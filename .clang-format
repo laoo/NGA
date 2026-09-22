@@ -1,0 +1,36 @@
+# Formatting is enforced, not debated. Local: clang-format 23 (brew).
+BasedOnStyle:  LLVM
+Language:      Cpp
+Standard:      c++20
+
+ColumnLimit:   120
+IndentWidth:   2
+TabWidth:      2
+UseTab:        Never
+AccessModifierOffset: -2
+NamespaceIndentation: None
+
+BreakBeforeBraces: Allman
+
+PointerAlignment:    Left
+ReferenceAlignment:  Left
+QualifierAlignment:  Right
+
+SpacesInParens: Custom
+SpacesInParensOptions:
+  InConditionalStatements: true
+  InEmptyParentheses:      false
+  InCStyleCasts:           false
+  Other:                   true
+SpacesInSquareBrackets:  false
+SpaceBeforeCpp11BracedList: false
+Cpp11BracedListStyle:    false
+
+AlwaysBreakTemplateDeclarations: Yes
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments:  false
+BinPackParameters: false
+IncludeBlocks:     Preserve
+SeparateDefinitionBlocks: Always

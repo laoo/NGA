@@ -1,0 +1,79 @@
+# Naming rules live here rather than in prose: readability-identifier-naming is
+# the only mechanism that actually enforces them.
+Checks: >
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-trailing-return-type,
+  -modernize-use-std-print,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -readability-trailing-comma,
+  -readability-redundant-member-init,
+  -bugprone-signed-bitwise
+
+# modernize-use-std-print is off because std::print is part of the C++23 subset
+# we cannot use: libc++ on Apple clang does not ship it. See PortabilityChecks.cpp.
+#
+# readability-trailing-comma is off because layout is `.clang-format`'s to
+# decide and nothing should hold two opinions about one thing: a trailing comma
+# is also what makes the formatter break a list one element to a line, so
+# obeying the check would relayout hundreds of initialisers to satisfy a tool
+# that does not own layout.
+#
+# readability-redundant-member-init is off because a `{}` on a member is what
+# lets a designated initializer omit it. Without one, clang's
+# -Wmissing-designated-field-initializers fires at every call site that does
+# not name the member, and GCC's -Wmissing-field-initializers is the same
+# opinion under -Wextra, which CI builds with -Werror. This codebase
+# initialises aggregates by designator throughout, so obeying the check trades
+# 36 tidy warnings for 18 compiler ones: tried, measured, reverted.
+#
+# bugprone-signed-bitwise is off because the model's Integer is `std::int64_t`
+# by design — an assembler for a machine with signed arithmetic has signed
+# expressions — so `&`, `|`, `^` and the shifts on one are the language's own
+# semantics, and the check fires on every place that implements them. Casting
+# to unsigned there would hide the one thing worth seeing.
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/(src|tests)/.*'
+
+CheckOptions:
+  # Types: CamelCase
+  readability-identifier-naming.ClassCase:                 CamelCase
+  readability-identifier-naming.StructCase:                CamelCase
+  readability-identifier-naming.EnumCase:                  CamelCase
+  readability-identifier-naming.UnionCase:                 CamelCase
+  readability-identifier-naming.TypeAliasCase:             CamelCase
+  readability-identifier-naming.TypedefCase:               CamelCase
+  readability-identifier-naming.ConceptCase:               CamelCase
+
+  # Functions and variables: camelBack
+  readability-identifier-naming.FunctionCase:              camelBack
+  readability-identifier-naming.MethodCase:                camelBack
+  readability-identifier-naming.VariableCase:              camelBack
+  readability-identifier-naming.ParameterCase:             camelBack
+
+  # Data members: class members are private and prefixed, struct members are not
+  readability-identifier-naming.PrivateMemberPrefix:       m
+  readability-identifier-naming.PrivateMemberCase:         CamelCase
+  readability-identifier-naming.ProtectedMemberPrefix:     m
+  readability-identifier-naming.ProtectedMemberCase:       CamelCase
+  readability-identifier-naming.PublicMemberCase:          camelBack
+
+  # Constants: UPPER_CASE at namespace and class scope, ordinary inside functions
+  readability-identifier-naming.GlobalConstantCase:        UPPER_CASE
+  readability-identifier-naming.ClassConstantCase:         UPPER_CASE
+  readability-identifier-naming.StaticConstantCase:        UPPER_CASE
+  readability-identifier-naming.EnumConstantCase:          UPPER_CASE
+  readability-identifier-naming.LocalConstantCase:         camelBack
+  readability-identifier-naming.MacroDefinitionCase:       UPPER_CASE
+
+  # Namespaces and template parameters
+  readability-identifier-naming.NamespaceCase:             lower_case
+  readability-identifier-naming.TypeTemplateParameterCase: CamelCase
+  readability-identifier-naming.ValueTemplateParameterCase: UPPER_CASE

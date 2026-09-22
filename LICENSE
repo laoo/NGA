@@ -1,0 +1,35 @@
+MIT License
+
+Copyright (c) 2026 Waldemar Pawlaszek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- What NGA puts into your program ---
+
+The licence above covers the tool. It does not cover what the tool puts into
+a program it builds, which is yours to use without attribution: the files under
+`lib/`, which carry their own licence (the Zero-Clause BSD licence, `lib/LICENSE`),
+and every byte of 6502 code and every line of assembler text that NGA itself
+writes into a build — the Transition routine, the Cell, the runtime of the C
+subset, the text a `.ngc` Module or a generator compiles to. A program that
+contains any of these is not a copy or a substantial portion of the Software
+and is not subject to the licence above.
+
+Third-party code the tool is built from, and the notices a binary of it must
+carry, are listed in `THIRD_PARTY_LICENSES.md`.

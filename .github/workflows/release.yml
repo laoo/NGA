@@ -1,0 +1,134 @@
+name: Release
+
+# Binaries for the three platforms, and the notices that must travel beside
+# them.
+#
+# This is the one workflow the public tree carries, so it has to build there as
+# it does here. The whole of the difference between the two trees, as far as
+# CMake is concerned, is that one has a `tests/` directory and the other does
+# not, so every configure below says `-DNGA_BUILD_TESTS=OFF` and neither tree
+# can drift into building something the other cannot.
+#
+# It runs no test, because there is nothing to run where it ships. What holds a
+# tag to working code is `ci.yml` in the private tree, run before the tag is
+# pushed.
+#
+# Priced as ci.yml explains -- a macOS minute bills at ten times a Linux one --
+# so nothing here runs on a push to a branch. A tag publishes; the Actions tab
+# builds without publishing.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-24.04
+            preset: release
+            dir: build/release
+            cc: gcc-14
+            cxx: g++-14
+          - name: macos-arm64
+            os: macos-latest
+            preset: release
+            dir: build/release
+          - name: windows-x64
+            os: windows-latest
+            preset: windows
+            dir: build/windows
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build g++-14
+
+      - name: Install toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake --preset ${{ matrix.preset }} -DNGA_BUILD_TESTS=OFF
+
+      - name: Build
+        if: runner.os != 'Windows'
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # The Windows preset is a Visual Studio generator and its build preset
+      # pins Debug, which is the configuration the suite is run in. A release
+      # binary asks for its own rather than reading that preset differently.
+      - name: Build
+        if: runner.os == 'Windows'
+        run: cmake --build ${{ matrix.dir }} --config Release
+
+      # What goes beside the executable is THIRD_PARTY_LICENSES.md's subject:
+      # our own licence, the notices file, and the `licenses/` directory the
+      # nga-deps archive carries for everything OR-Tools links into the binary.
+      # A missing one fails here rather than shipping a binary without it.
+      - name: Stage
+        shell: bash
+        run: |
+          out="dist/nga-${{ matrix.name }}"
+          mkdir -p "$out"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "${{ matrix.dir }}/src/nga_cli/Release/nga.exe" "$out/"
+          else
+            cp "${{ matrix.dir }}/src/nga_cli/nga" "$out/"
+          fi
+          cp LICENSE THIRD_PARTY_LICENSES.md "$out/"
+          cp -R "${{ matrix.dir }}/_deps/ortools_archive-src/licenses" "$out/licenses"
+
+      - name: Archive
+        shell: bash
+        working-directory: dist
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a "nga-${{ matrix.name }}.zip" "nga-${{ matrix.name }}"
+          else
+            tar czf "nga-${{ matrix.name }}.tar.gz" "nga-${{ matrix.name }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nga-${{ matrix.name }}
+          path: dist/nga-${{ matrix.name }}.*
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    if: startsWith( github.ref, 'refs/tags/' )
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}" dist/*
+          --repo "${{ github.repository }}"
+          --title "${{ github.ref_name }}"
+          --generate-notes
