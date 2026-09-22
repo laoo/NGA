@@ -27,8 +27,6 @@ with `-DNGA_ORTOOLS_PREFIX=/path/to/or-tools-<version>-<platform>`.
 The archives exist for Linux x86_64 (libstdc++), macOS arm64 and Windows x64
 (MSVC); on anything else the configure step says so and stops.
 
-
-
 ## Licence
 
 The tool is under the MIT licence, [LICENSE](LICENSE). What it puts into a
