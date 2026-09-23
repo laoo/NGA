@@ -1,0 +1,11 @@
+static u8 total;
+
+static void entry()
+{
+  u8 sum = 0;
+  for ( u8 i = 0; i < 5; ++i )
+    sum += numbers[i];
+  total = sum;
+}
+
+static const u8 numbers[] = { 3, 1, 4, 1, 5 };

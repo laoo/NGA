@@ -13,9 +13,10 @@ name: Release
 # tag to working code is `ci.yml` in the private tree, run before the tag is
 # pushed.
 #
-# Priced as ci.yml explains -- a macOS minute bills at ten times a Linux one --
-# so nothing here runs on a push to a branch. A tag publishes; the Actions tab
-# builds without publishing.
+# A push to a branch builds nothing. A tag builds the three platforms and
+# publishes what comes out of them; a run started from the Actions tab builds
+# them and publishes nothing, which is how to see that all three still compile
+# without saying anything about it.
 
 on:
   push:
@@ -93,6 +94,13 @@ jobs:
             cp "${{ matrix.dir }}/src/nga_cli/Release/nga.exe" "$out/"
           else
             cp "${{ matrix.dir }}/src/nga_cli/nga" "$out/"
+            # Only the Linux binary carries its own debug information. The
+            # release preset is RelWithDebInfo, and on ELF that lands inside
+            # the executable, where the other two toolchains leave it in a
+            # .dSYM and a .pdb this archive does not carry: 135 MB against 6.
+            if [ "$RUNNER_OS" = Linux ]; then
+              strip "$out/nga"
+            fi
           fi
           cp LICENSE THIRD_PARTY_LICENSES.md "$out/"
           cp -R "${{ matrix.dir }}/_deps/ortools_archive-src/licenses" "$out/licenses"
