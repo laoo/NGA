@@ -111,3 +111,29 @@ address.
 <!-- end -->
 
 With that in the project's `target` block, the module stops declaring those four names. Redeclaration or shadowing registers is an error.
+
+A name from a `target` block is reached the same way from C, with nothing
+declared at all — no `extern`, and no `volatile` either. The Target's
+registers are volatile whatever C says about them, so every read and every
+write happens exactly where the source puts it. The type comes from the width:
+one byte is a `u8`, two a `u16`, more a `u8[N]` at its address.
+
+<!-- include 03-targets/rainbow-in-c/rainbow.ngc -->
+```c
+void entry()
+{
+  for ( ;; )
+  {
+    while ( VCOUNT != 0 )
+    {
+    }
+    for ( u8 i = 0; i < 240; ++i )
+    {
+      WSYNC = 0;
+      COLBK = i;
+      COLPF2 = i;
+    }
+  }
+}
+```
+<!-- end -->

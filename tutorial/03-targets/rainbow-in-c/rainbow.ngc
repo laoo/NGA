@@ -1,0 +1,15 @@
+void entry()
+{
+  for ( ;; )
+  {
+    while ( VCOUNT != 0 )
+    {
+    }
+    for ( u8 i = 0; i < 240; ++i )
+    {
+      WSYNC = 0;
+      COLBK = i;
+      COLPF2 = i;
+    }
+  }
+}
