@@ -1,0 +1,15 @@
+target {
+  region          $0080 .. $00FF  ram
+  region          $2000 .. $BFFF  ram
+
+; tag registers
+  region COLBK    $D01A .. $D01A  register
+  register COLPF2 $D018
+  register WSYNC  $D40A
+  register VCOUNT $D40B
+; end registers
+}
+
+modules { "rainbow.asm" }
+
+container xex

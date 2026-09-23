@@ -1,0 +1,11 @@
+; tag res
+target {
+  region        $0080 .. $00FF  ram
+  region dos    $0700 .. $1FFF  reserved
+  region        $2000 .. $BFFF  ram
+}
+; end res
+
+modules { "pinned.asm" }
+
+container xex

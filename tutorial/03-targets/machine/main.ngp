@@ -1,0 +1,10 @@
+; tag ram
+target {
+  region        $0080 .. $00FF  ram
+  region        $2000 .. $BFFF  ram
+}
+; end ram
+
+modules { "machine.asm" }
+
+container xex

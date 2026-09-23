@@ -8,3 +8,5 @@ The chapters, in the order they are meant to be read.
 2. [Temporaries and Liveness](02-temporaries-and-liveness.md) — where a
    variable goes, which variables can have the same byte, and who works that
    out.
+3. [Targets](03-targets.md) — what the program is going to be, and teaching the
+   tool what machine it is for.

@@ -27,6 +27,10 @@ above
 
 The class is declared and never worked out from the address. So programmer declares the placement class and the solver picks the address within it.
 
+A section may take that decision back with `at`, which pins it to an address.
+The pin is a constraint the solver satisfies and places everything else
+around, not a cursor the source moves.
+
 `largest` and `above` keep their values. Nothing else may have their bytes.
 
 ## A variable that need not survive
