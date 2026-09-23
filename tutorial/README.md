@@ -1,5 +1,3 @@
-# The Problem
+# The NGA tutorial
 
-# The Solution
-
-# The Means
+The chapters, in the order they are meant to be read.
