@@ -1,9 +1,5 @@
 # NGA
 
-A resource-aware 6502 assembler with a compiler
-for a subset of C that builds on the same model.
-
-
 ## The Problem
 
 Writing for an 8-bit machine with a 6502 is easy. The OS services are mapped
@@ -34,9 +30,9 @@ takes a project describing your program as a graph of execution and works out
 which code and data must be present at the same time, and which never are and
 can therefore stand at one address. A constraint solver then assigns every
 address, bank and overlay at once. Errors that normally surface as a crash on
-real hardware — a phase that does not fit in memory, a reference to data that
-is not there when the code runs, a call into a bank that is not switched in —
-are reported at build time instead.
+real hardware — an execution phase that does not fit in memory, a reference to
+data that is not there when the code runs, a call into a bank that is not
+switched in — are reported at build time instead.
 
 ## Building
 

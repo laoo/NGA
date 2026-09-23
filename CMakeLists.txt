@@ -22,6 +22,17 @@ else( )
 endif( )
 
 option( NGA_BUILD_TESTS "Build the test suite"           ${ngaTestsDefault} )
+
+# Asked for where there is none: the published tree carries the sources, the
+# library and the tutorial and nothing else, so say that rather than leaving
+# CMake to report two missing directories the reader never named.
+if( NGA_BUILD_TESTS AND NOT ngaTestsDefault )
+  message( FATAL_ERROR
+    "NGA_BUILD_TESTS is ON, but this tree has no tests/ directory to build. "
+    "The published tree carries the tool and its library alone; configure it "
+    "with -DNGA_BUILD_TESTS=OFF, which is what it defaults to." )
+endif( )
+
 option( NGA_WERROR      "Treat compiler warnings as errors" OFF )
 
 include( Warnings )
