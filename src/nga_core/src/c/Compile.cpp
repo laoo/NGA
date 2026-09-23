@@ -943,6 +943,66 @@ nameAttribute( std::vector<Attribute> const& attributes, diag::SourceManager con
   return {};
 }
 
+/// The class `[[placement(zeropage)]]` or `[[placement(absolute)]]` asks for,
+/// and nothing where the attribute does not stand — see
+/// docs/decisions/0210-placement-is-declared-in-c-too.md.
+std::optional<model::PlacementClass> placementAttribute( std::vector<Attribute> const& attributes,
+                                                         diag::SourceManager const& sources )
+{
+  std::string const said = nameAttribute( attributes, sources, "placement" );
+  if ( said == "zeropage" )
+  {
+    return model::PlacementClass::ZEROPAGE;
+  }
+  if ( said == "absolute" )
+  {
+    return model::PlacementClass::ABSOLUTE;
+  }
+  return std::nullopt;
+}
+
+/// Whether a block says nothing but where its declarations lie, in which case
+/// it is an ordinary block and not one of the `[[with]]` family — see
+/// docs/decisions/0210-placement-is-declared-in-c-too.md.
+bool placementOnly( std::vector<Attribute> const& attributes, diag::SourceManager const& sources )
+{
+  return !attributes.empty() && std::ranges::all_of( attributes,
+                                                     [&]( Attribute const& one )
+                                                     { return sources.textOf( one.name.span() ) == "placement"; } );
+}
+
+/// A class in force for as long as the block that asked for it is being
+/// lowered. Nothing is pushed where the block asked for nothing, so the
+/// innermost entry is always the one that answers.
+class Placed
+{
+public:
+  Placed( std::vector<model::PlacementClass>& stack, std::optional<model::PlacementClass> asked )
+      : mStack{ asked.has_value() ? &stack : nullptr }
+  {
+    if ( asked.has_value() )
+    {
+      stack.push_back( *asked );
+    }
+  }
+
+  Placed( Placed const& ) = delete;
+  Placed( Placed&& ) = delete;
+  Placed& operator=( Placed const& ) = delete;
+  Placed& operator=( Placed&& ) = delete;
+
+  ~Placed()
+  {
+    if ( mStack != nullptr )
+    {
+      mStack->pop_back();
+    }
+  }
+
+private:
+  std::vector<model::PlacementClass>* mStack;
+};
+
 /// Whether a block is written `[[with(...), trampoline]]` — see
 /// docs/decisions/0097-a-trampoline-is-declared.md and
 /// docs/decisions/0098-a-proc-declares-what-is-shown.md.
@@ -4637,6 +4697,11 @@ private:
       return;
     }
     attributesKnown( object.attributes, object.isExtern ? AttributeSite::EXTERN : AttributeSite::GLOBAL );
+    if ( !object.isExtern )
+    {
+      placementAsked(
+          object, placementAttribute( object.attributes, *mSources ), isStriped( object.attributes, *mSources ), true );
+    }
     for ( std::size_t index = 0; index < object.declarators.size(); ++index )
     {
       Token const& declarator = object.declarators[index];
@@ -5400,6 +5465,53 @@ private:
   /// `[[transition(PHASE)]]` before a `return` — see
   /// docs/decisions/0064-phase-in-c.md. What `with` is given is read where
   /// the block is checked, and what `transition` is where the `return` is.
+  /// What `[[placement]]` is refused over, and where it says nothing — see
+  /// docs/decisions/0210-placement-is-declared-in-c-too.md. A pointer is read
+  /// through by `(zp),y` and lies in the zero page whatever is asked; a
+  /// striped array's place is settled by its layout; and asking for the class
+  /// a declaration has anyway is a `.off` that silenced nothing.
+  void placementAsked( Declaration const& declared,
+                       std::optional<model::PlacementClass> asked,
+                       bool stripes,
+                       bool atFileScope )
+  {
+    if ( !asked.has_value() )
+    {
+      return;
+    }
+    auto const at = [&]( diag::DiagnosticId id, Token const& name )
+    { return diagnostic( id ).at( name.location, name.length ).arg( "name", mTyping.spellingOf( name ) ); };
+    for ( std::size_t index = 0; index < declared.declarators.size(); ++index )
+    {
+      Token const& declarator = declared.declarators[index];
+      if ( stripes )
+      {
+        mTyping.add( at( diag::DiagnosticId::C_PLACEMENT_AND_STRIPED, declarator ) );
+        continue;
+      }
+      bool const pointer =
+          index < declared.shapes.size() && declared.shapes[index].isPointer && !declared.shapes[index].isArray;
+      if ( pointer && *asked == model::PlacementClass::ABSOLUTE )
+      {
+        mTyping.add( at( diag::DiagnosticId::C_PLACEMENT_ON_POINTER, declarator ) );
+        continue;
+      }
+      bool const already = atFileScope ? ( *asked == model::PlacementClass::ABSOLUTE && !pointer )
+                                       : ( *asked == model::PlacementClass::ZEROPAGE && mPlacement.back() == *asked );
+      if ( already )
+      {
+        mTyping.add(
+            at( diag::DiagnosticId::C_PLACEMENT_SAYS_NOTHING, declarator )
+                .arg( "class", std::string{ *asked == model::PlacementClass::ZEROPAGE ? "zeropage" : "absolute" } ) );
+      }
+    }
+  }
+
+  /// The classes in force while a body is checked, the function's at the
+  /// bottom, so that an attribute asking for what is already in force can say
+  /// so — see docs/decisions/0210-placement-is-declared-in-c-too.md.
+  std::vector<model::PlacementClass> mPlacement{ model::PlacementClass::ZEROPAGE };
+
   void attributesKnown( std::vector<Attribute> const& attributes, AttributeSite site )
   {
     auto const misplaced = [&]( Attribute const& attribute, std::string_view applies, std::string_view what )
@@ -5414,7 +5526,8 @@ private:
     {
       std::string const name = mTyping.spellingOf( attribute.name );
       bool const known = name == "striped" || name == "in" || name == "with" || name == "under" ||
-                         name == "trampoline" || name == "transition" || name == "slot" || name == "implements";
+                         name == "trampoline" || name == "transition" || name == "slot" || name == "implements" ||
+                         name == "placement";
       bool const bare = name == "striped" || name == "trampoline" || name == "slot";
       if ( attribute.prefix.has_value() || !known || ( bare && attribute.hasArguments ) )
       {
@@ -5445,6 +5558,30 @@ private:
       if ( site == AttributeSite::EXTERN )
       {
         // The extern's own check refuses every attribute on it.
+        continue;
+      }
+      if ( name == "placement" )
+      {
+        // The one attribute whose argument is a word of the model rather than
+        // the name of something declared — see
+        // docs/decisions/0210-placement-is-declared-in-c-too.md.
+        if ( site == AttributeSite::RETURN )
+        {
+          misplaced( attribute, "a declaration, a block or a function", whatStands( site ) );
+          continue;
+        }
+        std::string said;
+        if ( attribute.arguments.size() == 1 && attribute.arguments.front().kind == TokenKind::IDENTIFIER )
+        {
+          said = mTyping.spellingOf( attribute.arguments.front() );
+        }
+        if ( said != "zeropage" && said != "absolute" )
+        {
+          mTyping.add( diagnostic( diag::DiagnosticId::C_ATTRIBUTE_ARGUMENTS )
+                           .at( attribute.span.begin, attribute.span.length )
+                           .arg( "attribute", name )
+                           .arg( "takes", std::string{ "`zeropage` or `absolute`" } ) );
+        }
         continue;
       }
       if ( name == "transition" )
@@ -5834,6 +5971,11 @@ private:
   void functionDefinition( FunctionDefinition const& function )
   {
     attributesKnown( function.attributes, AttributeSite::FUNCTION );
+    // The class its body is checked under, which a block may narrow and a
+    // declaration may narrow again — see
+    // docs/decisions/0210-placement-is-declared-in-c-too.md.
+    mPlacement.assign(
+        1, placementAttribute( function.attributes, *mSources ).value_or( model::PlacementClass::ZEROPAGE ) );
     Definition const* const self = definitionOf( *mSources, *mUnit, function );
     if ( self == nullptr )
     {
@@ -6452,12 +6594,25 @@ private:
       mTyping.closeScope();
       return;
     case StatementKind::COMPOUND:
-      if ( !statement.attributes.empty() )
+    {
+      Placed const here{ mPlacement, placementAttribute( statement.attributes, *mSources ) };
+      if ( !statement.attributes.empty() && !placementOnly( statement.attributes, *mSources ) )
       {
         withBlock( statement );
         return;
       }
-      [[fallthrough]];
+      if ( !statement.attributes.empty() )
+      {
+        attributesKnown( statement.attributes, AttributeSite::BLOCK );
+      }
+      mTyping.openScope();
+      for ( Statement const& item : statement.items )
+      {
+        this->statement( item );
+      }
+      mTyping.closeScope();
+      return;
+    }
     case StatementKind::CASE:
       // A block is a scope, and so is a case, whose Proc is its own.
       mTyping.openScope();
@@ -6556,6 +6711,8 @@ private:
     Declaration const& declared = *statement.declaration;
     attributesKnown( declared.attributes, AttributeSite::LOCAL );
     bool const stripes = isStriped( declared.attributes, *mSources );
+    std::optional<model::PlacementClass> const asked = placementAttribute( declared.attributes, *mSources );
+    placementAsked( declared, asked, stripes, false );
     std::optional<Meaning> const type =
         declared.type.keyword == Keyword::AUTO ? deducedType( declared ) : mTyping.declaredType( declared.type );
     for ( std::size_t index = 0; index < declared.declarators.size(); ++index )
@@ -7162,6 +7319,10 @@ public:
         continue;
       }
       Site const fileScope{ .function = nullptr, .blocks = nullptr, .at = object.span.begin };
+      // An object at file scope is `absolute` unless it asked otherwise — see
+      // docs/decisions/0210-placement-is-declared-in-c-too.md.
+      model::PlacementClass const wanted =
+          placementAttribute( object.attributes, *mSources ).value_or( model::PlacementClass::ABSOLUTE );
       for ( std::size_t index = 0; index < object.declarators.size(); ++index )
       {
         Token const& declarator = object.declarators[index];
@@ -7202,7 +7363,8 @@ public:
                           .count = bytes,
                           .elements = array.hasList ? blockConstants( array, element, count, fileScope )
                                                     : std::vector<ir::Constant>{},
-                          .isTemporary = false } );
+                          .isTemporary = false,
+                          .placement = wanted } );
           continue;
         }
         if ( array.isArray )
@@ -7216,7 +7378,8 @@ public:
                                                         .value = std::nullopt,
                                                         .count = count,
                                                         .elements = elementsOf( array, type, count, fileScope ),
-                                                        .isTemporary = false } );
+                                                        .isTemporary = false,
+                                                        .placement = wanted } );
           continue;
         }
         // A `const` whose value the assembler folds is a Constant; one given an
@@ -7246,7 +7409,8 @@ public:
             .type = objectType,
             .isStatic = object.isStatic,
             .at = declarator.location,
-            .value = value != nullptr ? std::optional{ constantOf( *value, objectType, fileScope ) } : std::nullopt } );
+            .value = value != nullptr ? std::optional{ constantOf( *value, objectType, fileScope ) } : std::nullopt,
+            .placement = wanted } );
       }
     }
     for ( ir::Global& literal : mLiterals )
@@ -7327,6 +7491,9 @@ private:
         function( mTyping.spellingOf( definition.name ), definition.isStatic, definition.span.begin );
     lowered.isInline = definition.isInline;
     lowered.inlineSpan = definition.inlineSpan;
+    lowered.placement =
+        placementAttribute( definition.attributes, *mSources ).value_or( model::PlacementClass::ZEROPAGE );
+    mPlacement.assign( 1, lowered.placement );
     Definition const* const self = definitionOf( *mSources, *mUnit, definition );
     mOwner = lowered.name;
     mPane = self != nullptr ? self->pane : std::string{};
@@ -7444,12 +7611,25 @@ private:
     switch ( statement.kind )
     {
     case StatementKind::COMPOUND:
-      if ( !statement.attributes.empty() )
+    {
+      // A block carrying only `[[placement]]` is an ordinary block whose
+      // declarations lie where it says — see
+      // docs/decisions/0210-placement-is-declared-in-c-too.md.
+      std::optional<model::PlacementClass> const asked = placementAttribute( statement.attributes, *mSources );
+      Placed const here{ mPlacement, asked };
+      if ( !statement.attributes.empty() && !placementOnly( statement.attributes, *mSources ) )
       {
         withBlock( statement, site );
         return;
       }
-      [[fallthrough]];
+      mTyping.openScope();
+      for ( Statement const& item : statement.items )
+      {
+        this->statement( item, function, blocks );
+      }
+      mTyping.closeScope();
+      return;
+    }
     case StatementKind::CASE:
       mTyping.openScope();
       for ( Statement const& item : statement.items )
@@ -7553,6 +7733,9 @@ private:
   void declaration( Statement const& node, Site const& site )
   {
     Declaration const& declared = *node.declaration;
+    // The innermost `[[placement]]` over a byte the program names is its own —
+    // see docs/decisions/0210-placement-is-declared-in-c-too.md.
+    Placed const here{ mPlacement, placementAttribute( declared.attributes, *mSources ) };
     // What `auto` took from the value, read again as the check read it; what
     // the check refused is not lowered at all.
     Meaning const type =
@@ -7642,7 +7825,8 @@ private:
 
       local.byte = "__" + std::to_string( mLocals.back()++ ) + mTyping.spellingOf( declarator );
       local.owner = site.function->name;
-      site.function->locals.push_back( ir::Local{ .name = local.byte, .type = local.type } );
+      site.function->locals.push_back(
+          ir::Local{ .name = local.byte, .type = local.type, .placement = mPlacement.back() } );
       mTyping.settleLocal( declarator, local );
 
       if ( value != nullptr )
@@ -8140,7 +8324,8 @@ private:
     {
       local.byte = "__" + std::to_string( mLocals.back()++ ) + mTyping.spellingOf( declarator );
       local.owner = site.function->name;
-      site.function->locals.push_back( ir::Local{ .name = local.byte, .type = ir::Type::BLOCK, .bytes = bytes } );
+      site.function->locals.push_back(
+          ir::Local{ .name = local.byte, .type = ir::Type::BLOCK, .bytes = bytes, .placement = mPlacement.back() } );
     }
     mTyping.settleLocal( declarator, local );
     if ( fixed )
@@ -8511,7 +8696,8 @@ private:
     if ( object == nullptr || mVolatileNames.contains( baseOf( object->name ) ) )
     {
       std::string const name = "__v" + std::to_string( mTested.back()++ );
-      site.function->locals.push_back( ir::Local{ .name = name, .type = type, .bytes = 0 } );
+      site.function->locals.push_back(
+          ir::Local{ .name = name, .type = type, .bytes = 0, .placement = mPlacement.front() } );
       site.blocks->append( ir::Instruction{
           .operation = ir::Store{ .name = name, .type = type, .value = std::move( control ) }, .at = site.at } );
       control = ir::Object{ .name = name, .type = type };
@@ -8935,7 +9121,8 @@ private:
   {
     Blocks& blocks = *site.blocks;
     std::string const byte = "__b" + std::to_string( mConditions.back()++ );
-    site.function->locals.push_back( ir::Local{ .name = byte, .type = ir::Type::BOOL } );
+    site.function->locals.push_back(
+        ir::Local{ .name = byte, .type = ir::Type::BOOL, .placement = mPlacement.front() } );
 
     std::uint32_t const whenTrue = blocks.create();
     std::uint32_t const whenFalse = blocks.create();
@@ -8963,7 +9150,8 @@ private:
     Blocks& blocks = *site.blocks;
     ir::Type const type = mTyping.expression( node ).type.value_or( context );
     std::string const byte = "__b" + std::to_string( mConditions.back()++ );
-    site.function->locals.push_back( ir::Local{ .name = byte, .type = type, .bytes = 0 } );
+    site.function->locals.push_back(
+        ir::Local{ .name = byte, .type = type, .bytes = 0, .placement = mPlacement.front() } );
 
     std::uint32_t const whenTrue = blocks.create();
     std::uint32_t const whenFalse = blocks.create();
@@ -9467,7 +9655,7 @@ private:
     if ( std::holds_alternative<ir::Value>( value ) )
     {
       std::string const byte = "__m" + std::to_string( mConditions.back()++ );
-      site.function->locals.push_back( ir::Local{ .name = byte, .type = type } );
+      site.function->locals.push_back( ir::Local{ .name = byte, .type = type, .placement = mPlacement.front() } );
       site.blocks->append( ir::Instruction{
           .operation = ir::Store{ .name = byte, .type = type, .value = std::move( value ) }, .at = site.at } );
       value = ir::Object{ .name = byte, .type = type };
@@ -9654,7 +9842,8 @@ private:
       if ( place.kind == Reach::Kind::STRIPED && std::holds_alternative<ir::Value>( place.index ) )
       {
         std::string const name = "__i" + std::to_string( mIndexes.back()++ );
-        site.function->locals.push_back( ir::Local{ .name = name, .type = ir::Type::U8, .bytes = 0 } );
+        site.function->locals.push_back(
+            ir::Local{ .name = name, .type = ir::Type::U8, .bytes = 0, .placement = mPlacement.front() } );
         site.blocks->append( ir::Instruction{
             .operation = ir::Store{ .name = name, .type = ir::Type::U8, .value = place.index }, .at = site.at } );
         place.index = ir::Object{ .name = name, .type = ir::Type::U8 };
@@ -10371,6 +10560,12 @@ private:
 
   /// Per Proc being lowered: how many locals it has taken a byte for, which
   /// numbers the next, and how many bytes a `&&` or an `||` has needed.
+  /// The classes in force, the function's at the bottom and a block's above
+  /// it: what the program names takes the innermost, and what the compiler
+  /// takes for itself the function's — see
+  /// docs/decisions/0210-placement-is-declared-in-c-too.md.
+  std::vector<model::PlacementClass> mPlacement{ model::PlacementClass::ZEROPAGE };
+
   std::vector<std::uint32_t> mLocals;
   std::vector<std::uint32_t> mConditions;
 
@@ -12251,9 +12446,12 @@ private:
       return;
     }
     mark( object.at, indent );
-    // A pointer lies on the zero page, where `(zp),y` reads through it.
+    // A pointer lies on the zero page, where `(zp),y` reads through it, and so
+    // does an object `[[placement(zeropage)]]` asked for — see
+    // docs/decisions/0210-placement-is-declared-in-c-too.md.
     std::string attributes;
-    if ( object.type == ir::Type::POINTER && !object.count.has_value() )
+    if ( ( object.type == ir::Type::POINTER && !object.count.has_value() ) ||
+         object.placement == model::PlacementClass::ZEROPAGE )
     {
       attributes = "zeropage";
     }
@@ -12992,7 +13190,7 @@ private:
           // docs/decisions/0119-one-temporary-carries-two-roles.md.
           line( ".declare ret " + declared( *lowered.result, lowered.resultBytes ) );
         }
-        temporary( parameter.name, parameter.type, parameter.bytes, false );
+        temporary( parameter.name, parameter.type, parameter.bytes, false, lowered.placement );
       }
       // A member of a function type declares no byte of its own: its arguments
       // and its result are the type's — see docs/decisions/0065-handlers.md.
@@ -13005,12 +13203,12 @@ private:
         else if ( lowered.resultPlace == "ma" )
         {
           line( ".declare ret ma" );
-          temporary( std::string{ RESULT }, ir::Type::U8, 0, false );
+          temporary( std::string{ RESULT }, ir::Type::U8, 0, false, lowered.placement );
         }
         else
         {
           line( ".declare ret " + declared( *lowered.result, lowered.resultBytes ) );
-          temporary( std::string{ RESULT }, *lowered.result, lowered.resultBytes, false );
+          temporary( std::string{ RESULT }, *lowered.result, lowered.resultBytes, false, lowered.placement );
         }
       }
     };
@@ -13023,13 +13221,13 @@ private:
     }
     for ( ir::Local const& local : lowered.locals )
     {
-      temporary( local.name, local.type, local.bytes, true );
+      temporary( local.name, local.type, local.bytes, true, local.placement );
     }
     for ( std::uint32_t index = 0; index < mScratchSizes.size(); ++index )
     {
       std::size_t const begin = mText.size();
       mText.append( scratchName( index ) )
-          .append( " .ztemp " )
+          .append( lowered.placement == model::PlacementClass::ABSOLUTE ? " .temp " : " .ztemp " )
           .append( std::to_string( mScratchSizes[index] ) )
           .append( "\n" );
       mDeclared.push_back( Declared{ .name = scratchName( index ),
@@ -16070,14 +16268,19 @@ private:
     return true;
   }
 
-  void temporary( std::string const& name, ir::Type type, std::uint32_t bytes, bool mayGo )
+  void temporary( std::string const& name,
+                  ir::Type type,
+                  std::uint32_t bytes,
+                  bool mayGo,
+                  model::PlacementClass placement = model::PlacementClass::ZEROPAGE )
   {
     std::uint32_t const size = type == ir::Type::BLOCK ? bytes : ir::sizeOf( type );
+    // A block of more than a few bytes lies off the zero page whatever was
+    // asked: an instruction reaches none of it in two bytes — see
+    // docs/decisions/0210-placement-is-declared-in-c-too.md.
+    bool const off = size > SMALL_BLOCK || placement == model::PlacementClass::ABSOLUTE;
     std::size_t const begin = mText.size();
-    mText.append( name )
-        .append( size > SMALL_BLOCK ? " .temp " : " .ztemp " )
-        .append( std::to_string( size ) )
-        .append( "\n" );
+    mText.append( name ).append( off ? " .temp " : " .ztemp " ).append( std::to_string( size ) ).append( "\n" );
     if ( mayGo )
     {
       mDeclared.push_back( Declared{

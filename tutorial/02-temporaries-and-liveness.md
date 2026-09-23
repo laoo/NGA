@@ -99,8 +99,8 @@ with `.ztemp`
 NGA memory map
 
 phase phase0 (0)
-  zero page: 3 of 128 bytes
-  memory:    50 of 57344 bytes
+  zero page: 3 of 16 bytes
+  memory:    50 of 32768 bytes
   $0080-$0080  scan.largest     section            phase0
   $0081-$0081  scan.above       section            phase0
   $0082-$0082  scan.entry.best  temporary          phase0  shares with entry.tally
@@ -156,12 +156,12 @@ tally   .ztemp 1
 NGA memory map
 
 phase phase0 (0)
-  zero page: 4 of 128 bytes
-  memory:    43 of 57344 bytes
-  $0080-$0080  scan.largest     section            phase0
-  $0081-$0081  scan.above       section            phase0
-  $0082-$0082  scan.entry.best  temporary          phase0
-  $0083-$0083  scan.entry.tally temporary          phase0
+  zero page: 4 of 16 bytes
+  memory:    43 of 32768 bytes
+  $0080-$0080  scan.entry.tally temporary          phase0
+  $0081-$0081  scan.entry.best  temporary          phase0
+  $0082-$0082  scan.above       section            phase0
+  $0083-$0083  scan.largest     section            phase0
   $2000-$2004  scan.input       section            phase0
   $2005-$202A  scan.entry       proc               phase0
 ```
@@ -219,8 +219,8 @@ two procedures are on the stack and both of them are holding a value.
 NGA memory map
 
 phase phase0 (0)
-  zero page: 5 of 128 bytes
-  memory:    90 of 57344 bytes
+  zero page: 5 of 16 bytes
+  memory:    90 of 32768 bytes
   $0080-$0080  scan.largest          section            phase0
   $0081-$0081  scan.above            section            phase0
   $0082-$0082  scan.spread           section            phase0
@@ -307,8 +307,8 @@ void entry()
 NGA memory map
 
 phase phase0 (0)
-  zero page: 1 of 128 bytes
-  memory:    102 of 57344 bytes
+  zero page: 1 of 16 bytes
+  memory:    102 of 32768 bytes
   $0080-$0080  scan.countAbove.__0tally temporary          phase0  shares with report.__0least
   $0080-$0080  scan.report.__0least     temporary          phase0  shares with countAbove.__0tally
   $2000-$2004  scan.input               section            phase0

@@ -174,12 +174,12 @@ std::vector<Region> standInRegions()
 {
   return { Region{ .nameSpan = std::nullopt,
                    .name = {},
-                   .range = AddressRange{ .begin = 0x0080, .end = 0x0100 },
+                   .range = AddressRange{ .begin = 0x0080, .end = 0x0090 },
                    .property = RegionProperty::RAM,
                    .site = std::nullopt },
            Region{ .nameSpan = std::nullopt,
                    .name = {},
-                   .range = AddressRange{ .begin = 0x2000, .end = ADDRESS_SPACE_END },
+                   .range = AddressRange{ .begin = 0x2000, .end = 0xA000 },
                    .property = RegionProperty::RAM,
                    .site = std::nullopt } };
 }

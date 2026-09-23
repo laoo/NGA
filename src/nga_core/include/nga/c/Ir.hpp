@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nga/diag/SourceLocation.hpp"
+#include "nga/model/PlacementClass.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -452,6 +453,13 @@ struct Local
   /// empty for one in its byte — see
   /// docs/decisions/0145-an-argument-in-a-register.md.
   std::string place{};
+
+  /// Where the byte lies: the innermost `[[placement]]` over its declaration,
+  /// and the zero page where nothing said — see
+  /// docs/decisions/0210-placement-is-declared-in-c-too.md. A block of more
+  /// than a few bytes is written off the zero page whatever this says, since
+  /// an instruction reaches none of it in two bytes.
+  model::PlacementClass placement = model::PlacementClass::ZEROPAGE;
 };
 
 /// A `const` given a constant: a Constant of the assembler, taking no byte.
@@ -480,6 +488,12 @@ struct Global
 
   /// A local array, whose bytes are its function's only while it runs.
   bool isTemporary = false;
+
+  /// Where the object lies: `absolute` unless `[[placement(zeropage)]]` asked
+  /// otherwise, and the zero page whatever is written for a pointer, which
+  /// `(zp),y` reads through — see
+  /// docs/decisions/0210-placement-is-declared-in-c-too.md.
+  model::PlacementClass placement = model::PlacementClass::ABSOLUTE;
 
   /// A striped array's stripes, a byte of each element to a stripe: the names
   /// its Label lies under in the array's Namespace, and what it is given —
@@ -553,6 +567,11 @@ struct Function
   /// or `ma` for a pair whose high byte is in `A` at the `rts` — or empty for
   /// `__ret` — see docs/decisions/0145-an-argument-in-a-register.md.
   std::string resultPlace{};
+
+  /// Where the bytes the compiler takes for itself lie: the function's own
+  /// `[[placement]]`, since scratch has no name for anything finer to reach —
+  /// see docs/decisions/0210-placement-is-declared-in-c-too.md.
+  model::PlacementClass placement = model::PlacementClass::ZEROPAGE;
 
   /// The bytes it holds, written as `.ztemp` after its last instruction.
   std::vector<Local> locals{};

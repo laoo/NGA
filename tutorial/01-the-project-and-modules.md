@@ -74,8 +74,8 @@ nga main.ngp -o sum.bin --map sum.map
 NGA memory map
 
 phase phase0 (0)
-  zero page: 0 of 128 bytes
-  memory:    21 of 57344 bytes
+  zero page: 0 of 16 bytes
+  memory:    21 of 32768 bytes
   $2000-$2000  sum.total   section            phase0
   $2001-$200F  sum.entry   proc               phase0
   $2010-$2014  sum.numbers section            phase0

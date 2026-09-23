@@ -1051,7 +1051,16 @@ enum class Severity : std::uint8_t
      7304,                                                                                                             \
      ERROR,                                                                                                            \
      "`{name}` is assigned by `{operator}` where it is used as a value, and reached again in the same expression, "    \
-     "which is an order the subset does not fix" )
+     "which is an order the subset does not fix" )                                                                     \
+  X( C_PLACEMENT_ON_POINTER,                                                                                           \
+     7305,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is a pointer, which `(zp),y` reads through, so it lies in the zero page whatever is asked" )            \
+  X( C_PLACEMENT_AND_STRIPED,                                                                                          \
+     7306,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` lies in stripes, whose place its layout settles, so `[[placement]]` is a second answer" )               \
+  X( C_PLACEMENT_SAYS_NOTHING, 7307, WARNING, "`{name}` is `{class}` already, so this says nothing" )
 
 // A compiler-class tool outgrows 255 diagnostics, and renumbering the catalog
 // later is not an option.
