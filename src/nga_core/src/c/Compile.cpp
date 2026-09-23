@@ -13334,10 +13334,7 @@ private:
   /// Whether a rotated loop's first test is known to pass before it is
   /// written: the counter starts at a constant, the bound is one, and the
   /// start is below it, so the body runs at least once and the header's
-  /// `cpx` and branch say nothing the emitter does not know. The test is
-  /// still written where the carry it leaves clear is what the body counts
-  /// on ([0113](docs/decisions/0113-a-carry-known-is-not-set-again.md)): a
-  /// `clc` at every turn would cost more than one test on the way in.
+  /// `cpx` and branch say nothing the emitter does not know.
   [[nodiscard]] bool entersWithoutTest( CountedLoop const& loop ) const
   {
     ir::Block const& header = mFunction->blocks[loop.header];
@@ -13354,8 +13351,7 @@ private:
     {
       return loop.from != bound->value;
     }
-    return compare->op == ir::Comparison::LESS && !ir::isSigned( compare->type ) && loop.from < bound->value &&
-           ( mCarry == Carry::CLEAR || !bodyReadsCarry( loop ) );
+    return compare->op == ir::Comparison::LESS && !ir::isSigned( compare->type ) && loop.from < bound->value;
   }
 
   /// Whether the first thing the loop's body does with the carry is read it:
@@ -14749,6 +14745,16 @@ private:
       CountedLoop const* const loop = loopAt( index );
       if ( loop != nullptr && loop->header == index && rotates( *loop ) && entersWithoutTest( *loop ) )
       {
+        // A `<` test passed leaves the carry clear, and the edge back into the
+        // body does too, so where the body reads it first a `clc` stands in for
+        // the test: 0113 then leaves the body's own `clc` out at every turn —
+        // see docs/decisions/0208-a-loop-entered-with-the-carry-cleared.md.
+        auto const& compare = std::get<ir::Compare>( block.instructions.back().operation );
+        if ( compare.op == ir::Comparison::LESS && bodyReadsCarry( *loop ) )
+        {
+          under( end.at );
+          line( "clc" );
+        }
         return;
       }
       under( end.at );

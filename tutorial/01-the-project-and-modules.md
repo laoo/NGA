@@ -134,8 +134,7 @@ total
 .proc entry
         lda #0
         tax
-        cpx #5
-        jcs @l4
+        clc
 @l2
         adc numbers,x
         inx

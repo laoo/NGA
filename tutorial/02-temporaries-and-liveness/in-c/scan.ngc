@@ -1,0 +1,43 @@
+static const u8 input[] = { 3, 1, 4, 1, 5 };
+
+static u8 largest;
+static u8 above;
+static u8 spread;
+
+static void findLargest()
+{
+  u8 best = 0;
+  for ( u8 i = 0; i < 5; ++i )
+    if ( input[i] > best )
+      best = input[i];
+  largest = best;
+}
+
+static void countAbove()
+{
+  u8 tally = 0;
+  for ( u8 i = 0; i < 5; ++i )
+    if ( input[i] >= 3 )
+      tally += 1;
+  above = tally;
+}
+
+static void report()
+{
+  u8 least = 255;
+  for ( u8 i = 0; i < 5; ++i )
+    if ( input[i] < least )
+      least = input[i];
+  findLargest();
+  spread = largest - least;
+}
+
+void entry()
+{
+  findLargest();
+  countAbove();
+  report();
+
+  countAbove();
+  report();
+}
