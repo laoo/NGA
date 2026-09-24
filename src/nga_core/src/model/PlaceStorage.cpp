@@ -506,7 +506,14 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
       if ( section.emitsBytes() )
       {
         std::uint32_t const address = layout.addressOf( where ) + sizes.initialisedExtentOf( where ).begin;
-        storage.addPaneImage( where, StorageAddress{ .bank = BankIndex{ bank }, .offset = offsetOf( address ) } );
+        // One image per member, as the reservation below takes one run per
+        // member. A family's Sections stand in every member at one offset so
+        // that code shown any member finds them there, and a Container fills
+        // each Bank on its own, so each needs its own copy of the bytes.
+        for ( std::uint32_t member = bank; member < bank + pane.count && member < target.unitCount; ++member )
+        {
+          storage.addPaneImage( where, StorageAddress{ .bank = BankIndex{ member }, .offset = offsetOf( address ) } );
+        }
       }
       // Only the storage's own set has positions an image could take.
       if ( target.storageUnits != set )

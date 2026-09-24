@@ -17,7 +17,8 @@ The chapters, in the order they are meant to be read.
    whose storage is part of the address space: what a Window is, what a Bank
    is, and what may not live in one.
 6. [Panes](06-panes.md) — a Bank as somewhere for code and data to stay: what
-   one switch shows together, who may name it, and the other half of the rule.
+   one switch shows together, who may name it, N Banks of one layout, and the
+   other half of the rule.
 7. [Slots](07-slots.md) — how resident code reaches what differs from Phase to
    Phase: one name, one live definition at a time, and a cell the Transition
    rewrites.

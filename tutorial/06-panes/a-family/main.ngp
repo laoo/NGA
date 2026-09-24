@@ -1,0 +1,13 @@
+include "atari/130xe.ngp"
+
+modules { "print.asm" "intro.asm" "rows.asm" }
+
+panes in ext { slots[3] }
+
+resident { print }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs rows              entry levelStart }
+entry intro
+
+container xex

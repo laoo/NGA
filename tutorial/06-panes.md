@@ -185,6 +185,137 @@ in a Bank; one switch stands between them, so the same address serves both.
 `shared.spare` is in the program for no reason other than to show it. Nothing
 names it, which is why it is `root`, and nothing would miss it.
 
+## More than one of the same thing
+
+A Pane is one Bank. `NAME[N]` declares a **family**: N Panes of one layout on
+consecutive Banks, and every Section `in` it stands in each member at the
+same address.
+
+<!-- include 06-panes/a-family/main.ngp -->
+```
+include "atari/130xe.ngp"
+
+modules { "print.asm" "intro.asm" "rows.asm" }
+
+panes in ext { slots[3] }
+
+resident { print }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs rows              entry levelStart }
+entry intro
+
+container xex
+```
+<!-- end -->
+
+<!-- include 06-panes/a-family/rows.asm tag=family -->
+```asm
+; One layout, three times. `slotRow` stands at the same address in every
+; member of the family, so the two routines below name it once and reach a
+; different Bank's bytes depending on which member is shown.
+.section in slots
+slotRow
+        .res rowWidth
+.ends
+
+; Fills this member's row with `mark`. The byte comes through memory and not
+; through a register: a `.with` shows the Window before the statement it
+; covers, and showing it is the driver's code, which keeps nothing.
+.proc fillRow, in slots
+        ldy #rowWidth - 1
+        lda mark
+@byte   sta slotRow,y
+        dey
+        bpl @byte
+        rts
+.endp
+
+.proc showRow, in slots
+        ldx #<slotRow
+        ldy #>slotRow
+        lda #rowWidth
+        jsr printLine
+        rts
+.endp
+```
+<!-- end -->
+
+<!-- map 06-panes/a-family phase=level rows=rows -->
+```
+phase level (1)
+  zero page: 145 of 256 bytes
+  memory:    16273 of 56576 bytes
+  ...
+  $0088-$0089  rows.mark                    section            level
+  ...
+  $20DF-$212D  rows.levelStart              proc               level  waits in bank 0 at $000C (copy, 81 bytes)
+  ...
+  $4000-$4024  rows.slotRow                 section            level  in pane slots (state 2)
+  $4025-$402F  rows.fillRow                 proc               level  in pane slots (state 2)
+  $4030-$4039  rows.showRow                 proc               level  in pane slots (state 2)
+  ...
+```
+<!-- end -->
+
+One row and two routines, each at one address, and the map names `state 2` for
+all three — which is the **first** member's. The other two members are the
+states after it and no row says so, because a Pane's Sections are not in
+storage: the Container writes them into each member's Bank when the program is
+loaded, once per member, and no Transition copies them again.
+
+<!-- include 06-panes/a-family/rows.asm tag=use -->
+```asm
+; Two ways of naming a member. `slots + n` is one known where it is written;
+; `slots, x` is whichever member's state is in `X`, which is how a loop walks
+; them. The family's name on its own is the first member's state, so the
+; counter starts there and `slots + 3` is one past the last.
+.proc levelStart
+        lda #'A'
+        sta mark
+        .with slots + 0
+        jsr fillRow
+        lda #'B'
+        sta mark
+        .with slots + 1
+        jsr fillRow
+        lda #'C'
+        sta mark
+        .with slots + 2
+        jsr fillRow
+
+        lda #slots
+        sta which
+@show
+        ldx which
+        .with slots, x
+        jsr showRow
+        inc which
+        lda which
+        cmp #slots + 3
+        bne @show
+@stop   jmp @stop
+.endp
+```
+<!-- end -->
+
+On the machine that puts three rows on the screen, `AAA…`, `BBB…` and `CCC…`.
+Every one of them was written by the same `sta slotRow,y` and read by the same
+`printLine` call at the same address; what differed each time was which Bank
+was underneath.
+
+That is what a family is for, and it is also its limit. The Sections are
+declared **once**, so a Section with bytes has the same bytes in every member —
+N copies of one layout, not N different things. Three different level maps are
+three Panes, not a family of three; three working areas that code addresses
+identically are the family.
+
+The code that touches them has to stand **in** the family, which is where this
+differs from `level` above. `under` names a Pane and not a family, since which
+member is shown is known only at run time, so there is no Trampoline to
+declare: `fillRow` and `showRow` are Procs `in slots`, standing in every member
+beside the row they read, called under a `.with` that has shown one.
+
 ## In C
 
 The Section takes the attribute, and the block takes the switch.
