@@ -81,10 +81,17 @@ jobs:
         if: runner.os == 'Windows'
         run: cmake --build ${{ matrix.dir }} --config Release
 
-      # What goes beside the executable is THIRD_PARTY_LICENSES.md's subject:
-      # our own licence, the notices file, and the `licenses/` directory the
-      # nga-deps archive carries for everything OR-Tools links into the binary.
-      # A missing one fails here rather than shipping a binary without it.
+      # What goes beside the executable is `lib/` and THIRD_PARTY_LICENSES.md's
+      # subject: our own licence, the notices file, and the `licenses/`
+      # directory the nga-deps archive carries for everything OR-Tools links
+      # into the binary. A missing one fails here rather than shipping a binary
+      # without it.
+      #
+      # `lib/` is what the tool ships as source rather than compiles in, so a
+      # binary without it builds nothing that names a driver, a decoder or a
+      # machine variant — which is nearly every project. It goes beside the
+      # executable because that is where the tool looks for it first, so an
+      # archive works unpacked anywhere and needs no `--lib`.
       - name: Stage
         shell: bash
         run: |
@@ -103,6 +110,7 @@ jobs:
             fi
           fi
           cp LICENSE THIRD_PARTY_LICENSES.md "$out/"
+          cp -R lib "$out/lib"
           cp -R "${{ matrix.dir }}/_deps/ortools_archive-src/licenses" "$out/licenses"
 
       - name: Archive

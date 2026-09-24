@@ -13,7 +13,22 @@
 #include "nga/model/Project.hpp"
 #include "nga/model/ProjectFile.hpp"
 
+// Asking the platform where the executable is takes a platform's header. Both
+// of Windows' macro habits are turned off first: `min` and `max` as macros
+// break every standard header after this one, and the lean header leaves out
+// what nothing here uses.
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +40,65 @@
 
 namespace
 {
+
+/// The directory the running executable stands in, empty where the platform
+/// will not say. Only the CLI asks: nga_core is handed a path and never looks
+/// one up, which is why the three ways of asking live here.
+std::filesystem::path executableDirectory()
+{
+#ifdef _WIN32
+  // Long paths are permitted, so the buffer is the maximum rather than MAX_PATH,
+  // and a return equal to its size means the name was truncated.
+  std::wstring buffer( 32768, L'\0' );
+  DWORD const length = GetModuleFileNameW( nullptr, buffer.data(), static_cast<DWORD>( buffer.size() ) );
+  if ( length == 0 || length == buffer.size() )
+  {
+    return {};
+  }
+  buffer.resize( length );
+  return std::filesystem::path{ buffer }.parent_path();
+#else
+#ifdef __APPLE__
+  // The first call fails and reports the size it wanted; the path it then
+  // writes may hold symlinks and `..`, so it is resolved.
+  std::uint32_t size = 0;
+  _NSGetExecutablePath( nullptr, &size );
+  std::string buffer( size, '\0' );
+  if ( size == 0 || _NSGetExecutablePath( buffer.data(), &size ) != 0 )
+  {
+    return {};
+  }
+  buffer.resize( std::strlen( buffer.c_str() ) );
+  std::error_code failed;
+  std::filesystem::path const self = std::filesystem::weakly_canonical( buffer, failed );
+  return failed ? std::filesystem::path{} : self.parent_path();
+#else
+  std::error_code failed;
+  std::filesystem::path const self = std::filesystem::read_symlink( "/proc/self/exe", failed );
+  return failed ? std::filesystem::path{} : self.parent_path();
+#endif
+#endif
+}
+
+/// Where the drivers and decoders the tool ships are, when `--lib` does not
+/// say. A release archive carries `lib/` beside the executable and is meant to
+/// work unpacked anywhere, so that is looked for first; a build knows the tree
+/// it was built from, which is what a developer runs against and what the
+/// archive's copy was taken from.
+std::string shippedLibrary()
+{
+  std::filesystem::path const beside = executableDirectory();
+  if ( !beside.empty() )
+  {
+    std::error_code failed;
+    std::filesystem::path const library = beside / "lib";
+    if ( std::filesystem::is_directory( library, failed ) )
+    {
+      return library.string();
+    }
+  }
+  return NGA_LIB_DIR;
+}
 
 /// One `--deny`, `--allow` or `--off` group, resolved to identifiers once so it
 /// can be applied more than once without validating twice.
@@ -107,7 +181,7 @@ int run( int argc, char** argv )
 
   // Where the drivers and decoders the tool ships are found when a document
   // names one that is not beside it — see docs/spec/project-file.md.
-  std::string library = NGA_LIB_DIR;
+  std::string library = shippedLibrary();
   app.add_option( "--lib", library, "The directory of the drivers and decoders the tool ships" );
 
   bool verifyLayout = false;
