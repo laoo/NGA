@@ -438,6 +438,11 @@ struct Block
   Terminator terminator;
 };
 
+/// The blocks control may reach from this terminator, in the order it names
+/// them. Nothing for `ret`, `enter` and `fall`: what the Proc holds does not
+/// outlive the call, and a Proc chained by `then` is another Function.
+std::vector<std::uint32_t> successorsOf( Terminator const& terminator );
+
 /// A byte of a Proc's own: a local of the C, or one the compiler needed —
 /// see docs/decisions/0080-a-local-is-a-byte-of-its-proc.md.
 struct Local
@@ -488,6 +493,12 @@ struct Global
 
   /// A local array, whose bytes are its function's only while it runs.
   bool isTemporary = false;
+
+  /// For an object of a function, the name the program wrote, where `name` is
+  /// the one the compiler made of it. A finding says this one: nothing outside
+  /// this file has ever seen the other, and a diagnostic that un-mangled a name
+  /// would be a second place that knows how one is spelled.
+  std::string written{};
 
   /// Where the object lies: `absolute` unless `[[placement(zeropage)]]` asked
   /// otherwise, and the zero page whatever is written for a pointer, which

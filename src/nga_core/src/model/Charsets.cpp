@@ -264,7 +264,7 @@ void Resolver::applyEntry( ModuleIndex home, CharsetEntry const& entry, Charset&
     {
       report( diag::diagnostic( diag::DiagnosticId::DUPLICATE_CHARSET_ENTRY )
                   .at( entry.characters.location, entry.characters.length )
-                  .arg( "character", syntax::utf8Of( point ) ) );
+                  .arg( "character", syntax::displayOf( point ) ) );
     }
     ++byte;
   }

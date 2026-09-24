@@ -47,8 +47,14 @@ std::uint32_t characterCountOf( std::string_view body );
 /// anything left to report.
 std::vector<char32_t> codePointsOf( std::string_view body );
 
-/// One code point as the UTF-8 a diagnostic can print.
-std::string utf8Of( char32_t codePoint );
+/// One code point as a diagnostic can print it.
+///
+/// A printable code point is its own UTF-8. One that is not printable has no
+/// business in a message: a `\0` reaching a stream ends the text there, and the
+/// finding loses its character, its location and its newline. So a code point
+/// the language has an escape for is that escape, and any other control
+/// character is `U+XXXX`.
+std::string displayOf( char32_t codePoint );
 
 /// Length of the UTF-8 sequence at `pos`, or zero if the bytes there are not
 /// well-formed. Overlong encodings, surrogates and anything past U+10FFFF are

@@ -1,5 +1,7 @@
 #include "nga/syntax/Literal.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -177,9 +179,30 @@ std::vector<char32_t> codePointsOf( std::string_view body )
   return points;
 }
 
-std::string utf8Of( char32_t codePoint )
+std::string displayOf( char32_t codePoint )
 {
   auto const value = static_cast<std::uint32_t>( codePoint );
+
+  // What the language spells, spelled that way; every other control character
+  // by its number, as `NGA7002` names one the C lexer meets.
+  switch ( value )
+  {
+  case 0x00U:
+    return "\\0";
+  case 0x09U:
+    return "\\t";
+  case 0x0AU:
+    return "\\n";
+  default:
+    break;
+  }
+  // C0 and C1 controls, DEL, and the two separators Unicode reads as line
+  // breaks: each of them would end or displace the line the finding stands on.
+  if ( value < 0x20U || value == 0x7FU || ( value >= 0x80U && value <= 0x9FU ) || value == 0x2028U || value == 0x2029U )
+  {
+    return fmt::format( "U+{:04X}", value );
+  }
+
   std::string text;
   if ( value < 0x80U )
   {

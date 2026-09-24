@@ -217,6 +217,24 @@ std::string textOf( Instruction const& instruction, Function const& function )
 
 } // namespace
 
+std::vector<std::uint32_t> successorsOf( Terminator const& terminator )
+{
+  switch ( terminator.kind )
+  {
+  case TerminatorKind::JUMP:
+    return { terminator.target };
+  case TerminatorKind::BRANCH:
+    return { terminator.target, terminator.otherwise };
+  case TerminatorKind::DISPATCH:
+    return terminator.targets;
+  case TerminatorKind::RETURN:
+  case TerminatorKind::TRANSITION:
+  case TerminatorKind::FALL:
+    return {};
+  }
+  return {};
+}
+
 std::uint32_t sizeOf( Type type )
 {
   switch ( type )

@@ -1092,7 +1092,12 @@ enum class Severity : std::uint8_t
      7306,                                                                                                             \
      ERROR,                                                                                                            \
      "`{name}` lies in stripes, whose place its layout settles, so `[[placement]]` is a second answer" )               \
-  X( C_PLACEMENT_SAYS_NOTHING, 7307, WARNING, "`{name}` is `{class}` already, so this says nothing" )
+  X( C_PLACEMENT_SAYS_NOTHING, 7307, WARNING, "`{name}` is `{class}` already, so this says nothing" )                  \
+  X( C_STATIC_READ_BEFORE_WRITTEN,                                                                                     \
+     7308,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is read here before anything writes it, and a `static` local holds what was there; give it a value "    \
+     "where it is declared" )
 
 // A compiler-class tool outgrows 255 diagnostics, and renumbering the catalog
 // later is not an option.

@@ -287,7 +287,7 @@ void Typer::checkCharset( ModuleIndex home, syntax::Expression const& node )
       }
       report( diag::diagnostic( diag::DiagnosticId::NON_ASCII_WITHOUT_CHARSET )
                   .at( node.token.location, node.token.length )
-                  .arg( "character", syntax::utf8Of( point ) ) );
+                  .arg( "character", syntax::displayOf( point ) ) );
       return;
     }
     return;
@@ -325,7 +325,7 @@ void Typer::checkCharset( ModuleIndex home, syntax::Expression const& node )
     report( diag::diagnostic( diag::DiagnosticId::CHARACTER_NOT_IN_CHARSET )
                 .at( node.token.location, node.token.length )
                 .arg( "charset", std::string{ quoted.charset } )
-                .arg( "character", syntax::utf8Of( point ) ) );
+                .arg( "character", syntax::displayOf( point ) ) );
     // One finding per literal: a set missing an alphabet would otherwise
     // report once per letter.
     return;

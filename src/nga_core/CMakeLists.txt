@@ -1,6 +1,7 @@
 add_library( nga_core
   src/Version.cpp
   src/PortabilityChecks.cpp
+  src/c/Assigned.cpp
   src/c/Compile.cpp
   src/c/Fold.cpp
   src/c/Hoist.cpp

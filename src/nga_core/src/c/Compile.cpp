@@ -1,5 +1,7 @@
 #include "nga/c/Compile.hpp"
 
+#include "nga/c/Assigned.hpp"
+
 #include "nga/c/Fold.hpp"
 #include "nga/c/Hoist.hpp"
 #include "nga/c/Inline.hpp"
@@ -7808,6 +7810,7 @@ private:
                                          .type = local.type,
                                          .isStatic = true,
                                          .at = declarator.location,
+                                         .written = mTyping.spellingOf( declarator ),
                                          .value = declared.isStatic && value != nullptr
                                                       ? std::optional{ constantOf( *value, local.type, site ) }
                                                       : std::nullopt } );
@@ -8318,7 +8321,8 @@ private:
                                        .count = bytes,
                                        .elements = fixed && shape.hasList ? blockConstants( shape, local, 1, site )
                                                                           : std::vector<ir::Constant>{},
-                                       .isTemporary = !kept } );
+                                       .isTemporary = !kept,
+                                       .written = mTyping.spellingOf( declarator ) } );
     }
     else
     {
@@ -17825,6 +17829,17 @@ std::vector<std::optional<ir::Unit>> lower( diag::SourceManager const& sources,
   {
     sinks.push_back( unit.sink );
   }
+  // Before any pass moves a store or drops one: what the source says about a
+  // `static` local read before anything writes it — see
+  // docs/decisions/0212-a-static-local-read-before-it-is-written.md.
+  for ( std::size_t index = 0; index < lowered.size(); ++index )
+  {
+    if ( lowered[index].has_value() && sinks[index] != nullptr )
+    {
+      checkStaticsAreAssigned( *lowered[index], *sinks[index] );
+    }
+  }
+
   wrapCalls( lowered, sinks, intent == Intent::SPEED );
 
   // The passes over the finished IR, one Unit at a time: what a loop computes

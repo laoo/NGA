@@ -197,26 +197,6 @@ BlockAccess accessOf( ir::Block const& block, std::set<std::string> const& own )
   return access;
 }
 
-std::vector<std::uint32_t> successorsOf( ir::Terminator const& terminator )
-{
-  switch ( terminator.kind )
-  {
-  case ir::TerminatorKind::JUMP:
-    return { terminator.target };
-  case ir::TerminatorKind::BRANCH:
-    return { terminator.target, terminator.otherwise };
-  case ir::TerminatorKind::DISPATCH:
-    return terminator.targets;
-  case ir::TerminatorKind::RETURN:
-  case ir::TerminatorKind::TRANSITION:
-  case ir::TerminatorKind::FALL:
-    // Nothing of the Proc's own outlives the call: the caller wrote the
-    // parameters and reads the result, which is not among them.
-    return {};
-  }
-  return {};
-}
-
 } // namespace
 
 std::vector<std::set<std::string>> liveInOf( ir::Function const& function )
@@ -241,7 +221,7 @@ std::vector<std::set<std::string>> liveInOf( ir::Function const& function )
     for ( std::size_t index = function.blocks.size(); index-- > 0; )
     {
       std::set<std::string> in = access[index].upwardUses;
-      for ( std::uint32_t const next : successorsOf( function.blocks[index].terminator ) )
+      for ( std::uint32_t const next : ir::successorsOf( function.blocks[index].terminator ) )
       {
         if ( next >= liveIn.size() )
         {
@@ -419,7 +399,7 @@ void dropIn( ir::Function& function, std::set<std::string> const& volatiles )
   for ( ir::Block& block : function.blocks )
   {
     std::set<std::string> live;
-    for ( std::uint32_t const next : successorsOf( block.terminator ) )
+    for ( std::uint32_t const next : ir::successorsOf( block.terminator ) )
     {
       if ( next < liveIn.size() )
       {
