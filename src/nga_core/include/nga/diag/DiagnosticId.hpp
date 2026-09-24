@@ -518,8 +518,8 @@ enum class Severity : std::uint8_t
   X( CROSS_VIEW_REFERENCE,                                                                                             \
      2412,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{symbol}` is in pane `{pane}`, which is shown only under it, and this is not; see "                             \
-     "docs/decisions/0055-with.md" )                                                                                   \
+     "`{symbol}` is in pane `{pane}`, and this code does not run with that pane shown: put the statement "             \
+     "under a `.with`, or the code in a Proc declared `under` it" )                                                    \
   X( PANE_UNKNOWN, 2418, ERROR, "`{name}` is not a pane the Project declares" )                                        \
   X( PANE_SECTION_MOVABLE,                                                                                             \
      2419,                                                                                                             \
@@ -578,12 +578,14 @@ enum class Severity : std::uint8_t
   X( NO_COPY_DECODER,                                                                                                  \
      2279,                                                                                                             \
      ERROR,                                                                                                            \
-     "no module declares a decoder for `copy`, and every Transition copies; see docs/spec/transition.md" )             \
+     "no module declares a decoder for `copy`, and every Transition copies; the storage driver declares one "          \
+     "with `.transform copy`" )                                                                                        \
   X( NO_DECODER, 2280, ERROR, "no module declares a decoder for `{transform}`" )                                       \
   X( NO_DRIVER,                                                                                                        \
      2281,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `.transition` is taken and no module declares the storage driver; see docs/spec/transition.md" )               \
+     "a `.transition` is taken and no module declares the storage driver; one module declares it with "                \
+     "`.driver`, and a machine variant usually lists that module" )                                                    \
   X( SECOND_DRIVER, 2282, ERROR, "this module declares the storage driver, and `{module}` already does" )              \
   X( DRIVER_IS_HERE, 2283, NOTE, "the driver is declared here" )                                                       \
   X( UNKNOWN_DRIVER_ROLE,                                                                                              \
@@ -681,7 +683,8 @@ enum class Severity : std::uint8_t
   X( PANE_STATE_PAYLOAD,                                                                                               \
      5227,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` has bytes and is in pane `{pane}`, a named state no loader fills; see docs/open-questions.md" )      \
+     "`{section}` has bytes and is in pane `{pane}`, which is pinned to a named state: no Container fills "            \
+     "one, so a pane pinned to a state holds only sections that reserve" )                                             \
   X( LAYOUT_OVERLAP,                                                                                                   \
      5240,                                                                                                             \
      ERROR,                                                                                                            \
@@ -774,6 +777,35 @@ enum class Severity : std::uint8_t
      6214,                                                                                                             \
      ERROR,                                                                                                            \
      "the .xex fills a unit through one range, and window `{name}` has {count}" )                                      \
+  X( ATR_STORAGE_IS_A_UNIT_SET,                                                                                        \
+     6221,                                                                                                             \
+     ERROR,                                                                                                            \
+     "an .atr reads storage a sector at a time and shows no Window, and this storage is the unit set                   \
+     `{name}`" )                                                                                                       \
+  X( ATR_UNIT_IS_NOT_SECTORS,                                                                                          \
+     6222,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a unit of storage on a diskette is the {size:n} bytes 256 sectors of {sector:n} hold, and {unit:n} "             \
+     "is not that" )                                                                                                   \
+  X( ATR_DRIVER_NAMES_A_WINDOW,                                                                                        \
+     6223,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the boot record of an .atr shows no Window, and this driver streams through `{name}`" )                          \
+  X( ATR_DOES_NOT_FIT,                                                                                                 \
+     6224,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a sector is numbered in two bytes, so an image holds {available:n} of them, and this program "                   \
+     "needs {required:n}" )                                                                                            \
+  X( ATR_SECTION_IN_BOOT_RECORD,                                                                                       \
+     6225,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` stands at {address:hex}, inside the boot record the .atr loads over {begin:hex} to "                 \
+     "{end:hex}, which is still loading the program when those bytes are written" )                                    \
+  X( ATR_WITHOUT_BOOT_RECORD, 6226, ERROR, "an .atr is booted by its first sectors, and none were made" )              \
+  X( ATR_BOOT_RECORD_TOO_LARGE,                                                                                        \
+     6227,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the boot record holds {available:n} bytes and its loader came to {required:n}" )                                 \
   X( ENTRY_NOT_DEFINED,                                                                                                \
      6211,                                                                                                             \
      ERROR,                                                                                                            \

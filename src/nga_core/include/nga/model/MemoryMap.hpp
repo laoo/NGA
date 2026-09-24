@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace nga::model
@@ -94,6 +95,12 @@ struct MemoryMap
   std::vector<MapBank> banks;
   Pools pools;
   std::uint32_t bankSize = 0;
+
+  /// What one unit of storage is called here: a **Bank** where storage is a
+  /// unit set, since that is what a Bank is, and a plain **unit** where
+  /// storage is by count — a diskette has no unit set, and the glossary
+  /// refuses `bank` as a general word. See docs/spec/glossary.md.
+  std::string_view unitWord = "bank";
 };
 
 /// Reads the map off a finished build. Deterministic: entries are ordered by

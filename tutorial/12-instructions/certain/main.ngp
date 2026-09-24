@@ -1,0 +1,7 @@
+target {
+  cpu "65sc02"
+  region $0080 .. $00FF ram
+  region $2000 .. $BFFF ram
+}
+modules { "jump.asm" }
+container raw

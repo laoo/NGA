@@ -1,5 +1,7 @@
 #include "nga/model/ProjectFile.hpp"
 
+#include "nga/model/Atr.hpp"
+
 #include <spdlog/fmt/fmt.h>
 
 #include "nga/model/Evaluate.hpp"
@@ -696,7 +698,8 @@ void Loader::addConstant( syntax::Token name, syntax::Token value )
 /// Every container the tool writes, as a finding lists them.
 std::string knownContainers()
 {
-  return fmt::format( "`{}` and `{}`", nameOf( Container::RAW_IMAGE ), nameOf( Container::XEX ) );
+  return fmt::format(
+      "`{}`, `{}` and `{}`", nameOf( Container::RAW_IMAGE ), nameOf( Container::XEX ), nameOf( Container::ATR ) );
 }
 
 void Loader::setContainer( syntax::Token name )
@@ -1929,6 +1932,12 @@ Project loadProject( diag::SourceManager& sources,
   // A Project with an edge takes Transitions, and the Modules that take them
   // are the tool's to add — see docs/decisions/0019-transition-mechanism.md.
   addTransitionModules( project, sources, sink );
+  // An `.atr` is booted by its own first sectors, which are the tool's to
+  // write — see docs/decisions/0211-a-diskette-is-a-container-and-its-sectors-are-storage.md.
+  if ( project.container == Container::ATR )
+  {
+    addBootRecord( project, sources );
+  }
   // A Project of C is given the runtime its operators call — see
   // docs/decisions/0095-literals-and-the-runtime.md.
   if ( holdsC( sources, project ) )

@@ -261,7 +261,7 @@ int run( int argc, char** argv )
     }
     else
     {
-      spdlog::info( "{} bytes of .xex", bytes.size() );
+      spdlog::info( "{} bytes of .{}", bytes.size(), nga::model::nameOf( project.container ) );
     }
   }
 

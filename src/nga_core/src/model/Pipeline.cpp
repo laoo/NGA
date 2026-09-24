@@ -123,6 +123,10 @@ void buildFrom( diag::SourceManager const& sources,
   {
     emitted.bytes = emitXex( patched, sink ).bytes;
   }
+  else if ( project.container == Container::ATR )
+  {
+    emitted.bytes = emitAtr( patched, sink ).bytes;
+  }
   else
   {
     RawImage image = emitRawImage( patched, sink );

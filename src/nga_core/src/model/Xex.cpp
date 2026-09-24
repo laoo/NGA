@@ -1,5 +1,6 @@
 #include "nga/model/Emit.hpp"
 
+#include "nga/model/Segments.hpp"
 #include "nga/model/Transition.hpp"
 
 #include <algorithm>
@@ -7,210 +8,30 @@
 #include <cstddef>
 #include <optional>
 #include <span>
-#include <string>
 #include <utility>
 #include <vector>
 
 namespace nga::model
 {
 
-namespace
-{
-
-/// Appends segments in the shape a DOS loader reads: start and end, both two
-/// bytes little endian and the end inclusive, then exactly the bytes between.
-///
-/// A segment that begins where the one before it ended is not a segment of
-/// its own: the bytes are appended to the one before and its end moved,
-/// which is the same load four bytes shorter. A Proc is a Section, and a
-/// Module of Procs would otherwise pay a header per routine.
-class XexWriter
-{
-public:
-  XexWriter()
-  {
-    mBytes.push_back( 0xFF );
-    mBytes.push_back( 0xFF );
-  }
-
-  void segment( std::uint32_t start, std::span<std::uint8_t const> data )
-  {
-    std::uint32_t const end = start + static_cast<std::uint32_t>( data.size() ) - 1;
-    if ( mOpen.has_value() && mOpen->end + 1 == start )
-    {
-      mOpen->end = end;
-      writeAddress( mOpen->endAt, end );
-      mBytes.insert( mBytes.end(), data.begin(), data.end() );
-      return;
-    }
-    address( start );
-    mOpen = Open{ .end = end, .endAt = mBytes.size() };
-    address( end );
-    mBytes.insert( mBytes.end(), data.begin(), data.end() );
-  }
-
-  void byte( std::uint32_t at, std::uint8_t value )
-  {
-    std::array<std::uint8_t, 1> const one{ value };
-    segment( at, one );
-  }
-
-  void word( std::uint32_t at, std::uint32_t value )
-  {
-    std::array<std::uint8_t, 2> const two{ static_cast<std::uint8_t>( value & 0xFF ),
-                                           static_cast<std::uint8_t>( ( value >> 8 ) & 0xFF ) };
-    segment( at, two );
-  }
-
-  [[nodiscard]] std::vector<std::uint8_t> take() &&
-  {
-    return std::move( mBytes );
-  }
-
-private:
-  /// The segment being written: where it ends, and where in the file its
-  /// end address stands, so that a contiguous one can move it.
-  struct Open
-  {
-    std::uint32_t end = 0;
-    std::size_t endAt = 0;
-  };
-
-  void address( std::uint32_t value )
-  {
-    mBytes.push_back( static_cast<std::uint8_t>( value & 0xFF ) );
-    mBytes.push_back( static_cast<std::uint8_t>( ( value >> 8 ) & 0xFF ) );
-  }
-
-  void writeAddress( std::size_t at, std::uint32_t value )
-  {
-    mBytes[at] = static_cast<std::uint8_t>( value & 0xFF );
-    mBytes[at + 1] = static_cast<std::uint8_t>( ( value >> 8 ) & 0xFF );
-  }
-
-  std::vector<std::uint8_t> mBytes;
-  std::optional<Open> mOpen;
-};
-
-/// Something with a place to wait — a Payload or a Frame — and where.
-struct Stored
-{
-  StorageAddress at;
-  std::span<std::uint8_t const> form;
-};
-
-/// A DOS calls the address written here after the segment that wrote it,
-/// which is how a file runs the driver while it is loaded.
-constexpr std::uint32_t INITAD = 0x02E2;
-
-/// The runtime address of a Label the whole program can see, or nothing.
-std::optional<std::uint32_t>
-addressOfExported( GlobalSymbols const& symbols, std::string_view name, Sizes const& sizes, Layout const& layout )
-{
-  std::optional<SymbolRef> const where = symbols.find( name );
-  return where.has_value() ? addressOfLabel( symbols, *where, sizes, layout ) : std::nullopt;
-}
-
-/// The bytes Patch produced for a Section, no more than its size.
-/// The bytes Patch produced for a Section's initialised extent, clamped to
-/// what Patch produced: a Section shorter than its size is a defect of an
-/// earlier Step and not of the writer.
-std::span<std::uint8_t const> contentOf( Bytes const& bytes, SectionRef where, InitialisedExtent extent )
-{
-  std::span<std::uint8_t const> const content = bytes.of( where );
-  std::size_t const begin = std::min<std::size_t>( extent.begin, content.size() );
-  return content.subspan( begin, std::min<std::size_t>( extent.size(), content.size() - begin ) );
-}
-
-} // namespace
-
 XexFile emitXex( Patched const& build, diag::DiagnosticSink& sink )
 {
   Project const& project = build.project();
   GlobalSymbols const& symbols = build.symbols();
   Sizes const& sizes = build.sizes();
-  Storage const& storage = build.storage();
   Layout const& layout = build.layout();
-  Bytes const& bytes = build.bytes();
   Target const& target = build.target();
-  std::span<Module const> const modules = symbols.modules();
 
-  // Every Payload with a place to wait, by Bank and then by offset: one switch
-  // per Bank rather than one per Payload.
-  std::vector<Stored> stored;
-  for ( std::uint32_t module = 0; module < modules.size(); ++module )
-  {
-    for ( std::uint32_t index = 0; index < modules[module].sections().size(); ++index )
-    {
-      SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
-      // The Payload's size is Storage's: what waits in a Bank is the stored
-      // form, and the Section's own size is what it occupies once loaded.
-      if ( !storage.hasPayload( where ) || !storage.isPlaced( where ) || storage.sizeOf( where ) == 0 )
-      {
-        continue;
-      }
-      stored.push_back( Stored{ .at = storage.addressOf( where ), .form = storage.formOf( where ) } );
-    }
-  }
-  // And every Pane's Section with bytes, which the loader writes into the
-  // Pane's Bank at its offset within the Window, once — see
-  // docs/decisions/0054-panes.md.
-  for ( Storage::PaneImage const& image : storage.paneImages() )
-  {
-    stored.push_back(
-        Stored{ .at = image.at, .form = contentOf( bytes, image.where, sizes.initialisedExtentOf( image.where ) ) } );
-  }
-  // And every Frame, which waits as a Payload does and is read by the
-  // routine alone.
-  for ( std::uint32_t index = 0; index < storage.frameCount(); ++index )
-  {
-    FrameIndex const frame{ index };
-    if ( storage.isFramePlaced( frame ) && !storage.frameBytesOf( frame ).empty() )
-    {
-      stored.push_back( Stored{ .at = storage.frameAddressOf( frame ), .form = storage.frameBytesOf( frame ) } );
-    }
-  }
-  std::ranges::stable_sort(
-      stored,
-      []( Stored const& a, Stored const& b )
-      { return a.at.bank.value != b.at.bank.value ? a.at.bank.value < b.at.bank.value : a.at.offset < b.at.offset; } );
+  std::vector<Stored> const stored = storedImages( build );
 
-  XexWriter out;
+  SegmentWriter out;
 
   // Present when the program starts: everything the entry Phase needs that
   // emits bytes, in Project order. Before the units, because filling one
   // runs the driver, which is among them; a Section whose runtime address
   // is in the window is base memory, and stays so once the driver shows the
   // base again.
-  Phase const& entryPhase = project.phases.phases[project.phases.entry.value];
-  std::vector<bool> present( modules.size(), false );
-  for ( ModuleIndex const module : entryPhase.needs )
-  {
-    present[module.value] = true;
-  }
-  for ( std::uint32_t module = 0; module < modules.size(); ++module )
-  {
-    if ( !present[module] )
-    {
-      continue;
-    }
-    Module const& one = modules[module];
-    for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
-    {
-      SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
-      // A Pane's Section is in its Bank and not in base memory.
-      if ( !layout.isPlaced( where ) || !sizes.isKnown( where ) || sizes.sizeOfSection( where ) == 0 ||
-           !one.sections()[index].emitsBytes() || one.sections()[index].pane().has_value() )
-      {
-        continue;
-      }
-      // The initialised extent and not the Section: reserved space at either
-      // end is not in the file, because a load writing it would write nothing
-      // the program may rely on.
-      InitialisedExtent const extent = sizes.initialisedExtentOf( where );
-      out.segment( layout.addressIn( where, project.phases.entry ) + extent.begin, contentOf( bytes, where, extent ) );
-    }
-  }
+  writeResidentSegments( build, out, {} );
 
   if ( !stored.empty() )
   {
@@ -291,11 +112,13 @@ XexFile emitXex( Patched const& build, diag::DiagnosticSink& sink )
   {
     return {};
   }
-  std::array<std::uint8_t, 2> const runAddress{ static_cast<std::uint8_t>( *run & 0xFF ),
-                                                static_cast<std::uint8_t>( ( *run >> 8 ) & 0xFF ) };
-  out.segment( 0x02E0, runAddress );
+  out.word( RUNAD, *run );
 
-  return XexFile{ .bytes = std::move( out ).take() };
+  // A `.xex` begins with $FF $FF and is otherwise the segments.
+  std::vector<std::uint8_t> file{ 0xFF, 0xFF };
+  std::vector<std::uint8_t> const segments = std::move( out ).take();
+  file.insert( file.end(), segments.begin(), segments.end() );
+  return XexFile{ .bytes = std::move( file ) };
 }
 
 } // namespace nga::model

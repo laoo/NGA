@@ -24,6 +24,8 @@ add_library( nga_core
   src/diag/SeverityPolicy.cpp
   src/diag/SourceManager.cpp
   src/model/Assemble.cpp
+  src/model/Boot.cpp
+  src/model/Atr.cpp
   src/model/Charsets.cpp
   src/model/Emit.cpp
   src/model/Generator.cpp
@@ -59,6 +61,7 @@ add_library( nga_core
   src/model/References.cpp
   src/model/ProjectFile.cpp
   src/model/Section.cpp
+  src/model/Segments.cpp
   src/model/Size.cpp
   src/model/Slots.cpp
   src/model/Solver.cpp

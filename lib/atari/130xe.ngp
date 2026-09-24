@@ -1,22 +1,14 @@
-; An Atari 130XE: the four extended Banks as a unit set, which is the
-; storage; the window PORTB brings one into for the CPU while ANTIC is left
-; on base RAM; the OS Window, whose two states are the ROM and the RAM
-; beneath it; what every address is in every state of the hardware; and the
-; registers the program writes by name. This is the machine and not one
-; program's use of it, so a register stands here whether or not a given
-; Project writes it. What PORTB takes to show a state is the driver's, not
-; here. The OS is a Module and not a Region, since it occupies memory for a
-; while rather than being a truth about addresses: `atari/os.asm` holds its
-; zero page, its variables and its ROM, and the names a program reaches it
-; by. See 0038, 0051 and 0053.
+; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings
+; one of them into, the Window over the OS ROM, every Region of the address
+; space, and the Modules a program on this machine needs. What PORTB takes to
+; show a state is the driver's and not here, and the OS is a Module rather than
+; a Region because it occupies memory for a while rather than being a truth
+; about addresses.
 target {
-  ; The processor. An Atari's is a 6502C, whose instruction set is the 6502's,
-  ; so that is what a Module of a Project on this machine may be written in.
   cpu "6502"
 
-  ; What the machine is fed a program on: DOS loads a `.xex`, which is the one
-  ; the tool writes today. A Project naming any other is refused here rather
-  ; than at the writer — see 0179.
+  ; DOS loads a `.xex`, and a Project naming any other Container is refused
+  ; here rather than at the writer.
   containers xex
 
   units  extension 4
@@ -31,19 +23,19 @@ target {
   region stack  $0100 .. $01FF  reserved
   region io     $D000 .. $D7FF  register
 
-  register PORTB  $D301
+  ; This machine takes a `.xex` and nothing else, and a `.xex` is loaded by a
+  ; DOS, which stays where a DOS of the 2.x family stays. A Project whose DOS
+  ; takes more says so with a `reserved` Region of its own, which narrows this
+  ; one further.
+  region dos    $0700 .. $1FFF  reserved
 
-  ; POKEY.
-  register AUDF1  $D200
-  register AUDC1  $D201
-  register AUDCTL $D208
-  register SKCTL  $D20F
+  ; What the driver writes. A Project that wants more of the hardware by name
+  ; declares it, as it declares the memory its DOS holds.
+  register PORTB  $D301
 }
 
-; The OS, the storage driver for this memory and the decoders the tool ships,
-; listed as a file of the Project's own would be and found in the tool's
-; library; every Transition calls the driver and the decoders, so they are
-; resident, and the OS is resident until a Phase can say it switched it out.
-; A decoder nothing uses is dispatched to by nothing and dropped.
-modules { "atari/os.asm"  "atari/portb.asm"  "stream/zx0.asm" }
-resident { os, portb, zx0 }
+; The OS, the driver for this storage and the decoders the tool ships, listed
+; as a file of the Project's own would be. Every Transition calls the driver
+; and the decoders, so they are resident; a decoder nothing uses is dropped.
+modules { "atari/os.asm"  "atari/charsets.asm"  "atari/portb.asm"  "stream/zx0.asm" }
+resident { os, charsets, portb, zx0 }

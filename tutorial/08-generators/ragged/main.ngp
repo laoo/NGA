@@ -1,0 +1,14 @@
+include "atari/130xe.ngp"
+
+modules { "print.asm" "run.asm" "shared.asm" "intro.asm" "level.asm"
+  script( "tools/rows.js", map = "maps/level1.map", width = 37, in = level ) as maps }
+
+panes in ext { level }
+
+resident { print, run, shared }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs level, maps  entry levelStart }
+entry intro
+
+container xex

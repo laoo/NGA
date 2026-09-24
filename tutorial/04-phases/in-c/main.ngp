@@ -1,0 +1,11 @@
+include "atari/800xl.ngp"
+
+modules { "print.asm" "intro.ngc" "level.ngc" }
+
+resident { print }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs level             entry levelStart }
+entry intro
+
+container atr

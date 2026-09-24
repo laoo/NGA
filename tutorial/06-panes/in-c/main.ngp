@@ -1,0 +1,13 @@
+include "atari/130xe.ngp"
+
+modules { "print.asm" "shared.asm" "intro.ngc" "level.ngc" }
+
+panes in ext { level }
+
+resident { print, shared }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs level             entry levelStart }
+entry intro
+
+container xex

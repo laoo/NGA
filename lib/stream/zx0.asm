@@ -6,7 +6,7 @@
 ; stream at the stored size, which it reads past. A match is copied a byte
 ; at a time, forward, from what was written, which is what makes an offset
 ; shorter than its length — the run — come out right. Resident, and outside
-; the driver's window. See docs/spec/transition.md.
+; the driver's window.
 ;
 ;   zx0Bits      the bit buffer, a sentinel one above the bits still unread
 ;   zx0Offset    the last offset

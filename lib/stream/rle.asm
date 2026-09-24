@@ -3,7 +3,7 @@
 ; count, driven by the stored size — it stops when that many bytes have
 ; been read, and what it produces is as long as it turns out to be. Entered
 ; with X/Y = the destination and the stream at the stored size. Resident,
-; and outside the driver's window. See docs/spec/transition.md.
+; and outside the driver's window.
 
 .transform rle rleDecode
 

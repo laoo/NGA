@@ -389,9 +389,10 @@ enum class Container : std::uint8_t
 {
   RAW_IMAGE,
   XEX,
+  ATR,
 };
 
-/// `raw` and `xex`, and nothing where the word names neither.
+/// `raw`, `xex` and `atr`, and nothing where the word names none of them.
 std::optional<Container> containerNamed( std::string_view word );
 
 /// The word a Container is written as, which is what a finding lists.

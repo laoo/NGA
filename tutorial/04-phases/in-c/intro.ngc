@@ -1,0 +1,7 @@
+static const u8 introText[] = "INTRO";
+
+void introStart()
+{
+  printLine( (u16)introText, sizeof( introText ) - 1 );
+  [[transition(level)]] return;
+}

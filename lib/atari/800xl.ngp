@@ -1,0 +1,41 @@
+; An Atari 800XL with a double-density disk drive: sixty-four kilobytes and no
+; banking, so storage is the diskette's own sectors, which nothing maps into
+; memory. There is no unit set and no Window for that reason, and the driver
+; shows nothing. The Container is the `.atr`, a bootable diskette whose first
+; three sectors the tool writes itself.
+target {
+  cpu "6502"
+
+  ; A diskette it boots, or a `.xex` a DOS loads. A Project naming any other
+  ; is refused here rather than at the writer.
+  containers atr, xex
+}
+
+; The diskette's sectors, from the fourth: the boot record has the first three
+; and the load image whatever is left after the storage a program uses. A unit
+; is 256 sectors, which is the one size the `.atr` takes, and three of them
+; reach past the 180 KB a double-density diskette holds. It is a ceiling and
+; not a reservation: what the image costs is what the program's Payloads came
+; to.
+storage { units 3 size 65536 }
+
+target {
+  region ram    $0000 .. $06FF  ram
+  ; $0700 to $087F is the boot record's. It stands in no Region, so the solver
+  ; never allocates there and the record's own pins are the author's word.
+  region        $0880 .. $CFFF  ram
+  region        $D800 .. $FFFF  ram
+  region stack  $0100 .. $01FF  reserved
+  region io     $D000 .. $D7FF  register
+
+  ; A Project that wants more of the hardware by name declares it, as it
+  ; declares the memory its DOS holds.
+  register PORTB  $D301
+}
+
+; The OS, the driver for a diskette and the decoders the tool ships, listed as
+; a file of the Project's own would be. Every Transition calls the driver and
+; the decoders, so they are resident, and the OS is resident because the driver
+; calls into it; a decoder nothing uses is dropped.
+modules { "atari/os.asm"  "atari/charsets.asm"  "atari/disk.asm"  "stream/zx0.asm" }
+resident { os, charsets, disk, zx0 }

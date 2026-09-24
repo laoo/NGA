@@ -161,8 +161,32 @@ MemoryMap memoryMapOf( Patched const& build )
   Target const& target = build.target();
   std::span<Module const> const modules = build.modules();
 
+  // A Slot's Cell is a Section the tool built and gave no Label, so the map
+  // would have nothing to call it. It has the Slot's name to call it by, and
+  // with several Slots that is the only thing telling the Cells apart. Not a
+  // Label, because a Slot that takes arguments owns a Namespace of its name
+  // and a Symbol of a Namespace's name is refused.
+  std::vector<std::pair<SectionRef, std::string_view>> cellNames;
+  for ( Module const& one : modules )
+  {
+    for ( Symbol const& symbol : one.symbols().symbols() )
+    {
+      auto const* const slot = std::get_if<SlotDeclaration>( &symbol.value );
+      if ( slot != nullptr && slot->cell.has_value() )
+      {
+        cellNames.emplace_back( *slot->cell, symbol.name );
+      }
+    }
+  }
+  auto const cellNamed = [&cellNames]( SectionRef where ) -> std::optional<std::string_view>
+  {
+    auto const found = std::ranges::find_if( cellNames, [where]( auto const& one ) { return one.first == where; } );
+    return found == cellNames.end() ? std::nullopt : std::optional{ found->second };
+  };
+
   map.pools = target.pools;
   map.bankSize = target.bankSize();
+  map.unitWord = target.storageUnits.has_value() ? "bank" : "unit";
   for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
   {
     map.phases.push_back( MapPhase{ .name = graph.phases[phase].name.value_or( "phase" + std::to_string( phase ) ) } );
@@ -185,7 +209,9 @@ MemoryMap memoryMapOf( Patched const& build )
       auto const entryAt = [&]( std::optional<PhaseIndex> first, std::optional<PhaseIndex> last, std::uint32_t at )
       {
         MapEntry entry{ .where = where,
-                        .name = one.displayNameOf( where.section, build.sources() ),
+                        .name = cellNamed( where )
+                                    .transform( []( std::string_view name ) { return std::string{ name }; } )
+                                    .value_or( one.displayNameOf( where.section, build.sources() ) ),
                         .module = std::string{ one.name() },
                         .firstPhase = first,
                         .lastPhase = last,
@@ -413,7 +439,8 @@ std::string renderMapText( MemoryMap const& map )
                                       phasesOf( map, *entry ) );
       if ( entry->waits.has_value() )
       {
-        line += fmt::format( "  waits in bank {} at {} ({}, {} bytes)",
+        line += fmt::format( "  waits in {} {} at {} ({}, {} bytes)",
+                             map.unitWord,
                              entry->waits.value_or( StorageAddress{} ).bank.value,
                              hexOf( entry->waits.value_or( StorageAddress{} ).offset ),
                              entry->transform,
@@ -462,7 +489,7 @@ std::string renderMapText( MemoryMap const& map )
     out += "\nstorage\n";
     for ( std::uint32_t bank = 0; bank < map.banks.size(); ++bank )
     {
-      out += fmt::format( "  bank {}: {} of {} bytes\n", bank, map.banks[bank].used, map.bankSize );
+      out += fmt::format( "  {} {}: {} of {} bytes\n", map.unitWord, bank, map.banks[bank].used, map.bankSize );
       std::vector<std::pair<std::uint32_t, std::string>> lines;
       for ( MapFrame const& frame : map.frames )
       {

@@ -8,8 +8,7 @@
 ; calls each state of a Window is this Module's alone: `portbValues` holds
 ; a PORTB value per state of `ext` — base RAM first, then one per Bank, as
 ; many as the variant's `extension` counts — and the OS Window is bit 0.
-; `PORTB` is the variant's register. See docs/spec/transition.md and
-; docs/decisions/0053-a-window-names-its-units.md.
+; `PORTB` is the variant's register.
 ;
 ; Resident, and outside the window — the variant lists this Module in
 ; `resident`, and the tool holds it outside the window the stream reads

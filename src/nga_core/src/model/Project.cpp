@@ -23,12 +23,25 @@ std::optional<Container> containerNamed( std::string_view word )
   {
     return Container::XEX;
   }
+  if ( word == "atr" )
+  {
+    return Container::ATR;
+  }
   return std::nullopt;
 }
 
 std::string_view nameOf( Container container )
 {
-  return container == Container::XEX ? "xex" : "raw";
+  switch ( container )
+  {
+  case Container::XEX:
+    return "xex";
+  case Container::ATR:
+    return "atr";
+  case Container::RAW_IMAGE:
+    break;
+  }
+  return "raw";
 }
 
 std::optional<Cpu> cpuNamed( std::string_view word )

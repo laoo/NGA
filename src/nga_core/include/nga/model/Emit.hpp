@@ -58,4 +58,26 @@ struct XexFile
 /// Phase has no entry Label defined exactly once among the Modules it needs.
 XexFile emitXex( Patched const& build, diag::DiagnosticSink& sink );
 
+/// A diskette, as bytes: the sixteen-byte header every reader knows an `.atr`
+/// by, then 720 sectors of 128 bytes. The CLI writes them; `nga_core` does no
+/// I/O.
+struct AtrFile
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the `.atr` Container, the one whose storage is a medium
+/// nothing maps: the boot record in the first three sectors, storage a sector
+/// to the unit after it, and then the load image — the Sections the entry
+/// Phase needs as the segments a `.xex` carries, which the boot record's
+/// loader reads through the OS's disk handler. The layout is the contract in
+/// docs/spec/atr.md and the reasoning is
+/// docs/decisions/0211-a-diskette-is-a-container-and-its-sectors-are-storage.md.
+///
+/// Refused, with nothing emitted, when storage is a unit set or its units are
+/// not sectors, when the driver streams through a Window, when a Section the
+/// image loads stands in the boot record, and when the whole comes to more
+/// sectors than a single-density diskette has.
+AtrFile emitAtr( Patched const& build, diag::DiagnosticSink& sink );
+
 } // namespace nga::model

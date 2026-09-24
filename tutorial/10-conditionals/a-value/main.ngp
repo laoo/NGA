@@ -1,0 +1,9 @@
+; tag constants
+constants {
+  NTSC = 1
+}
+; end constants
+
+target { region $0080 .. $00FF ram   region $2000 .. $BFFF ram }
+modules { "wait.asm" }
+container raw

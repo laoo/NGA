@@ -1,0 +1,14 @@
+[[implements(title)]] static const u8 introTitle[] = "INTRO";
+
+static const u8 introText[] = "THE FIRST SCREEN";
+
+[[implements(draw)]] void introDraw()
+{
+  printLine( (u16)introText, sizeof( introText ) - 1 );
+}
+
+void introStart()
+{
+  showScreen();
+  [[transition(level)]] return;
+}

@@ -1,0 +1,11 @@
+[[slot]] extern u8* const title;
+[[slot]] extern void draw();
+
+void showScreen()
+{
+  u8 left = 0;
+  while ( title[left] != 0 )
+    left += 1;
+  printLine( (u16)title, left );
+  draw();
+}

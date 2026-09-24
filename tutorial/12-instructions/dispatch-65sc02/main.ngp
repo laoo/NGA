@@ -1,0 +1,9 @@
+; tag cpu
+target {
+  cpu "65sc02"
+  region $0080 .. $00FF ram
+  region $2000 .. $BFFF ram
+}
+; end cpu
+modules { "../dispatch/state.asm" }
+container raw
