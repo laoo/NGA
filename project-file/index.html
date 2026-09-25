@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Project file — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".alt","u":"../assembler/#alt"},{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"cartridge","u":"../project-file/#cartridge"},{"n":"choose","u":"../project-file/#choose"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"foreign","u":"../assembler/#foreign"},{"n":"frames","u":"../project-file/#frames"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"load","u":"../project-file/#load"},{"n":"modules","u":"../project-file/#modules"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"readonly","u":"../assembler/#readonly"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li class="here"><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="reference-the-project-file">Reference: the Project file</h1>
+<p>A run takes one <code>.ngp</code> file and nothing else. The file says which Modules the
+program has, what machine it runs on, and what the tool builds it into. No
+<code>.asm</code> or <code>.ngc</code> file carries any of that.</p>
+<p>This chapter lists every block and every option. The chapters before it teach
+the ideas. This one is for looking things up.</p>
+<h2 id="the-command-line">The command line</h2>
+<pre><code class="language-sh">nga main.ngp -o game.xex --map game.map
+</code></pre>
+<p><code>-o</code> names the file to write, and <code>--map</code> a file for the memory map.
+<code>--deny</code>, <code>--allow</code> and <code>--off</code> change a finding's severity, as the
+<a href="#diagnostics"><code>diagnostics</code></a> block does. <code>nga --help</code> lists the rest.</p>
+<p><code>--explain</code> is for a build that ends in <code><a class="ref" href="../diagnostics/#nga5206">NGA5206</a></code>, no layout satisfies every
+constraint. The tool asks the solver once more and names the fewest pairs of
+Sections that cannot be kept apart, one <code><a class="ref" href="../diagnostics/#nga5207">NGA5207</a></code> for each pair. Making room for
+one Section of each pair is the fix.</p>
+<h2 id="how-the-tool-reads-the-file">How the tool reads the file</h2>
+<p>Line endings mean nothing. Every construct ends because its own shape is
+complete. Layout is free.</p>
+<p>A block may appear more than once. The occurrences sum. Order does not matter,
+and a block may name something declared later or in a file included later.</p>
+<p>Nothing is a keyword. The tool reads a block's name and every word inside it by
+position.</p>
+<p>Lists are comma-separated: <code>needs a, b</code> and <code>resident { a, b }</code>. The <code>modules</code>
+block has no commas, because each entry has a structure of its own.</p>
+<p>A value is an expression in the assembler's expression language. Write <code>$4000</code>
+here as you write it in source. The Project has no Symbols, so a name in an
+expression is an error.</p>
+<p>Comments start with <code>;</code> and run to the end of the line.</p>
+<p>Two entries that contradict each other are an error. The last one does not win.
+This keeps the result independent of the order of your <code>include</code> lines.</p>
+<h2 id="modules"><code>modules</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">modules</span> <span class="t-punctuation">{</span>
+  <span class="t-string">&quot;src/intro.asm&quot;</span>
+  <span class="t-string">&quot;gfx/tiles.asm&quot;</span>                        <span class="t-keyword">as</span> <span class="t-name">gfxTiles</span>
+  <span class="t-name">binary</span><span class="t-punctuation">(</span> <span class="t-string">&quot;gfx/font.bin&quot;</span><span class="t-punctuation">,</span> <span class="t-name">align</span> <span class="t-punctuation">=</span> <span class="t-number">1024</span> <span class="t-punctuation">)</span>
+<span class="t-punctuation">}</span>
+</code></pre>
+<p>Each entry is a file path or a generator call. The Module takes its name from
+the file stem. Use <code>as NAME</code> to give it another name.</p>
+<p>Two Modules with the same name are an error. The message proposes <code>as</code>.</p>
+<p>A path is relative to the file that holds it. Use <code>/</code> on every platform. A path
+that names no file there names one in <a href="#the-library">the library</a>.</p>
+<p>A path is a plain string. It may hold non-ASCII characters. It may not carry a
+character set prefix, because nothing translates it.</p>
+<p>A <code>.ngc</code> path is a Module in the C subset. The tool compiles it before it
+assembles it.</p>
+<p>A Project with no Modules is an error.</p>
+<p>A generator call writes a Module instead of reading one. See
+<a href="../generators/">Generators</a>. One argument stands without a name and is the
+file the generator works from. A name with a value is an option, such as
+<code>align = 1024</code>. A name on its own is a flag, such as <code><a class="ref" href="../assembler/#root">root</a></code>.</p>
+<p>A name before the brace makes the block a <a href="#group">group</a>.</p>
+<h2 id="group"><code>group</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">modules</span> <span class="t-name">engine</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;engine/ball.asm&quot;</span>  <span class="t-string">&quot;engine/draw.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">modules</span> <span class="t-name">sfx</span>    <span class="t-punctuation">{</span> <span class="t-string">&quot;engine/beep.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">group</span>   <span class="t-name">play</span>   <span class="t-punctuation">{</span> <span class="t-name">engine</span><span class="t-punctuation">,</span> <span class="t-name">sfx</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">phase</span> <span class="t-name">level1</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">play</span><span class="t-punctuation">,</span> <span class="t-name">one</span>  <span class="t-keyword">then</span> <span class="t-name">level2</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>A group is a name for a list of Modules. It stands wherever a list of Modules
+stands, which is <code>needs</code> and <code>resident</code>. It means every Module it holds, each
+one once.</p>
+<p>Two blocks declare a group. A named <code>modules</code> block is a group of the Modules
+it declares. A <code>group</code> block lists names, never paths.</p>
+<p>A group may name another group to any depth. A group that reaches itself is an
+error.</p>
+<p>One name for both a Module and a group is an error. A group may not stand in a
+<code>transform</code> entry, which names one Module.</p>
+<p>A group that some list named and that holds no Module is a warning.</p>
+<h2 id="phase"><code>phase</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">phase</span> <span class="t-name">intro</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">intro</span><span class="t-punctuation">,</span> <span class="t-name">hud</span>   <span class="t-keyword">then</span> <span class="t-name">game</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">phase</span> <span class="t-name">game</span>  <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">game</span><span class="t-punctuation">,</span> <span class="t-name">hud</span>    <span class="t-keyword">then</span> <span class="t-name">boss</span><span class="t-punctuation">,</span> <span class="t-name">intro</span>  <span class="t-keyword">entry</span> <span class="t-name">gameStart</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p><code>needs</code> lists the Modules the Phase requires in memory. A name may be a group.</p>
+<p><code>then</code> lists the Phases a Transition may lead to.</p>
+<p>Both may repeat inside a block and sum. Two <code>phase</code> blocks with one name sum.</p>
+<p>A Module's Residency is the set of Phases whose <code>needs</code> name it. Its Sections
+inherit that Residency. Nothing else declares Residency.</p>
+<p>A Module that no Phase names is never in memory. That is a warning.</p>
+<p>A name in <code>needs</code> that is no Module is an error. A name in <code>then</code> that is no
+Phase is an error.</p>
+<p><code>entry NAME</code> names the Label the Phase starts at. Write <code>one.start</code> for a Label
+in a Namespace. Without <code>entry</code>, the tool looks for a Label named <code>entry</code>. The
+name must have exactly one definition among the Modules the Phase needs. It may
+be private. It must be a Label.</p>
+<p><code>without NAME</code> takes a Module out of the Phase that <code>resident</code> put in. It works
+only for a ROM the driver switches out, such as <code>osrom</code> on the 130XE:</p>
+<pre><code class="language-ngp"><span class="t-keyword">phase</span> <span class="t-name">deep</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">deep</span>  <span class="t-keyword">without</span> <span class="t-name">osrom</span><span class="t-punctuation">,</span> <span class="t-name">mathpack</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>While <code>deep</code> runs, the driver has the OS ROM switched out, and the RAM under it
+belongs to the Phase. Code in <code>deep</code> cannot call the OS, because the OS is not in
+the Phase. The program also has to look after the interrupt vectors at <code>$FFFA</code>,
+which are in that RAM now.</p>
+<p>The driver says which Modules it can switch out. Any other name after <code>without</code>
+is an error, and so is the entry Phase of a <code>.xex</code> doing without anything, since
+its DOS loads it with every ROM in.</p>
+<p><code>final</code> marks a Phase the program never leaves: it has no <code>then</code>, and its entry
+never returns.</p>
+<pre><code class="language-ngp"><span class="t-keyword">phase</span> <span class="t-name">game</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">game</span>  <span class="t-keyword">without</span> <span class="t-name">osrom</span><span class="t-punctuation">,</span> <span class="t-name">mathpack</span>  <span class="t-keyword">entry</span> <span class="t-name">gameStart</span>  <span class="t-keyword">final</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>The tool then keeps out of <code>game</code> what runs only when a program leaves a Phase
+or returns: the code that ends the program, and a driver that only switches
+ROMs. A game that loops in its last Phase gets that memory back. A <code>final</code>
+Phase with <code>then</code> is an error, and so is one whose entry may return.</p>
+<p>A Phase that no path from the entry reaches is a warning. An edge that no
+<code><a class="ref" href="../assembler/#transition">.transition</a></code> takes is also a warning.</p>
+<h2 id="resident"><code>resident</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">hud</span><span class="t-punctuation">,</span> <span class="t-name">music</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>Names the Modules present in every Phase. This includes Phases declared later
+and Phases in files included later.</p>
+<p>A name may be a group. A name that is neither a Module nor a group is an error.</p>
+<p>There is no way to name a subset of Phases other than listing them. A Phase can
+leave out of that only a ROM the driver switches, with <code>without</code>.</p>
+<h2 id="load"><code>load</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">load</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">osram</span><span class="t-punctuation">,</span> <span class="t-name">dos</span><span class="t-punctuation">,</span> <span class="t-name">fade</span>  <span class="t-keyword">init</span> <span class="t-name">fadeStart</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>Describes what happens while the DOS loads a <code>.xex</code>, before the program starts.</p>
+<p>A Module named in <code>needs</code> that holds only pinned Sections with no bytes says
+where the machine's memory is during the load: the OS's variables, the DOS's
+code and buffers. Nothing the file writes while it loads goes there: no Section
+with bytes, and none of the code the tool runs during the load. A buffer with
+no bytes may go there, because the DOS is done with the memory by the time the
+program writes the buffer. A Section you pin there with bytes, such as a write
+to <code>INITAD</code>, is allowed with a warning.</p>
+<p>Any other Module named in <code>needs</code> is code of your own that runs during the
+load. <code>init</code> names a Label in it, and the <code>.xex</code> calls that Label through
+<code>INITAD</code> before it writes anything else. Several <code>init</code>s are called in order.
+The tool places this code in memory that is free during the load and writes the
+rest of the file after it, so the rest may go over it once it has run. Such a
+Module belongs to no Phase.</p>
+<p>The library's <code>atari/800xl.ngp</code> already lists the OS's memory as <code>resident</code>,
+which covers the load too. A Project that drops it, to give a Phase without the
+OS that memory, names it in <code>load</code> instead.</p>
+<h2 id="entry"><code>entry</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">entry</span> <span class="t-name">intro</span>
+</code></pre>
+<p>Names the Phase the program starts in. Required when the document declares a
+<code>phase</code>. Give it at most once.</p>
+<h2 id="a-project-with-no-phase-block">A Project with no <code>phase</code> block</h2>
+<p>The Project has one Phase. It is unnamed and holds every Module. It needs no
+<code>entry</code>.</p>
+<h2 id="target"><code>target</code></h2>
+<p>The machine. Write this in a machine variant and include the variant, because
+the block states hardware truth. The tool ships variants in
+<a href="#the-library">the library</a>:</p>
+<pre><code class="language-ngp"><span class="t-comment">; An Atari 130XE: five Banks as a unit set — the four of extended memory and,</span>
+<span class="t-comment">; last, the machine&#x27;s own memory under the Window — the Window PORTB brings</span>
+<span class="t-comment">; one of them into, every Region of the address space, and the Modules a</span>
+<span class="t-comment">; program on this machine needs. It declares no storage. A program that loads</span>
+<span class="t-comment">; anything during a run includes `atari/extension.ngp` beside this, which makes</span>
+<span class="t-comment">; the Banks its storage. What PORTB takes to show a state is the</span>
+<span class="t-comment">; driver&#x27;s and not here, and the OS is two Modules rather than a Region because</span>
+<span class="t-comment">; it occupies memory for a while rather than being a truth about addresses: its</span>
+<span class="t-comment">; variables for the whole of a program, its ROM in every Phase that does not</span>
+<span class="t-comment">; say `without osrom` — see 0229. The same register switches the ROMs, so the</span>
+<span class="t-comment">; driver is what declares them.</span>
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">cpu</span> <span class="t-string">&quot;6502&quot;</span>
+
+  <span class="t-comment">; DOS loads a `.xex`, and a Project naming any other Container is refused</span>
+  <span class="t-comment">; here rather than at the writer.</span>
+  <span class="t-keyword">containers</span> <span class="t-name">xex</span>
+
+  <span class="t-comment">; No Window has a base, so the memory under this one is a Bank like the</span>
+  <span class="t-comment">; others and nothing of the program stands there but a Pane or storage — see</span>
+  <span class="t-comment">; docs/decisions/0229-no-window-has-a-base.md.</span>
+  <span class="t-keyword">units</span>  <span class="t-name">extension</span> <span class="t-number">5</span>
+  <span class="t-keyword">window</span> <span class="t-name">ext</span>  <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-keyword">views</span> <span class="t-name">extension</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">region</span> <span class="t-keyword">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-keyword">ram</span>
+  <span class="t-keyword">region</span>        <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-keyword">ram</span>
+  <span class="t-keyword">region</span> <span class="t-name">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword">region</span> <span class="t-name">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword">register</span>
+  <span class="t-comment">; The RAM the OS ROM covers, named so that a Section may say `in underOsLow`</span>
+  <span class="t-comment">; and stand there: only in a Phase without `osrom`, or hidden under it where</span>
+  <span class="t-comment">; nothing needs it — see docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.</span>
+  <span class="t-keyword">region</span> <span class="t-name">underOsLow</span>   <span class="t-number">$C000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-keyword">ram</span>
+  <span class="t-keyword">region</span> <span class="t-name">underOsHigh</span>  <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-keyword">ram</span>
+
+  <span class="t-comment">; This machine takes a `.xex` and nothing else, and a `.xex` is loaded by a</span>
+  <span class="t-comment">; DOS, which stays where a DOS of the 2.x family stays. A Project whose DOS</span>
+  <span class="t-comment">; takes more says so with a `reserved` Region of its own, which narrows this</span>
+  <span class="t-comment">; one further.</span>
+  <span class="t-keyword">region</span> <span class="t-name">dos</span>    <span class="t-number">$0700</span> <span class="t-punctuation">..</span> <span class="t-number">$1FFF</span>  <span class="t-keyword">reserved</span>
+
+  <span class="t-comment">; What the driver writes. A Project that wants more of the hardware by name</span>
+  <span class="t-comment">; declares it, as it declares the memory its DOS holds.</span>
+  <span class="t-keyword">register</span> <span class="t-name">PORTB</span>  <span class="t-number">$D301</span>
+
+  <span class="t-comment">; The hardware that holds a Section while a program has handed it one, by</span>
+  <span class="t-comment">; `.root NAME` before the taking of its address, until it hands another or</span>
+  <span class="t-comment">; `.release NAME`: what it holds stays where it is for that long. See</span>
+  <span class="t-comment">; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.</span>
+  <span class="t-keyword">holder</span> <span class="t-name">dlist</span>                          <span class="t-comment">; ANTIC&#x27;s display list: SDLSTL, or DLISTL</span>
+  <span class="t-keyword">holder</span> <span class="t-name">dli</span>                            <span class="t-comment">; the display list interrupt: VDSLST</span>
+  <span class="t-keyword">holder</span> <span class="t-name">vbi</span>                            <span class="t-comment">; the immediate vertical blank: VVBLKI</span>
+  <span class="t-keyword">holder</span> <span class="t-name">vbd</span>                            <span class="t-comment">; the deferred vertical blank: VVBLKD</span>
+  <span class="t-keyword">holder</span> <span class="t-name">nmi</span>                            <span class="t-comment">; $FFFA, where the OS ROM is switched out</span>
+  <span class="t-keyword">holder</span> <span class="t-name">irq</span>                            <span class="t-comment">; $FFFE, where the OS ROM is switched out</span>
+  <span class="t-keyword">holder</span> <span class="t-name">chbase</span>                         <span class="t-comment">; the character set: CHBAS, or CHBASE</span>
+  <span class="t-keyword">holder</span> <span class="t-name">pmbase</span>                         <span class="t-comment">; the player-missile memory: PMBASE</span>
+  <span class="t-keyword">holder</span> <span class="t-name">dosini</span>                         <span class="t-comment">; DOSINI: called once a boot returns, and on every reset</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The OS and the driver, listed as a file of the Project&#x27;s own would be. The</span>
+<span class="t-comment">; driver is here and not beside the storage because it does more than read it:</span>
+<span class="t-comment">; it shows a Pane&#x27;s Bank and switches the ROMs, with or without storage. BASIC</span>
+<span class="t-comment">; is not listed: a program that wants it lists `atari/basic.asm` and names it</span>
+<span class="t-comment">; in a Phase&#x27;s `needs`, and the driver switches it out everywhere else.</span>
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span>
+  <span class="t-string">&quot;atari/osram.asm&quot;</span>  <span class="t-string">&quot;atari/osrom.asm&quot;</span>  <span class="t-string">&quot;atari/mathpack.asm&quot;</span>
+  <span class="t-string">&quot;atari/charsets.asm&quot;</span>  <span class="t-string">&quot;atari/portb.asm&quot;</span>
+<span class="t-punctuation">}</span>
+<span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">osram</span><span class="t-punctuation">,</span> <span class="t-name">osrom</span><span class="t-punctuation">,</span> <span class="t-name">mathpack</span><span class="t-punctuation">,</span> <span class="t-name">charsets</span><span class="t-punctuation">,</span> <span class="t-name">portb</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>A Project adds its own <code>target</code> block for what the variant cannot know. A DOS
+that takes more low memory than the variant leaves it is one line:</p>
+<pre><code class="language-ngp"><span class="t-keyword">target</span> <span class="t-punctuation">{</span> <span class="t-keyword">region</span> <span class="t-number">$0700</span> <span class="t-punctuation">..</span> <span class="t-number">$2FFF</span> <span class="t-keyword">reserved</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>Blocks sum, so this narrows the variant's Regions rather than replacing them.
+The Region has no name, because the variant already names <code>dos</code> and one name
+names one Region.</p>
+<h3 id="region"><code>region</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">region</span> <span class="t-keyword">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-keyword">ram</span>
+<span class="t-keyword">region</span> <span class="t-name">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+<span class="t-keyword">region</span> <span class="t-name">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword">register</span>
+</code></pre>
+<p>A range with one property. Both ends are inclusive. The name is optional.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ram</code></td>
+<td>the solver allocates here</td>
+</tr>
+<tr>
+<td><code>rom</code></td>
+<td>the solver allocates here only what no code writes, such as a cartridge's fixed part. See <a href="../cartridges/">Cartridges</a>.</td>
+</tr>
+<tr>
+<td><code>reserved</code></td>
+<td>the solver does not allocate here. A pin here is a warning.</td>
+</tr>
+<tr>
+<td><code>register</code></td>
+<td>nothing may stand here. A pin here is an error.</td>
+</tr>
+</tbody>
+</table>
+<p>Where two Regions overlap, the more restrictive property wins. A Project can
+narrow the variant's memory. A Project cannot turn a register into RAM.</p>
+<p>A named Region gives every Module a Symbol of kind <code>Region</code>. Its value is the
+start address. A Module that defines the same name is an error.</p>
+<p>A Region must run from a lower address to a higher one. One name names one
+Region.</p>
+<p>With no <code>region</code> and no <code>register</code> anywhere, the Target keeps two stand-in <code>ram</code>
+Regions, <code>$0080-$008F</code> and <code>$2000-$9FFF</code>. The first Region you declare replaces
+the stand-in.</p>
+<h3 id="register"><code>register</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">register</span> <span class="t-name">COLBK</span>  <span class="t-number">$D01A</span>
+<span class="t-keyword">register</span> <span class="t-name">AUDF1</span>  <span class="t-number">$D200</span><span class="t-punctuation">,</span> <span class="t-number">2</span>
+</code></pre>
+<p>A named <code>register</code> Region of one byte, or of the width after the comma. The
+width is 1 or 2.</p>
+<h3 id="units"><code>units</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">units</span> <span class="t-name">extension</span> <span class="t-number">5</span>
+</code></pre>
+<p>Declares a unit set of N Banks. N is between 1 and 65536, because a unit's number
+is two bytes at most.</p>
+<p>The name gives every Module a Symbol whose value is the count.</p>
+<p>The block says how many Banks there are and nothing else. What the hardware
+calls each one belongs to the driver.</p>
+<pre><code class="language-ngp"><span class="t-keyword">units</span> <span class="t-name">sdram</span> <span class="t-number">2047</span>  <span class="t-keyword">linear</span> <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$1FFFFFF</span>
+</code></pre>
+<p><code>linear BEGIN .. END</code> says where the Banks lie in the memory another master,
+such as a blitter, reads as one range. Bank 0 starts at <code>BEGIN</code>, each next Bank
+starts a Window's size further on, and the last must end by <code>END</code>. Both ends are
+inclusive. This is MariaCEL's, whose blocks are 16 KB.</p>
+<p>A Section in a Pane of such a set then has a linear address, read with
+<a href="../assembler/#attribute-access"><code>linearSectionAddress</code></a>, and a Section may
+stand <a href="../assembler/#in-name"><code>in</code></a> the set itself, across its Banks.</p>
+<h3 id="window"><code>window</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">window</span> <span class="t-name">ext</span>     <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-keyword">views</span> <span class="t-name">extension</span>
+<span class="t-keyword">window</span> <span class="t-name">cel4000</span> <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-keyword">views</span> <span class="t-name">main</span><span class="t-punctuation">,</span> <span class="t-name">sprlist</span><span class="t-punctuation">,</span> <span class="t-name">textab</span><span class="t-punctuation">,</span> <span class="t-name">derived</span><span class="t-punctuation">,</span> <span class="t-name">stripmap</span><span class="t-punctuation">,</span> <span class="t-name">strip</span>
+</code></pre>
+<p>The first is the 130XE's, and the second MariaCEL's, whose states are the
+blitter's blocks.</p>
+<p>Declares a Window: the ranges the hardware switches together, and the states it
+can show.</p>
+<p>Each name after <code>views</code> is a unit set of the target, or a named state of the
+hardware. A unit set contributes one state per Bank. List each name once.</p>
+<p>No state is held when nothing has switched: what a Window shows outside a
+<code><a class="ref" href="../assembler/#with">.with</a></code> is undefined. So a Window's ranges are in no pool, and only a Pane's
+Sections and storage stand there. <code>base</code>, which once named such a state, is an
+error (<code><a class="ref" href="../diagnostics/#nga1242">NGA1242</a></code>).</p>
+<p>The tool numbers the states from zero in the order written, and a set's Banks in
+their own order. The driver receives a state by that number.</p>
+<p>A Window names no register. Showing a state is the driver's work, and a driver
+shows every Window the target declares.</p>
+<p>Region names, unit set names and Window names share one name space.</p>
+<h3 id="cpu"><code>cpu</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">cpu</span> <span class="t-string">&quot;65sc02&quot;</span>
+</code></pre>
+<p>The processor the machine has. Write <code>&quot;6502&quot;</code> or <code>&quot;65sc02&quot;</code>. A Target that says
+nothing is a 6502. You quote the name because it starts with a digit.</p>
+<p><code>&quot;65sc02&quot;</code> adds the <code>(zp)</code> addressing modes, <code>stz</code>, <code>trb</code>, <code>tsb</code>, <code>inc</code> and <code>dec</code> of <code>A</code>,
+<code>phx</code>, <code>phy</code>, <code>plx</code>, <code>ply</code>, <code>bit</code> immediate and indexed, <code>bra</code>, and
+<code>jmp (abs,x)</code>.</p>
+<p>It does not add the Rockwell bit instructions, <code>wai</code> or <code>stp</code>. The 65SC02 does
+not have them either.</p>
+<p>An instruction the Target's processor lacks is an error. The message names the
+instruction, the processor it needs, and the processor the Target is. See
+<a href="../instructions/">Instructions</a>.</p>
+<h3 id="containers"><code>containers</code></h3>
+<pre><code class="language-ngp"><span class="t-keyword">containers</span> <span class="t-name">xex</span><span class="t-punctuation">,</span> <span class="t-name">atr</span>
+</code></pre>
+<p>What the machine takes. Write this in a variant. A Project that names a
+Container the Target does not offer is an error.</p>
+<p>Where no Target says anything, the Project's word stands.</p>
+<h2 id="storage"><code>storage</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">storage</span> <span class="t-punctuation">{</span> <span class="t-keyword">units</span> <span class="t-name">extension</span> <span class="t-punctuation">}</span>          <span class="t-comment">; the Banks of a unit set</span>
+<span class="t-keyword">storage</span> <span class="t-punctuation">{</span> <span class="t-keyword">units</span> <span class="t-number">720</span>  <span class="t-keyword">size</span> <span class="t-number">128</span> <span class="t-punctuation">}</span>      <span class="t-comment">; units by number, such as a disk</span>
+</code></pre>
+<p>What a Transition loads from.</p>
+<p><code>units NAME</code> takes the Banks of the unit set the target declares under that
+name. The size of one unit is the size of the Window that shows the set. Do not
+write <code>size</code> beside it.</p>
+<p><code>units N</code> declares N units known by their numbers, and needs one <code>size</code>. The
+size is between one byte and the address space.</p>
+<p>Declare units once. A storage holds at most 65536 units, because a unit's number
+is at most two bytes.</p>
+<p>Storage is one space of <code>units × size</code> bytes. Every Section a Transition loads
+has a Payload packed into it. An image may run from one unit into the next. A
+Payload with no room left is an error.</p>
+<p>With no <code>storage</code> block there is no storage. Then nothing waits anywhere: a
+Section with bytes is written when the program loads and stays in memory for as
+long as a Phase still to come needs it, and a Transition loads nothing.</p>
+<p>So a Phase may read and write the bytes of a Phase it leads to, such as a boot
+Phase patching the game's code before it enters the game. It may not call that
+code: the code would run in a Phase where what it uses is not there. A routine
+the boot Phase calls belongs in a Module the boot Phase needs.</p>
+<p>A machine variant declares no storage. A library file beside it does, such as
+<code>atari/disk.ngp</code> for an 800XL's diskette or <code>atari/extension.ngp</code> for a
+130XE's Banks, and a Project includes it when something waits there.</p>
+<h2 id="panes"><code>panes</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">panes</span> <span class="t-keyword">in</span> <span class="t-name">ext</span>               <span class="t-punctuation">{</span> <span class="t-name">level</span><span class="t-punctuation">,</span> <span class="t-name">tables</span><span class="t-punctuation">[</span><span class="t-number">8</span><span class="t-punctuation">]</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">panes</span> <span class="t-keyword">in</span> <span class="t-name">cel4000</span> <span class="t-punctuation">=</span> <span class="t-name">sprlist</span> <span class="t-punctuation">{</span> <span class="t-name">sprlist</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>A Pane is a named set of Sections that one switch shows together. See
+<a href="../panes/">Panes</a>. The block names the Window its Panes are in.</p>
+<p>The solver gives each Pane one state of the Window for the whole run. It picks a
+Bank of the unit set the Window shows.</p>
+<p>Write <code>= STATE</code> in the header to pin the Panes to a named state. The solver then
+has no say. A Window that shows no unit set holds only pinned Panes.</p>
+<p><code>NAME[N]</code> declares a family: N Panes of one layout on consecutive Banks. N is
+between 1 and 255. Every Section in the family stands in each member at one
+address. A pinned Pane is one state, so it cannot be a family.</p>
+<p>A Pane whose Sections come to more than a Bank holds is an error. So is a family
+wider than its set.</p>
+<p>A Pane's name gives every Module a Symbol of kind <code>Pane</code>. Its value is the index
+of the state the solver gave it.</p>
+<h2 id="transform"><code>transform</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">transform</span> <span class="t-name">rle</span> <span class="t-punctuation">{</span> <span class="t-name">music</span><span class="t-punctuation">.</span><span class="t-name">notes</span><span class="t-punctuation">,</span> <span class="t-name">levels</span><span class="t-punctuation">.</span><span class="t-name">tiles</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>Names the Sections whose Payload the tool decodes on the way in. The tool
+copies a Section that appears in no <code>transform</code> block.</p>
+<p>The unit is the Section, not the Module. A Section has no name of its own, so
+name it by a Label of it: <code>module.label</code>, or <code>module.space.label</code> for a Label in
+a Namespace. Any Label of the Section names it.</p>
+<p>The tool finds the Label whether you exported it or not.</p>
+<p>The transform must be a format the tool encodes, and some Module must declare a
+decoder for it with <code>.transform</code>. That Module must have a Label of that name.</p>
+<p>A group may not stand here. A Section that no Transition loads has nothing to
+transform, which is a warning.</p>
+<h2 id="container"><code>container</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">container</span> <span class="t-name">xex</span>
+</code></pre>
+<p>What the tool builds the program into.</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raw</code></td>
+<td>the raw image. This is the default.</td>
+</tr>
+<tr>
+<td><code>xex</code></td>
+<td>an Atari DOS binary</td>
+</tr>
+<tr>
+<td><code>atr</code></td>
+<td>a bootable double-density Atari diskette</td>
+</tr>
+<tr>
+<td><code>car</code></td>
+<td>an Atari cartridge image. See <a href="../cartridges/">Cartridges</a>.</td>
+</tr>
+<tr>
+<td><code>bs93</code></td>
+<td>a Lynx program an emulator copies into memory and enters</td>
+</tr>
+<tr>
+<td><code>lnx</code></td>
+<td>a Lynx cartridge, with the header a reader shows</td>
+</tr>
+<tr>
+<td><code>lyx</code></td>
+<td>a Lynx cartridge without the header</td>
+</tr>
+<tr>
+<td><code>prg</code></td>
+<td>a Commodore PET program, started by a line of BASIC</td>
+</tr>
+<tr>
+<td><code>d64</code></td>
+<td>a <code>prg</code> on a 1541 or 4040 diskette</td>
+</tr>
+<tr>
+<td><code>d80</code></td>
+<td>a <code>prg</code> on an 8050 diskette</td>
+</tr>
+<tr>
+<td><code>d82</code></td>
+<td>a <code>prg</code> on an 8250 diskette</td>
+</tr>
+</tbody>
+</table>
+<p>Give it at most once. A Container constrains Place, so it belongs here. The <code>-o</code>
+option names a path and chooses nothing.</p>
+<p>A cartridge names its board after the Container, quoted:</p>
+<pre><code class="language-ngp"><span class="t-keyword">container</span> <span class="t-name">car</span> <span class="t-string">&quot;xegs128&quot;</span>
+<span class="t-keyword">container</span> <span class="t-name">lnx</span> <span class="t-string">&quot;64k&quot;</span>
+</code></pre>
+<p><code>car</code> takes <code>8k</code>, <code>16k</code>, or one of <code>xegs32</code>, <code>xegs64</code> and so on up to
+<code>xegs1024</code>. <code>lnx</code> and <code>lyx</code> take <code>64k</code>, <code>128k</code>, <code>256k</code> or <code>512k</code>, the board's
+size, which sets its page size. A board is required there, and every other
+Container takes none. The tool checks the board against the machine's Regions
+and Windows.</p>
+<p>A <code>.xex</code> can be compressed:</p>
+<pre><code class="language-ngp"><span class="t-keyword">container</span> <span class="t-name">xex</span> <span class="t-keyword">compress</span> <span class="t-name">zx0</span>
+</code></pre>
+<p>Each segment of the file that gets smaller is stored in that format. While the
+file loads, the tool's decoder unpacks it at the addresses it belongs at. A
+segment that does not get smaller is stored as it is. Once the file has loaded,
+memory holds what it would without compression, so the program needs no
+changes. The format may be <code>zx0</code> or <code>rle</code>. Only a <code>.xex</code> takes <code>compress</code>.</p>
+<p>To keep some Modules uncompressed, list them, or their groups, after <code>except</code>:</p>
+<pre><code class="language-ngp"><span class="t-keyword">container</span> <span class="t-name">xex</span> <span class="t-keyword">compress</span> <span class="t-name">zx0</span> <span class="t-keyword">except</span> <span class="t-punctuation">{</span> <span class="t-name">loadingPic</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>They are stored as they are and arrive when they would without compression. A
+loading screen is the usual case, since it has to appear at once.</p>
+<p>The file is smaller, but the loader has to wait for the decoder. On a slow
+drive the load is faster overall, and on a fast device it can be slower.</p>
+<h2 id="cartridge"><code>cartridge</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">cartridge</span> <span class="t-punctuation">{</span>
+  <span class="t-name">name</span>         <span class="t-string">&quot;A Lynx of Two Masters&quot;</span>
+  <span class="t-name">manufacturer</span> <span class="t-string">&quot;NGA&quot;</span>
+  <span class="t-name">rotation</span>     <span class="t-name">none</span>
+<span class="t-punctuation">}</span>
+</code></pre>
+<p>What a reader shows about a <code>.lnx</code>: the three fields of its header. <code>name</code> holds
+at most 31 bytes and <code>manufacturer</code> at most 15. A longer one is an error and is
+not cut. <code>rotation</code> is how the machine is held: <code>none</code>, <code>left</code> or <code>right</code>.</p>
+<p>Give each field at most once. Without the block both strings are empty and the
+rotation is <code>none</code>. The block with any other Container is an error, <code>lyx</code>
+included, because that image has no header.</p>
+<h2 id="frames"><code>frames</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">frames</span> <span class="t-keyword">held</span>
+</code></pre>
+<p>Makes the Transition routine read an edge's list of what to load in one pass,
+before the first image arrives. Without it, the routine goes back to the Frame
+between one image and the next, and the driver opens it again each time.</p>
+<p>It costs some 130 bytes of the routine and two bytes of zero page, in every
+Phase. It pays where opening is slow, such as a Lynx's cartridge or a diskette,
+and saves nothing where opening is a Window being switched. On a Lynx, an edge
+of forty images took 54 frames without it and 15 with it.</p>
+<p>The list is kept in the memory of the edge's largest image, which then loads
+last, so it costs no memory of its own. Write it at most once. In a Project
+with an edge and no storage there is no Frame, and the line is an error.</p>
+<h2 id="optimize"><code>optimize</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">optimize</span> <span class="t-name">speed</span>
+</code></pre>
+<p>What to prefer where one choice costs speed against size. Write <code>speed</code>, <code>size</code>
+or <code>fit</code>. A document that says nothing gets <code>fit</code>.</p>
+<p><code>fit</code> takes as much speed as the tool can promise to give back. It leaves any
+choice it cannot undo.</p>
+<p>An Intent fills a silence and overrides nothing. The tool wraps a function
+written <code>inline</code> under every Intent.</p>
+<h2 id="constants"><code>constants</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">constants</span> <span class="t-punctuation">{</span>
+  <span class="t-name">CART</span>   <span class="t-punctuation">=</span> <span class="t-number">1</span>
+  <span class="t-name">LEVELS</span> <span class="t-punctuation">=</span> <span class="t-number">8</span>
+<span class="t-punctuation">}</span>
+</code></pre>
+<p>A name the Project gives a value. Every Module sees it. The assembler reads one
+in <code>.if</code>, a macro argument takes one, and C reads one through an <code>extern const</code>.</p>
+<p>The value is a literal. It is not an expression. Do arithmetic in the source, where the tool reads
+the value. A <code>-</code> written right after the <code>=</code> is the literal's sign, so <code>SHIFT = -1</code> and
+<code>DEPTH = -$10</code> are values. C reads a negative one through an <code>extern const i8</code>.</p>
+<p>Giving one name a value twice is an error. A Module that declares a name the
+Project declared is an error.</p>
+<h2 id="choose"><code>choose</code></h2>
+<pre><code class="language-ngp"><span class="t-name">choose</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;vbxe-d640.ngp&quot;</span> <span class="t-string">&quot;vbxe-d740.ngp&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">include</span> <span class="t-string">&quot;game.ngp&quot;</span>
+</code></pre>
+<p>Builds one <code>.xex</code> that can be any of the documents it names, and the program
+picks one while the file loads. Use it when one piece of hardware can sit at
+more than one address: a VBXE at <code>$D640</code> or at <code>$D740</code>, for example.</p>
+<p>Each document holds values and nothing else: <code>register</code> lines in a <code>target</code>
+block, and a <code>constants</code> block. Every document declares the same names. The
+tool builds the program as the first document says and places it once. It then
+builds it again with the values of each other document and notes every byte
+that comes out different.</p>
+<p>An <code>init</code> of the <a href="#load"><code>load</code></a> block finds out which document the machine
+needs and writes its number into <code>ngaChoice</code>: 0 for the first, 1 for the
+second. While the rest of the file loads, the tool's own code changes every
+noted byte to the value of that document, before anything runs it. Code that
+the first <code>init</code> runs is not changed, so it reads the places it checks by their
+numbers. Code of a later <code>init</code> is changed before it runs.</p>
+<p>A document may change bytes only. A <code>.if</code> that takes branches of different
+lengths in two documents is an error. So is a register of a later document
+standing where the program could place a section. Only a <code>.xex</code> without
+storage can be changed this way.</p>
+<h2 id="diagnostics"><code>diagnostics</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">diagnostics</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">deny</span>  <span class="t-name"><a class="ref" href="../diagnostics/#nga4501">NGA4501</a></span>
+  <span class="t-keyword">allow</span> <span class="t-name"><a class="ref" href="../diagnostics/#nga4606">NGA4606</a></span>
+  <span class="t-keyword">off</span>   <span class="t-name"><a class="ref" href="../diagnostics/#nga0113">NGA0113</a></span>
+<span class="t-punctuation">}</span>
+</code></pre>
+<p><code>deny</code> raises a finding to an error. <code>allow</code> lowers it to a warning. <code>off</code>
+suppresses it.</p>
+<p>An identifier that names no diagnostic is an error.</p>
+<p>Setting one identifier twice is an error. The message names both places.</p>
+<p>The block takes effect after the tool has read the Project, with every file it
+includes and every Module a generator wrote. It cannot change how the tool
+reports a finding raised while reading them, and a generator's warning is one of
+those. Where the block stands in the file makes no difference. It never
+overrides the command line: <code>--deny</code>, <code>--allow</code> and <code>--off</code> reach every finding.</p>
+<h2 id="include"><code>include</code></h2>
+<pre><code class="language-ngp"><span class="t-keyword">include</span> <span class="t-string">&quot;targets/atari-assets.ngp&quot;</span>
+</code></pre>
+<p>Names another Project file. Its content becomes part of this Project.</p>
+<p>The tool resolves the path as it resolves a Module path. See
+<a href="#the-library">the library</a>.</p>
+<p>The tool reads each file once. A second <code>include</code> of a file it has already read
+adds nothing, so two files can both include a third that they share. The tool
+knows a file by the path it resolves to, not by how the <code>include</code> spelled it.
+This is safe because a file means the same wherever it is included: blocks sum
+and their order does not matter, and the paths inside a file are resolved
+against that file. A cycle is still an error.</p>
+<p>Inclusion takes a whole document. An included <code>.ngp</code> is a <code>.ngp</code> that could
+stand alone. Blocks sum, so an included file that carries its own
+<code>modules { ... }</code> composes with the file that included it.</p>
+<p>There is no glob.</p>
+<h2 id="the-library">The library</h2>
+<p>The tool ships some files as source instead of compiling them in. They are a
+storage driver per mechanism, a decoder per format, a machine's OS, a machine
+variant that names them, and the storage that goes beside a variant. They live in <code>lib/</code>.</p>
+<p>Name a library file in <code>modules</code> or <code>include</code> as you name a file of your own.
+The tool looks beside the document first and in the library second. A file of
+your own under the same name therefore wins.</p>
+<p>The tool finds the library in three ways, in this order:</p>
+<ol>
+<li>The directory <code>--lib</code> names.</li>
+<li><code>lib/</code> beside the executable, which is how a release archive carries it.</li>
+<li>The source tree the tool came from.</li>
+</ol>
+
+<footer>NGA unknown, composed from b4b11472 of 2026-10-25</footer>
+</main>
+</body>
+</html>
