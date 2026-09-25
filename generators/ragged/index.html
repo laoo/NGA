@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ragged — Generators</title>
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../../assembler/#charset"},{"n":".declare","u":"../../assembler/#declare"},{"n":".dispatch","u":"../../assembler/#dispatch"},{"n":".endp then NAME","u":"../../assembler/#endp-then-name"},{"n":".export","u":"../../assembler/#export"},{"n":".macro","u":"../../assembler/#macro"},{"n":".off","u":"../../assembler/#off"},{"n":".proc","u":"../../assembler/#proc"},{"n":".section","u":"../../assembler/#section"},{"n":".source","u":"../../assembler/#source"},{"n":".transition","u":"../../assembler/#transition"},{"n":".with","u":"../../assembler/#with"},{"n":"WINDOW = STATE","u":"../../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../../c-dialect/#placement"},{"n":"[[striped]]","u":"../../c-dialect/#striped"},{"n":"auto","u":"../../c-dialect/#auto"},{"n":"constants","u":"../../project-file/#constants"},{"n":"container","u":"../../project-file/#container"},{"n":"containers","u":"../../project-file/#containers"},{"n":"cpu","u":"../../project-file/#cpu"},{"n":"diagnostics","u":"../../project-file/#diagnostics"},{"n":"entry","u":"../../project-file/#entry"},{"n":"group","u":"../../project-file/#group"},{"n":"in NAME","u":"../../assembler/#in-name"},{"n":"include","u":"../../project-file/#include"},{"n":"modules","u":"../../project-file/#modules"},{"n":"movable","u":"../../assembler/#movable"},{"n":"optimize","u":"../../project-file/#optimize"},{"n":"panes","u":"../../project-file/#panes"},{"n":"phase","u":"../../project-file/#phase"},{"n":"region","u":"../../project-file/#region"},{"n":"register","u":"../../project-file/#register"},{"n":"resident","u":"../../project-file/#resident"},{"n":"root","u":"../../assembler/#root"},{"n":"storage","u":"../../project-file/#storage"},{"n":"target","u":"../../project-file/#target"},{"n":"temporary","u":"../../assembler/#temporary"},{"n":"transform","u":"../../project-file/#transform"},{"n":"units","u":"../../project-file/#units"},{"n":"window","u":"../../project-file/#window"},{"n":"The Project and Modules","u":"../../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../../temporaries-and-liveness/"},{"n":"Targets","u":"../../targets/"},{"n":"Phases","u":"../../phases/"},{"n":"Banks and Windows","u":"../../banks-and-windows/"},{"n":"Panes","u":"../../panes/"},{"n":"Slots","u":"../../slots/"},{"n":"Generators","u":"../../generators/"},{"n":"Macros","u":"../../macros/"},{"n":"Conditionals and packs","u":"../../conditionals/"},{"n":"Character sets","u":"../../character-sets/"},{"n":"Instructions","u":"../../instructions/"},{"n":"Roots","u":"../../roots/"},{"n":"Cartridges","u":"../../cartridges/"},{"n":"The Project file","u":"../../project-file/"},{"n":"The assembler","u":"../../assembler/"},{"n":"The C dialect","u":"../../c-dialect/"},{"n":"Diagnostics","u":"../../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../../targets/">Targets</a>
+</li>
+<li><a href="../../phases/">Phases</a>
+</li>
+<li><a href="../../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../../panes/">Panes</a>
+</li>
+<li><a href="../../slots/">Slots</a>
+</li>
+<li class="here"><a href="../../generators/">Generators</a>
+<ul class="programs"><li><a href="../../generators/from-a-file/">from-a-file</a></li><li><a href="../../generators/from-a-script/">from-a-script</a></li><li><a href="../../generators/ragged/">ragged</a></li></ul>
+</li>
+<li><a href="../../macros/">Macros</a>
+</li>
+<li><a href="../../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../../character-sets/">Character sets</a>
+</li>
+<li><a href="../../instructions/">Instructions</a>
+</li>
+<li><a href="../../roots/">Roots</a>
+</li>
+<li><a href="../../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../../project-file/">The Project file</a>
+</li>
+<li><a href="../../assembler/">The assembler</a>
+</li>
+<li><a href="../../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1>ragged</h1>
+<p class="aside">A program of <a href="../../generators/">Generators</a>.</p>
+<div class="findings">
+<p class="label">This program is not meant to build. What the tool says is the lesson.</p>
+<p class="f-error"><b>NGA1212</b> maps: maps/level1.map is 110 characters, which is no whole number of rows of 37 <span class="at">/Users/waldek/Desktop/NGA/tutorial/08-generators/ragged/main.ngp:4</span></p>
+</div>
+<h2 class="file">main.ngp</h2>
+<pre><code class="language-project"><span class="t-keyword">include</span> <span class="t-string">&quot;atari/130xe.ngp&quot;</span>
+
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;print.asm&quot;</span> <span class="t-string">&quot;run.asm&quot;</span> <span class="t-string">&quot;shared.asm&quot;</span> <span class="t-string">&quot;intro.asm&quot;</span> <span class="t-string">&quot;level.asm&quot;</span>
+  <span class="t-name">script</span><span class="t-punctuation">(</span> <span class="t-string">&quot;tools/rows.js&quot;</span><span class="t-punctuation">,</span> <span class="t-name">map</span> <span class="t-punctuation">=</span> <span class="t-string">&quot;maps/level1.map&quot;</span><span class="t-punctuation">,</span> <span class="t-name">width</span> <span class="t-punctuation">=</span> <span class="t-number">37</span><span class="t-punctuation">,</span> <span class="t-keyword">in</span> <span class="t-punctuation">=</span> <span class="t-name">level</span> <span class="t-punctuation">)</span> <span class="t-keyword">as</span> <span class="t-name">maps</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">panes</span> <span class="t-keyword">in</span> <span class="t-name">ext</span> <span class="t-punctuation">{</span> <span class="t-name">level</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">print</span><span class="t-punctuation">,</span> <span class="t-name">run</span><span class="t-punctuation">,</span> <span class="t-name">shared</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">phase</span> <span class="t-name">intro</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">intro</span>  <span class="t-keyword">then</span> <span class="t-name">level</span>  <span class="t-keyword">entry</span> <span class="t-name">introStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">phase</span> <span class="t-name">level</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">level</span><span class="t-punctuation">,</span> <span class="t-name">maps</span>  <span class="t-keyword">entry</span> <span class="t-name">levelStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">entry</span> <span class="t-name">intro</span>
+
+<span class="t-keyword">container</span> <span class="t-name">xex</span>
+</code></pre>
+<details class="aside-file"><summary>130xe.ngp<span> project</span></summary><pre><code class="language-project"><span class="t-comment">; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings</span>
+<span class="t-comment">; one of them into, the Window over the OS ROM, every Region of the address</span>
+<span class="t-comment">; space, and the Modules a program on this machine needs. What PORTB takes to</span>
+<span class="t-comment">; show a state is the driver&#x27;s and not here, and the OS is a Module rather than</span>
+<span class="t-comment">; a Region because it occupies memory for a while rather than being a truth</span>
+<span class="t-comment">; about addresses.</span>
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">cpu</span> <span class="t-string">&quot;6502&quot;</span>
+
+  <span class="t-comment">; DOS loads a `.xex`, and a Project naming any other Container is refused</span>
+  <span class="t-comment">; here rather than at the writer.</span>
+  <span class="t-keyword">containers</span> <span class="t-name">xex</span>
+
+  <span class="t-keyword">units</span>  <span class="t-name">extension</span> <span class="t-number">4</span>
+  <span class="t-name">window</span> <span class="t-name">ext</span>  <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-keyword">views</span> <span class="t-name">main</span><span class="t-punctuation">,</span> <span class="t-name">extension</span>  <span class="t-keyword">base</span> <span class="t-name">main</span>
+  <span class="t-name">window</span> <span class="t-name">os</span>   <span class="t-number">$C000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span><span class="t-punctuation">,</span> <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-keyword">views</span> <span class="t-name">rom</span><span class="t-punctuation">,</span> <span class="t-name">ram</span>  <span class="t-keyword">base</span> <span class="t-name">rom</span>
+<span class="t-punctuation">}</span>
+<span class="t-keyword">storage</span> <span class="t-punctuation">{</span> <span class="t-keyword">units</span> <span class="t-name">extension</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">region</span> <span class="t-name">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword">region</span>        <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword">region</span> <span class="t-name">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword">region</span> <span class="t-name">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword">register</span>
+
+  <span class="t-comment">; This machine takes a `.xex` and nothing else, and a `.xex` is loaded by a</span>
+  <span class="t-comment">; DOS, which stays where a DOS of the 2.x family stays. A Project whose DOS</span>
+  <span class="t-comment">; takes more says so with a `reserved` Region of its own, which narrows this</span>
+  <span class="t-comment">; one further.</span>
+  <span class="t-keyword">region</span> <span class="t-name">dos</span>    <span class="t-number">$0700</span> <span class="t-punctuation">..</span> <span class="t-number">$1FFF</span>  <span class="t-keyword">reserved</span>
+
+  <span class="t-comment">; What the driver writes. A Project that wants more of the hardware by name</span>
+  <span class="t-comment">; declares it, as it declares the memory its DOS holds.</span>
+  <span class="t-keyword">register</span> <span class="t-name">PORTB</span>  <span class="t-number">$D301</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The OS, the driver for this storage and the decoders the tool ships, listed</span>
+<span class="t-comment">; as a file of the Project&#x27;s own would be. Every Transition calls the driver</span>
+<span class="t-comment">; and the decoders, so they are resident; a decoder nothing uses is dropped.</span>
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;atari/os.asm&quot;</span>  <span class="t-string">&quot;atari/charsets.asm&quot;</span>  <span class="t-string">&quot;atari/portb.asm&quot;</span>  <span class="t-string">&quot;stream/zx0.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">os</span><span class="t-punctuation">,</span> <span class="t-name">charsets</span><span class="t-punctuation">,</span> <span class="t-name">portb</span><span class="t-punctuation">,</span> <span class="t-name">zx0</span> <span class="t-punctuation">}</span>
+</code></pre></details>
+<details class="aside-file"><summary>os.asm<span> os</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Atari OS as a Module: what it occupies while it is in memory, and the</span>
+<span class="t-comment">; names a program reaches it by. Sections that hold no bytes, pinned where</span>
+<span class="t-comment">; the OS lives, so the solver sees memory that is taken rather than a Region</span>
+<span class="t-comment">; it may never allocate from — which is what lets a Phase that switches the</span>
+<span class="t-comment">; ROM out have those addresses back, once there is a way to say so. See</span>
+<span class="t-comment">; 0038 for why what occupies memory for a while is a Module, and 0051 for</span>
+<span class="t-comment">; what this first cut settles and what it leaves.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Every Section here is `root`: the OS and the hardware reach them with no</span>
+<span class="t-comment">; Reference in any Chunk, so nothing else would keep them. None holds bytes,</span>
+<span class="t-comment">; so none has a Payload and no Transition loads one.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; This is the OS as an XL or XE ships it. A machine whose OS lives elsewhere</span>
+<span class="t-comment">; declares a Module of its own; the variant is what chooses.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">RTCLOK</span><span class="t-punctuation">,</span> <span class="t-name">SDMCTL</span><span class="t-punctuation">,</span> <span class="t-name">SDLSTL</span><span class="t-punctuation">,</span> <span class="t-name">SDLSTH</span><span class="t-punctuation">,</span> <span class="t-name">CH</span><span class="t-punctuation">,</span> <span class="t-name">SETVBV</span><span class="t-punctuation">,</span> <span class="t-name">XITVBV</span>
+
+<span class="t-comment">; The OS&#x27;s half of the zero page. The program&#x27;s own variables live above it,</span>
+<span class="t-comment">; in the half the variant leaves to the solver.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span> <span class="t-name">at</span> <span class="t-number">$0000</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label">osZero</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$12</span>
+<span class="t-label">RTCLOK</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $0012: the frame counter, three bytes</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$6B</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The OS&#x27;s variables and buffers. The shadow registers are among them and</span>
+<span class="t-comment">; are Labels here rather than registers of the variant: they are the OS&#x27;s</span>
+<span class="t-comment">; memory, which the OS copies to the hardware on every vertical blank, and</span>
+<span class="t-comment">; a `register` Region inside this Section would be an address the Section</span>
+<span class="t-comment">; may not cover.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0200</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label">osRam</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$2F</span>
+<span class="t-label">SDMCTL</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $022F: shadows DMACTL</span>
+<span class="t-label">SDLSTL</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $0230: the display list address, low</span>
+<span class="t-label">SDLSTH</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $0231: and high</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$CA</span>
+<span class="t-label">CH</span>      <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $02FC: the last key pressed, $FF for none</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$403</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The ROM, in the two ranges the hardware registers leave between them, and</span>
+<span class="t-comment">; the entry points a program calls in the second. The RAM underneath is what</span>
+<span class="t-comment">; a Phase without the OS would be given.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$C000</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label">osRomLow</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$1000</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$D800</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label">osRomHigh</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$C5C</span>
+<span class="t-label">SETVBV</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $E45C: A = the stage, X/Y = the routine</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>
+<span class="t-label">XITVBV</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $E462: the end of a deferred routine</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$1B9B</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre></details>
+<details class="aside-file"><summary>charsets.asm<span> charsets</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Atari&#x27;s two codes for the same letters, as Charsets.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; `atascii` is what the character I/O takes: the machine&#x27;s own code, with the</span>
+<span class="t-comment">; graphics characters where an ASCII machine keeps its control codes, and the</span>
+<span class="t-comment">; letters where ASCII has them — which is why an unprefixed literal of plain</span>
+<span class="t-comment">; letters has always worked and why nothing else has. `\n` is `$9B`, the end of</span>
+<span class="t-comment">; line, and not `$0A`.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; `screen` is what the display reads out of screen memory, which is the same</span>
+<span class="t-comment">; letters at other numbers. A program that writes where the display looks</span>
+<span class="t-comment">; rather than through the OS wants this one.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; The graphics characters are written here as the Unicode the box-drawing and</span>
+<span class="t-comment">; block characters have, so a picture drawn in the source is the picture the</span>
+<span class="t-comment">; machine draws. A letter in inverse video is one of those too — Unicode squares</span>
+<span class="t-comment">; them off in a negative, and `atascii&quot;PRESS 🆂&quot;` is seven bytes with the last</span>
+<span class="t-comment">; one inverse. A whole line of inverse text is better asked of a Charset</span>
+<span class="t-comment">; derived from this one, `.charset bright : atascii ^ $80`, which is what a</span>
+<span class="t-comment">; derivation is for. Two of them have no exact Unicode: `$02` and `$0D` are a</span>
+<span class="t-comment">; quarter of a cell where the nearest character is an eighth, and are written</span>
+<span class="t-comment">; as `▕` and `▔`. Everything else, the inverse entries included, was read off</span>
+<span class="t-comment">; the machine&#x27;s own font and matches it.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; This Module emits nothing: it is two names and two tables.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">atascii</span><span class="t-punctuation">,</span> <span class="t-name">screen</span>
+
+<span class="t-comment">; tag atascii</span>
+<span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name">atascii</span>
+  <span class="t-string">&quot;♥├▕┘┤┐╱╲◢▗◣▝▘▔▂▖♣┌─┼●▄▎┬┴▌└&quot;</span>                                       <span class="t-punctuation">=</span> <span class="t-number">$00</span>
+  <span class="t-string">&quot;↑↓←→&quot;</span>                                                              <span class="t-punctuation">=</span> <span class="t-number">$1C</span>
+  <span class="t-string">&quot; !\&quot;#$%&amp;&#x27;()*+,-./0123456789:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$20</span>
+  <span class="t-string">&quot;♦&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$60</span>
+  <span class="t-string">&quot;abcdefghijklmnopqrstuvwxyz&quot;</span>                                        <span class="t-punctuation">=</span> <span class="t-number">$61</span>
+  <span class="t-string">&quot;♠&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7B</span>
+  <span class="t-string">&quot;│&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7C</span>
+  <span class="t-string">&quot;\n&quot;</span>                                                                <span class="t-punctuation">=</span> <span class="t-number">$9B</span>
+
+  <span class="t-comment">; Inverse video is the same glyph with the bits the other way round, which</span>
+  <span class="t-comment">; for the blocks and the triangles is another character Unicode draws. Every</span>
+  <span class="t-comment">; one of these was read off the machine&#x27;s own font and is exact; the rest of</span>
+  <span class="t-comment">; the inverse half has no glyph to be written as, and is reached by adding</span>
+  <span class="t-comment">; $80 or by a Charset derived from this one.</span>
+  <span class="t-string">&quot;▊&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$82</span>        <span class="t-comment">; ▕</span>
+  <span class="t-string">&quot;◤&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$88</span>        <span class="t-comment">; ◢</span>
+  <span class="t-string">&quot;▛&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$89</span>        <span class="t-comment">; ▗</span>
+  <span class="t-string">&quot;◥&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8A</span>        <span class="t-comment">; ◣</span>
+  <span class="t-string">&quot;▙&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8B</span>        <span class="t-comment">; ▝</span>
+  <span class="t-string">&quot;▟&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8C</span>        <span class="t-comment">; ▘</span>
+  <span class="t-string">&quot;▆&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8D</span>        <span class="t-comment">; ▔</span>
+  <span class="t-string">&quot;▜&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8F</span>        <span class="t-comment">; ▖</span>
+  <span class="t-string">&quot;▀&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$95</span>        <span class="t-comment">; ▄</span>
+  <span class="t-string">&quot;▐&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$99</span>        <span class="t-comment">; ▌</span>
+  <span class="t-string">&quot;█&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$A0</span>        <span class="t-comment">; the space</span>
+
+  <span class="t-comment">; And the letters, which Unicode squares off in a negative.</span>
+  <span class="t-string">&quot;🅰🅱🅲🅳🅴🅵🅶🅷🅸🅹🅺🅻🅼🅽🅾🅿🆀🆁🆂🆃🆄🆅🆆🆇🆈🆉&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C1</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+<span class="t-comment">; end atascii</span>
+
+<span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name">screen</span>
+  <span class="t-string">&quot; !\&quot;#$%&amp;&#x27;()*+,-./0123456789:;&lt;=&gt;?&quot;</span>                                 <span class="t-punctuation">=</span> <span class="t-number">$00</span>
+  <span class="t-string">&quot;@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_&quot;</span>                                 <span class="t-punctuation">=</span> <span class="t-number">$20</span>
+  <span class="t-string">&quot;♥├▕┘┤┐╱╲◢▗◣▝▘▔▂▖♣┌─┼●▄▎┬┴▌└&quot;</span>                                       <span class="t-punctuation">=</span> <span class="t-number">$40</span>
+  <span class="t-string">&quot;♦&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$60</span>
+  <span class="t-string">&quot;abcdefghijklmnopqrstuvwxyz&quot;</span>                                        <span class="t-punctuation">=</span> <span class="t-number">$61</span>
+  <span class="t-string">&quot;♠&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7B</span>
+  <span class="t-string">&quot;│&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7C</span>
+
+  <span class="t-comment">; The same inverses, at the display&#x27;s numbers.</span>
+  <span class="t-string">&quot;▊&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C2</span>
+  <span class="t-string">&quot;◤&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C8</span>
+  <span class="t-string">&quot;▛&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C9</span>
+  <span class="t-string">&quot;◥&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CA</span>
+  <span class="t-string">&quot;▙&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CB</span>
+  <span class="t-string">&quot;▟&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CC</span>
+  <span class="t-string">&quot;▆&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CD</span>
+  <span class="t-string">&quot;▜&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CF</span>
+  <span class="t-string">&quot;▀&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$D5</span>
+  <span class="t-string">&quot;▐&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$D9</span>
+  <span class="t-string">&quot;█&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$80</span>
+  <span class="t-string">&quot;🅰🅱🅲🅳🅴🅵🅶🅷🅸🅹🅺🅻🅼🅽🅾🅿🆀🆁🆂🆃🆄🆅🆆🆇🆈🆉&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$A1</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+</code></pre></details>
+<details class="aside-file"><summary>portb.asm<span> portb</span></summary><pre><code class="language-assembler"><span class="t-comment">; The storage driver for extended memory behind PORTB: the units are the</span>
+<span class="t-comment">; Banks of the variant&#x27;s `extension`, which a value written to PORTB brings</span>
+<span class="t-comment">; into the $4000-$7FFF window — `ext` in the variant — and the stream is a</span>
+<span class="t-comment">; pointer into that window that walks on to the next unit at its end. Each</span>
+<span class="t-comment">; role is a macro declared with `.driver`, which the routine, the loader&#x27;s</span>
+<span class="t-comment">; glue, the decoders and the tool&#x27;s own Procs expand where they use it as</span>
+<span class="t-comment">; `nga.open`, `nga.read`, `nga.show` and `nga.showAt`. What the hardware</span>
+<span class="t-comment">; calls each state of a Window is this Module&#x27;s alone: `portbValues` holds</span>
+<span class="t-comment">; a PORTB value per state of `ext` — base RAM first, then one per Bank, as</span>
+<span class="t-comment">; many as the variant&#x27;s `extension` counts — and the OS Window is bit 0.</span>
+<span class="t-comment">; `PORTB` is the variant&#x27;s register.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Resident, and outside the window — the variant lists this Module in</span>
+<span class="t-comment">; `resident`, and the tool holds it outside the window the stream reads</span>
+<span class="t-comment">; through.</span>
+
+<span class="t-label">portbWindow</span>    <span class="t-punctuation">=</span> <span class="t-number">$4000</span>
+<span class="t-label">portbWindowEnd</span> <span class="t-punctuation">=</span> <span class="t-name">portbWindow</span> <span class="t-punctuation">+</span> <span class="t-number">$4000</span>    <span class="t-comment">; one past the window: the high byte of the first address outside it</span>
+<span class="t-label">portbUnitPages</span> <span class="t-punctuation">=</span> <span class="t-number">$40</span>                    <span class="t-comment">; a unit, in pages: what an offset carries by</span>
+<span class="t-label">portbBase</span>      <span class="t-punctuation">=</span> <span class="t-number">$FF</span>                    <span class="t-comment">; base RAM in, the OS ROM in, BASIC and the self-test out</span>
+
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">open</span>    <span class="t-name">portbOpen</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">read</span>    <span class="t-name">portbRead</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">stream</span>  <span class="t-name">ext</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">show</span>    <span class="t-name">ext</span> <span class="t-name">portbShow</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">showAt</span>  <span class="t-name">ext</span> <span class="t-name">portbShowAt</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">show</span>    <span class="t-name">os</span>  <span class="t-name">portbShowOs</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">showAt</span>  <span class="t-name">os</span>  <span class="t-name">portbShowOsAt</span>
+
+<span class="t-directive">.</span><span class="t-directive">transform</span> <span class="t-name">copy</span> <span class="t-name">portbCopy</span>
+
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbOpen</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbOpenStream</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbRead</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbReadByte</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; The state to show, as the tool numbers ext&#x27;s states: 0 is base RAM, and</span>
+<span class="t-comment">; Bank n is n + 1.</span>
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbShow</span> <span class="t-name">state</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-name">state</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbSelect</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; X = the state to show.</span>
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbShowAt</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbSelect</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; The OS Window is bit 0 of PORTB: set for the ROM, state 0, and clear for</span>
+<span class="t-comment">; the RAM beneath it, state 1. The bank bits are left as they are.</span>
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbShowOs</span> <span class="t-name">state</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">PORTB</span>
+        <span class="t-mnemonic">and</span> <span class="t-punctuation">#</span><span class="t-number">$FE</span>
+        <span class="t-mnemonic">ora</span> <span class="t-punctuation">#</span><span class="t-number">1</span> <span class="t-punctuation">-</span> <span class="t-name">state</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">PORTB</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; X = the state to show, 0 or 1.</span>
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbShowOsAt</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">PORTB</span>
+        <span class="t-mnemonic">ora</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">cpx</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@store</span>
+        <span class="t-mnemonic">and</span> <span class="t-punctuation">#</span><span class="t-number">$FE</span>
+<span class="t-label">@store</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">PORTB</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; PORTB per state of ext: base RAM, then one value per Bank. The list runs</span>
+<span class="t-comment">; to the 130XE&#x27;s four and the variant&#x27;s count trims it, so that a variant</span>
+<span class="t-comment">; with fewer Banks takes a prefix; one with more lists its values here.</span>
+<span class="t-comment">; Every value has bit 0 set — the OS ROM in — which is what lets</span>
+<span class="t-comment">; portbSelect keep the OS Window&#x27;s bit with one `and` and no scratch byte.</span>
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">portbBankValues</span> <span class="t-name">n</span><span class="t-punctuation">,</span> <span class="t-name">values</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">if</span> <span class="t-name">n</span> <span class="t-punctuation">&gt;</span> <span class="t-number">0</span>
+<span class="t-directive">.</span><span class="t-directive">match</span> <span class="t-name">values</span>
+<span class="t-directive">.</span><span class="t-directive">case</span> <span class="t-name">first</span><span class="t-punctuation">,</span> <span class="t-name">rest</span><span class="t-punctuation">...</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-name">first</span>
+        <span class="t-macro">portbBankValues</span> <span class="t-name">n</span> <span class="t-punctuation">-</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-name">rest</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endmatch</span>
+<span class="t-directive">.</span><span class="t-directive">endif</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; The table portbSelect indexes, in a Section of its own: what has an</span>
+<span class="t-comment">; address stands in one, and a Proc holds code alone.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">portbValues</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-name">portbBase</span>
+        <span class="t-macro">portbBankValues</span> <span class="t-name">extension</span><span class="t-punctuation">,</span> <span class="t-number">$E3</span><span class="t-punctuation">,</span> <span class="t-number">$E7</span><span class="t-punctuation">,</span> <span class="t-number">$EB</span><span class="t-punctuation">,</span> <span class="t-number">$EF</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The stream: where the next byte is, and which unit is in. A plain zero-page</span>
+<span class="t-comment">; Section rather than Temporaries, because the value has to survive between</span>
+<span class="t-comment">; one call and the next while nothing here is running.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span>
+<span class="t-label">portbPtr</span>        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">2</span>
+<span class="t-label">portbUnit</span>       <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; X = the state of ext to show: its PORTB value, with the OS bit left as it</span>
+<span class="t-comment">; is, since the OS Window is the same byte. Writes no memory, so that a</span>
+<span class="t-comment">; loader running it leaves nothing behind but the register.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">portbSelect</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">PORTB</span>
+        <span class="t-mnemonic">ora</span> <span class="t-punctuation">#</span><span class="t-number">$FE</span>
+        <span class="t-mnemonic">and</span> <span class="t-name">portbValues</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">PORTB</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; A = the unit, X/Y = the offset in it: the stream stands there. An offset</span>
+<span class="t-comment">; past the unit&#x27;s end carries into the units after, since the routine</span>
+<span class="t-comment">; counts on in a Frame without knowing where a unit ends: a unit is $4000</span>
+<span class="t-comment">; bytes, so the offset&#x27;s top two bits are units.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">portbOpenStream</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbUnit</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">portbPtr</span>
+        <span class="t-mnemonic">tya</span>
+<span class="t-label">@carry</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-name">portbUnitPages</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@within</span>
+        <span class="t-mnemonic">sbc</span> <span class="t-punctuation">#</span><span class="t-name">portbUnitPages</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbUnit</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@carry</span>
+<span class="t-label">@within</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">portbWindow</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">portbUnit</span>
+        <span class="t-mnemonic">inx</span>                             <span class="t-comment">; Bank n is state n + 1</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbSelect</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; A = the next byte of the stream. X and Y are not preserved.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">portbReadByte</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">portbPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbPtr</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">cpy</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">portbWindowEnd</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic">pha</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbNextUnit</span>
+        <span class="t-mnemonic">pla</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The window&#x27;s end: the next unit in, and the pointer back at its start.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">portbNextUnit</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbUnit</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">portbUnit</span>
+        <span class="t-mnemonic">inx</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbSelect</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbPtr</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">portbWindow</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">;  The decoder of `copy`: X/Y = the destination, the stream at the stored</span>
+<span class="t-comment">; size and then the bytes. Reads the window through the pointer rather than</span>
+<span class="t-comment">; through portbReadByte, which is what a driver&#x27;s own decoder is for: a run at a</span>
+<span class="t-comment">; time, where a run ends at the source&#x27;s page end or at the size, so that</span>
+<span class="t-comment">; the inner loop is `(zp),y` down to zero — the window&#x27;s end is a page end,</span>
+<span class="t-comment">; so a unit is never crossed inside a run.</span>
+<span class="t-label">portbDst</span>  <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">portbSize</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">portbRun</span>  <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>                      <span class="t-comment">; bytes in the run, zero for 256</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">portbCopy</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">portbDst</span>
+        <span class="t-mnemonic">sty</span> <span class="t-name">portbDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbReadByte</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbReadByte</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbSize</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@run</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">ora</span> <span class="t-name">portbSize</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbPtr</span>                    <span class="t-comment">; to the end of the source&#x27;s page</span>
+        <span class="t-mnemonic">eor</span> <span class="t-punctuation">#</span><span class="t-number">$FF</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbRun</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbSize</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@copy</span>                       <span class="t-comment">; at least a page left: the run stands</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbRun</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@cap</span>                        <span class="t-comment">; a whole page, and less than one left</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@copy</span>
+<span class="t-label">@cap</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbRun</span>
+<span class="t-label">@copy</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">portbRun</span>
+<span class="t-label">@byte</span>
+        <span class="t-mnemonic">dey</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">portbPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><span class="t-name">portbDst</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">tya</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@byte</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">portbRun</span>                    <span class="t-comment">; the run, as 256 where it is zero</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@counted</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">portbSize</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@crossed</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic">txa</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-name">portbPtr</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbPtr</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@source</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@source</span>
+        <span class="t-mnemonic">txa</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-name">portbDst</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbDst</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@destination</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">portbDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@destination</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">portbRun</span>
+        <span class="t-mnemonic">sbc</span> <span class="t-name">portbRun</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">portbSize</span>
+        <span class="t-mnemonic">bcs</span> <span class="t-name">@crossed</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">portbSize</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@crossed</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">portbPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">portbWindowEnd</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@run</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">portbNextUnit</span>               <span class="t-comment">; the window&#x27;s end: the next unit in</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@run</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<details class="aside-file"><summary>zx0.asm<span> zx0</span></summary><pre><code class="language-assembler"><span class="t-comment">; The decoder of `zx0` over any driver&#x27;s stream: Einar Saukas&#x27;s ZX0, version</span>
+<span class="t-comment">; 2&#x27;s standard forward stream, decoded as the reference dzx0.c does, driven</span>
+<span class="t-comment">; by the stream&#x27;s own end marker. Written here from the format, not ported:</span>
+<span class="t-comment">; nothing of the reference&#x27;s text is in it, and it is licensed as everything</span>
+<span class="t-comment">; under lib/ is, see lib/LICENSE. Entered with X/Y = the destination and the</span>
+<span class="t-comment">; stream at the stored size, which it reads past. A match is copied a byte</span>
+<span class="t-comment">; at a time, forward, from what was written, which is what makes an offset</span>
+<span class="t-comment">; shorter than its length — the run — come out right. Resident, and outside</span>
+<span class="t-comment">; the driver&#x27;s window.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">;   zx0Bits      the bit buffer, a sentinel one above the bits still unread</span>
+<span class="t-comment">;   zx0Offset    the last offset</span>
+<span class="t-comment">;   zx0Length    the length in hand, or an offset&#x27;s MSB while one is read</span>
+<span class="t-comment">;   zx0Invert    one while an offset&#x27;s MSB is read, whose data bits the</span>
+<span class="t-comment">;                stream carries complemented; zero otherwise</span>
+
+<span class="t-directive">.</span><span class="t-directive">transform</span> <span class="t-name">zx0</span> <span class="t-name">zx0Decode</span>
+
+<span class="t-label">zx0Dst</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">zx0Src</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">zx0Bits</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">zx0Offset</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">zx0Length</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">zx0Invert</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+<span class="t-comment">; The next bit of the stream, in A as zero or one and in the Z flag. The</span>
+<span class="t-comment">; buffer holds a sentinel above the unread bits, so shifting it to nothing is</span>
+<span class="t-comment">; the signal to fetch the next byte and put the sentinel back below it.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">asl</span> <span class="t-name">zx0Bits</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@have</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">rol</span>                     <span class="t-comment">; the carry the asl left is the sentinel</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Bits</span>
+<span class="t-label">@have</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">rol</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; An interlaced Elias gamma value into zx0Length: a control bit says whether</span>
+<span class="t-comment">; a data bit follows, and the value begins at one. Three Procs chained by</span>
+<span class="t-comment">; `then` because the value after an offset is entered with its first control</span>
+<span class="t-comment">; bit already read, at zx0EliasData: the first falls through into the</span>
+<span class="t-comment">; second, and the second branches into the third, which the chain is what</span>
+<span class="t-comment">; allows.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0Elias</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">zx0EliasMore</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0EliasMore</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">zx0EliasData</span>        <span class="t-comment">; zero: a data bit follows</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">zx0EliasData</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0EliasData</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">eor</span> <span class="t-name">zx0Invert</span>
+        <span class="t-mnemonic">lsr</span>
+        <span class="t-mnemonic">rol</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">rol</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">zx0EliasMore</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; One byte written: the destination moves on and the length in hand comes</span>
+<span class="t-comment">; down, leaving Z set when it reaches zero.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0Step</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Dst</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@moved</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Dst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@moved</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@low</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@low</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">ora</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The length in hand copied from zx0Dst less the last offset to zx0Dst.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0Copy</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">zx0Dst</span>
+        <span class="t-mnemonic">sbc</span> <span class="t-name">zx0Offset</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Src</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">zx0Dst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sbc</span> <span class="t-name">zx0Offset</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Src</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@byte</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">zx0Src</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><span class="t-name">zx0Dst</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Src</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@from</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Src</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@from</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Step</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@byte</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">zx0Decode</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">zx0Dst</span>
+        <span class="t-mnemonic">sty</span> <span class="t-name">zx0Dst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>             <span class="t-comment">; the stored size, which the end marker makes unnecessary</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">$80</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Bits</span>             <span class="t-comment">; an empty buffer: the sentinel alone</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Offset</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Offset</span><span class="t-punctuation">+</span><span class="t-number">1</span>         <span class="t-comment">; the last offset begins at one</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Invert</span>
+<span class="t-label">@literals</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Elias</span>
+<span class="t-label">@literal</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><span class="t-name">zx0Dst</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Step</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@literal</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@offset</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Elias</span>            <span class="t-comment">; a match at the last offset</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Copy</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@literals</span>
+<span class="t-label">@offset</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Invert</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Elias</span>            <span class="t-comment">; the new offset&#x27;s MSB, complemented in the stream</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Invert</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@done</span>               <span class="t-comment">; 256 is the end marker, and the one value with a low byte of zero</span>
+        <span class="t-mnemonic">lsr</span>                     <span class="t-comment">; offset = MSB * 128 - LSB / 2</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Offset</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">ror</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Offset</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">lsr</span>                     <span class="t-comment">; the LSB&#x27;s low bit is the length&#x27;s first control bit</span>
+        <span class="t-mnemonic">php</span>
+        <span class="t-mnemonic">eor</span> <span class="t-punctuation">#</span><span class="t-number">$FF</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">adc</span> <span class="t-name">zx0Offset</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Offset</span>
+        <span class="t-mnemonic">bcs</span> <span class="t-name">@subtracted</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">zx0Offset</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@subtracted</span>
+        <span class="t-mnemonic">plp</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Length</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">bcs</span> <span class="t-name">@counted</span>            <span class="t-comment">; a control bit of one: the value is one</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0EliasData</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Length</span>           <span class="t-comment">; a match at a new offset is one longer than written</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@copy</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">zx0Length</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@copy</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Copy</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">zx0Bit</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@offset</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@literals</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<h2 class="file">print.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; The one thing both Phases need: a line on the screen, through the character</span>
+<span class="t-comment">; I/O the OS opens on channel 0 before a program starts. `PUTREC` writes a</span>
+<span class="t-comment">; record, so it ends the line itself.</span>
+
+<span class="t-label">CIOV</span>   <span class="t-punctuation">=</span> <span class="t-number">$E456</span>
+<span class="t-label">ICCOM</span>  <span class="t-punctuation">=</span> <span class="t-number">$0342</span>
+<span class="t-label">ICBAL</span>  <span class="t-punctuation">=</span> <span class="t-number">$0344</span>
+<span class="t-label">ICBLL</span>  <span class="t-punctuation">=</span> <span class="t-number">$0348</span>
+<span class="t-label">PUTREC</span> <span class="t-punctuation">=</span> <span class="t-number">9</span>
+
+<span class="t-comment">; Both Phases call it, so both have to see the name.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">printLine</span>
+
+<span class="t-comment">; Where the line stands, and how long it is. Declaring where the two arguments</span>
+<span class="t-comment">; are is what lets a Module of C call this one as a function.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">printLine</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-name">xy</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-name">a</span>
+
+        <span class="t-mnemonic">stx</span> <span class="t-name">ICBAL</span>
+        <span class="t-mnemonic">sty</span> <span class="t-name">ICBAL</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ICBLL</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ICBLL</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">PUTREC</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ICCOM</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">CIOV</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<h2 class="file">run.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; The shape every screen has: a title, and then whatever the Phase draws under</span>
+<span class="t-comment">; it. Neither is here — this Module knows only that there are two of them, and</span>
+<span class="t-comment">; which Phase is running it never learns.</span>
+
+<span class="t-comment">; tag slot</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">showScreen</span>
+
+<span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">pointer</span><span class="t-punctuation">,</span> <span class="t-name">zeropage</span>
+<span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">vector</span>
+<span class="t-comment">; end slot</span>
+
+<span class="t-comment">; tag screen</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">showScreen</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@count</span>  <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">title</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>           <span class="t-comment">; the Phase&#x27;s title, as long as it turns out</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@print</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@count</span>
+<span class="t-label">@print</span>
+        <span class="t-mnemonic">tya</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">title</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">title</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">printLine</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">draw</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+<span class="t-comment">; end screen</span>
+</code></pre>
+<h2 class="file">shared.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; Nothing of the program uses this. It is pinned into the Window&#x27;s range to</span>
+<span class="t-comment">; show what the rule permits: a Section in no Pane is in the Window&#x27;s base</span>
+<span class="t-comment">; state, and the Pane&#x27;s Sections are in another, so the two never collide</span>
+<span class="t-comment">; however their Phases overlap. `root`, because nothing names it.</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$4000</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label">spare</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">64</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre>
+<h2 class="file">intro.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; tag fills</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">introTitle</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">introDraw</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">introTitle</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;INTRO&quot;</span><span class="t-punctuation">,</span> <span class="t-number">0</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+<span class="t-comment">; end fills</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">introText</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;THE FIRST SCREEN&quot;</span>
+<span class="t-label">introTextEnd</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">introDraw</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><span class="t-name">introText</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">introText</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">introTextEnd</span> <span class="t-punctuation">-</span> <span class="t-name">introText</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">printLine</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">introStart</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">showScreen</span>
+        <span class="t-directive">.</span><span class="t-directive">transition</span> <span class="t-name">level</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<h2 class="file">level.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; The map is not here any more. What is here is what draws it, and the row</span>
+<span class="t-comment">; width it walks by.</span>
+
+<span class="t-label">levelHero</span> <span class="t-punctuation">=</span> <span class="t-number">$2A</span>                         <span class="t-comment">; `*` in ATASCII</span>
+
+<span class="t-comment">; tag fills</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">levelTitle</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">levelDraw</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">levelTitle</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;LEVEL ONE&quot;</span><span class="t-punctuation">,</span> <span class="t-number">0</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+<span class="t-comment">; end fills</span>
+
+<span class="t-comment">; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`</span>
+<span class="t-comment">; shown, which is what lets it name what the Pane holds.</span>
+<span class="t-comment">; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`</span>
+<span class="t-comment">; shown, which is what lets it name what the Pane holds. It builds each line in</span>
+<span class="t-comment">; `levelRow` rather than drawing out of the map, so that the hero can stand on</span>
+<span class="t-comment">; a square without the map being written over.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">drawMap</span><span class="t-punctuation">,</span> <span class="t-name">under</span> <span class="t-name">level</span>
+<span class="t-label">at</span>      <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">row</span>     <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">left</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><span class="t-name">levelMap</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">at</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">levelMap</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">at</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">levelRows</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">left</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">row</span>
+<span class="t-label">@row</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-name">levelWidth</span> <span class="t-punctuation">-</span> <span class="t-number">1</span>
+<span class="t-label">@copy</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">at</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">levelRow</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">dey</span>
+        <span class="t-mnemonic">bpl</span> <span class="t-name">@copy</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-name">row</span>                 <span class="t-comment">; where the map said the level starts</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-name">levelStartRow</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@print</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">levelHero</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">levelRow</span> <span class="t-punctuation">+</span> <span class="t-name">levelStartColumn</span>
+<span class="t-label">@print</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><span class="t-name">levelRow</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">levelRow</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">levelWidth</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">printLine</span>
+
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">at</span>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><span class="t-name">levelWidth</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">at</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@counted</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">at</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">row</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">left</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@row</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">levelDraw</span>
+        <span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">level</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">drawMap</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">levelStart</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">showScreen</span>
+<span class="t-label">@stop</span>   <span class="t-mnemonic">jmp</span> <span class="t-name">@stop</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<details class="aside-file"><summary>maps.asm<span> maps</span></summary><pre><code class="language-assembler"><span class="t-directive">.</span><span class="t-directive">source</span> <span class="t-string">&quot;tools/rows.js&quot;</span><span class="t-punctuation">,</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span><span class="t-punctuation">,</span> <span class="t-name">in</span> <span class="t-name">level</span>
+<span class="t-label">levelMap</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">levelMap</span><span class="t-punctuation">,</span> <span class="t-name">levelWidth</span><span class="t-punctuation">,</span> <span class="t-name">levelRows</span><span class="t-punctuation">,</span> <span class="t-name">levelStartRow</span><span class="t-punctuation">,</span> <span class="t-name">levelStartColumn</span>
+        <span class="t-directive">.</span><span class="t-directive">base64</span> <span class="t-string">&quot;IyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMuLi4uLi4uLi4u&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">base64</span> <span class="t-string">&quot;Li4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLiMjLi4uLi4uLi4uLi4uLi4uLi4uLi4u&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">base64</span> <span class="t-string">&quot;Li4uLi4uLi4uLi4uLiM=&quot;</span>
+<span class="t-label">levelWidth</span> <span class="t-punctuation">=</span> <span class="t-number">37</span>
+<span class="t-label">levelRows</span> <span class="t-punctuation">=</span> <span class="t-number">2</span>
+<span class="t-label">levelStartRow</span> <span class="t-punctuation">=</span> <span class="t-number">1</span>
+<span class="t-label">levelStartColumn</span> <span class="t-punctuation">=</span> <span class="t-number">16</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span><span class="t-punctuation">,</span> <span class="t-name">in</span> <span class="t-name">level</span>
+<span class="t-label">levelRow</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">levelRow</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">37</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre></details>
+<details class="aside-file"><summary>transition.asm<span> nga.transition</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Transition routine. Called by `jsr` from a `.transition`, with the</span>
+<span class="t-comment">; statement&#x27;s list right behind the call: the Phase to enter, and per Phase</span>
+<span class="t-comment">; the code may be in, the unit and offset where the edge&#x27;s Frame waits.</span>
+<span class="t-comment">; nga.open and nga.read are the driver&#x27;s roles, macros of the driver&#x27;s</span>
+<span class="t-comment">; Module expanded here; ngaShowBases is the Proc the tool generates beside</span>
+<span class="t-comment">; the dispatcher, which reads from the Frame the base the entered Phase gives</span>
+<span class="t-comment">; every Window and shows it, the stream&#x27;s last; and ngaCurrentPhase is the</span>
+<span class="t-comment">; Cell the tool generates. Everything else the edge has to say waits in the</span>
+<span class="t-comment">; Frame, in storage. See docs/spec/transition.md.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Its zero page is Temporaries: nothing of it is needed once the routine has</span>
+<span class="t-comment">; jumped to the entered Phase&#x27;s entry, and a `.transition` is a jump into the</span>
+<span class="t-comment">; routine, so whatever the statement&#x27;s Section had on the zero page is dead by</span>
+<span class="t-comment">; then too. Two Temporaries never live at once share an address — see</span>
+<span class="t-comment">; docs/decisions/0034-trace.md.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaTransition</span>
+
+<span class="t-label">ngaPtr</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaEntry</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaDst</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaValue</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaOffset</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaFramePos</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label">ngaWanted</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">ngaCount</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">ngaFrameUnit</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">ngaUnit</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">ngaTransition</span>
+        <span class="t-mnemonic">pla</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaPtr</span>
+        <span class="t-mnemonic">pla</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>            <span class="t-comment">; the return address: one below the statement&#x27;s list</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaWanted</span>           <span class="t-comment">; the Phase to enter</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaCount</span>            <span class="t-comment">; entries that follow</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaPtr</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaPtr</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@scan</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">ngaPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@scan</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@check</span>
+        <span class="t-mnemonic">brk</span>                     <span class="t-comment">; no entry for the current Phase: unreachable while the static rule holds</span>
+<span class="t-label">@check</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-name">ngaCurrentPhase</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@found</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaPtr</span>              <span class="t-comment">; the next entry: four bytes on</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaPtr</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@skipped</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">ngaPtr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@skipped</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@scan</span>
+<span class="t-label">@found</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaFrameUnit</span>        <span class="t-comment">; the unit the Frame waits in</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaFramePos</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">ngaPtr</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaFramePos</span><span class="t-punctuation">+</span><span class="t-number">1</span>       <span class="t-comment">; and where in it</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">ngaEnter</span>
+
+<span class="t-comment">; The rest of it, and the way in for a Container that has no current Phase to</span>
+<span class="t-comment">; look one up by: ngaWanted holds the Phase to enter and ngaFrameUnit and</span>
+<span class="t-comment">; ngaFramePos where its Frame waits. The cold start comes here — see</span>
+<span class="t-comment">; docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaEnter</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">ngaEnter</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaFrameOpen</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaEntry</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaEntry</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaCount</span>            <span class="t-comment">; blocks that follow</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaFrameSkip</span>
+<span class="t-label">@block</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@cells</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaFrameOpen</span>        <span class="t-comment">; back to the Frame: a block&#x27;s stream replaced it</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaUnit</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaOffset</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaOffset</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaDst</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">pha</span>                     <span class="t-comment">; the decoder&#x27;s number</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">6</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaFrameSkip</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaUnit</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">ngaOffset</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">ngaOffset</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">open</span>                <span class="t-comment">; the block&#x27;s stream: its stored size, then its bytes</span>
+        <span class="t-mnemonic">pla</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">ngaDst</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">ngaDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaTransform</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@block</span>
+<span class="t-label">@cells</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaFrameOpen</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaCount</span>            <span class="t-comment">; Cell writes that follow, read in one stream</span>
+<span class="t-label">@cell</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@enter</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaDst</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaDst</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaValue</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaValue</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaValue</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><span class="t-name">ngaDst</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>          <span class="t-comment">; a Cell stands outside the driver&#x27;s window</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaValue</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><span class="t-name">ngaDst</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">dec</span> <span class="t-name">ngaCount</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@cell</span>
+<span class="t-label">@enter</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">ngaShowBases</span>        <span class="t-comment">; the entered Phase&#x27;s base in every Window, read from the Frame</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaWanted</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaCurrentPhase</span>     <span class="t-comment">; the Phase the program is in from here on</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-punctuation">(</span><span class="t-name">ngaEntry</span><span class="t-punctuation">)</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The Frame&#x27;s stream, from where the routine last left it.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">ngaFrameOpen</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">ngaFrameUnit</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">ngaFramePos</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">ngaFramePos</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">open</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; A bytes on in the Frame, which is where its stream is opened next.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">ngaFrameSkip</span>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">adc</span> <span class="t-name">ngaFramePos</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ngaFramePos</span>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">ngaFramePos</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<details class="aside-file"><summary>cell<span> nga.cell</span></summary><pre><code class="language-assembler"><span class="t-label">ngaCurrentPhase</span></code></pre></details>
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

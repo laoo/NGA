@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The assembler — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li class="here"><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="reference-the-assembler">Reference: the assembler</h1>
+<p>What an <code>.asm</code> Module may hold. The chapters before this one teach the ideas.
+This one lists the forms.</p>
+<p>The 6502 instruction set is not here. Mnemonics and addressing modes are the
+same as in every other assembler. What this chapter lists is what the tool adds.</p>
+<h2 id="lines-and-labels">Lines and labels</h2>
+<p>A line holds a label definition, a statement, or both:</p>
+<pre><code class="language-asm"><span class="t-label">copyRow</span> <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@loop</span>   <span class="t-mnemonic">lda</span> <span class="t-name">source</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+</code></pre>
+<p>A label definition is an identifier at column one. Indent a statement. Only the first token of a line can stand at column one, so a line
+never defines two labels.</p>
+<p>An identifier at column one with <code>=</code> after it defines a Constant. With anything
+else after it, it defines a Label.</p>
+<pre><code class="language-asm"><span class="t-label">screenWidth</span> <span class="t-punctuation">=</span> <span class="t-number">40</span>                <span class="t-comment">; Constant</span>
+<span class="t-label">copyRow</span>                         <span class="t-comment">; Label</span>
+</code></pre>
+<p>A Label whose name is a mnemonic is a warning. <code>rts</code> at column one is a legal
+label definition, and the warning is what tells you that you lost an indent.</p>
+<h3 id="local-labels">Local labels</h3>
+<p>A name with a leading <code>@</code> is local to the enclosing <code>.proc</code> or macro body.
+Outside both it is an error.</p>
+<p>Use <code>@</code> for a label that repeats. A plain name is unique in its scope. In a
+Proc it becomes a Symbol under the Proc's name, such as <code>worker.inner</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Reference</th>
+<th>Resolves to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@name</code></td>
+<td>the one definition of <code>name</code> in the scope. Several is an error.</td>
+</tr>
+<tr>
+<td><code>@+name</code></td>
+<td>the nearest definition after the reference</td>
+</tr>
+<tr>
+<td><code>@-name</code></td>
+<td>the nearest definition before the reference</td>
+</tr>
+<tr>
+<td><code>@</code></td>
+<td>defines an anonymous local label</td>
+</tr>
+<tr>
+<td><code>@+</code></td>
+<td>the nearest anonymous label after the reference</td>
+</tr>
+<tr>
+<td><code>@-</code></td>
+<td>the nearest anonymous label before the reference</td>
+</tr>
+</tbody>
+</table>
+<p>Direction compares position in the source, never address.</p>
+<p>Named and anonymous labels are separate. <code>@-</code> passes over every <code>@name</code>, and
+<code>@-name</code> passes over every <code>@</code>. The direction does not repeat, so <code>@++name</code> does
+not exist. The direction marker appears only in references. <code>@</code> followed by
+digits is an error.</p>
+<h2 id="numbers-strings-and-characters">Numbers, strings and characters</h2>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Base</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>123</code></td>
+<td>decimal</td>
+</tr>
+<tr>
+<td><code>$1F</code></td>
+<td>hexadecimal</td>
+</tr>
+<tr>
+<td><code>%1010</code></td>
+<td>binary</td>
+</tr>
+<tr>
+<td><code>'a'</code></td>
+<td>the character's value in a character set</td>
+</tr>
+</tbody>
+</table>
+<p>There is one notation per base. <code>0x</code>, a trailing <code>h</code> and a leading <code>0</code> for octal
+are errors.</p>
+<p><code>_</code> may separate digits and must stand between them. <code>$FF_FF</code> is a literal.
+<code>$_FF</code> and <code>$FF_</code> are errors.</p>
+<p>A digit sequence must not touch an identifier character. There are no
+floating-point literals, which leaves <code>..</code> free to mean a range.</p>
+<p>Escapes are <code>\\</code>, <code>\&quot;</code>, <code>\'</code>, <code>\n</code>, <code>\t</code> and <code>\0</code>. Any other escape is an error.
+An escape is one character. There is no <code>\xNN</code>, because a raw byte belongs in
+the data directive around the string.</p>
+<p>A literal may carry a character set prefix, such as <code>atascii&quot;HELLO&quot;</code>. See
+<a href="../character-sets/">Character sets</a> and <a href="#charset"><code>.charset</code></a> below. A
+literal with no prefix must be ASCII.</p>
+<h2 id="section"><code>.section</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-punctuation">[</span> <span class="t-name">attribute</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">attribute</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span> <span class="t-punctuation">]</span>
+<span class="t-directive">.</span><span class="t-directive">endsection</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-label">attribute</span> <span class="t-punctuation">=</span> <span class="t-name">placement</span> <span class="t-punctuation">|</span> <span class="t-name">movable</span> <span class="t-punctuation">|</span> <span class="t-name">root</span> <span class="t-punctuation">|</span> <span class="t-name">in</span> <span class="t-name">NAME</span> <span class="t-punctuation">|</span> <span class="t-name">temporary</span>
+<span class="t-label">placement</span> <span class="t-punctuation">=</span> <span class="t-punctuation">(</span> <span class="t-name">zeropage</span> <span class="t-punctuation">|</span> <span class="t-name">absolute</span> <span class="t-punctuation">)</span> <span class="t-name">qualifier</span><span class="t-punctuation">*</span>
+<span class="t-label">qualifier</span> <span class="t-punctuation">=</span> <span class="t-name">at</span> <span class="t-name">EXPRESSION</span> <span class="t-punctuation">|</span> <span class="t-name">align</span> <span class="t-name">EXPRESSION</span> <span class="t-punctuation">|</span> <span class="t-name">within</span> <span class="t-name">EXPRESSION</span>
+</code></pre>
+<p>At most one placement, one <code>movable</code>, one <code>root</code>, one <code>in</code> and one <code>temporary</code>,
+in any order.</p>
+<p>A Section has no name of its own. Every Label it holds stands for it on the left
+of a dot. Its first Label is what the memory map and a finding call it. A
+Section that holds no Label is an error.</p>
+<p>PlacementClass defaults to <code>absolute</code>.</p>
+<h3 id="placement">Placement</h3>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$2000</span>
+<span class="t-label">code</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span> <span class="t-name">at</span> <span class="t-number">$80</span>
+<span class="t-label">vars</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">align</span> <span class="t-number">1024</span>
+<span class="t-label">font</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">within</span> <span class="t-number">1024</span>
+<span class="t-label">list</span>
+</code></pre>
+<p><code>at N</code> pins the Section. <code>align N</code> starts it at a multiple of <code>N</code>. <code>within N</code>
+keeps it from crossing a multiple of <code>N</code>. Use <code>within</code> for a table indexed by
+<code>,x</code>, for a display list, and for screen memory.</p>
+<p><code>at</code>, <code>align</code> and <code>within</code> complete the placement, so they never follow a comma.
+The class always stands next to the address. Each takes an <code>Integer</code> that is a
+<a href="#declared-values">declared value</a>. Neither <code>align</code> nor <code>within</code> may be zero.</p>
+<p>A Section larger than its <code>within</code> boundary is an error.</p>
+<h3 id="movable"><code>movable</code></h3>
+<p>A Movable Section may stand at a different address in each Phase it is present
+in. The solver moves it only where a layout needs it to.</p>
+<p>A Reference holds it still. Code that names it sees one address in every Phase
+that code is in. A Section that names itself never moves. A Section named from
+resident code never moves.</p>
+<p><code>at</code> applies in every Phase, so <code>at</code> and <code>movable</code> together mean a Section that
+does not move.</p>
+<h3 id="root"><code>root</code></h3>
+<p>Keeps the Section whether or not any Chunk names it. Use it for memory the
+hardware reads with no Reference in the code, such as a display list. See
+<a href="../roots/">Roots</a>.</p>
+<p>The entry Phase's entry Label is the other Root and needs no mark.</p>
+<h3 id="in-name"><code>in NAME</code></h3>
+<p>Puts the Section in a <a href="../panes/">Pane</a> the Project declares. The Section is
+then <code>absolute</code> and not <code>movable</code>. A pin must fall within the Pane's Window.</p>
+<p>Only code of the same Pane may name what a Pane holds, unless a
+<a href="#with"><code>.with</code></a> shows it.</p>
+<h3 id="temporary"><code>temporary</code></h3>
+<p>Makes the Section a <a href="#ztemp-and-temp">Temporary</a>. It holds reservations only. It
+goes with none of <code>in</code>, <code>movable</code> or <code>root</code>.</p>
+<h2 id="proc"><code>.proc</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">attribute</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endproc</span> <span class="t-punctuation">[</span> <span class="t-name">then</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>    <span class="t-punctuation">[</span> <span class="t-name">then</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span>
+
+<span class="t-label">attribute</span> <span class="t-punctuation">=</span> <span class="t-name">placement</span> <span class="t-punctuation">|</span> <span class="t-name">movable</span> <span class="t-punctuation">|</span> <span class="t-name">root</span> <span class="t-punctuation">|</span> <span class="t-name">in</span> <span class="t-name">NAME</span> <span class="t-punctuation">|</span> <span class="t-name">under</span> <span class="t-name">NAME</span> <span class="t-punctuation">|</span> <span class="t-name">as</span> <span class="t-name">NAME</span>
+</code></pre>
+<p>A Proc is a Section of its own that holds code. It takes the attributes a
+<code>.section</code> takes, less <code>temporary</code>. It stands at the top level of a Module,
+never inside a <code>.section</code> and never inside another Proc.</p>
+<p><code>.proc NAME</code> defines a Label at the first byte of the code.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>under NAME</code></td>
+<td>the Proc runs with Pane <code>NAME</code> shown. See <a href="../panes/">Panes</a>.</td>
+</tr>
+<tr>
+<td><code>as NAME</code></td>
+<td>the Proc's arguments are Proc <code>NAME</code>'s Temporaries</td>
+</tr>
+</tbody>
+</table>
+<p><code>under</code> names a Pane and not a family. It stands on a <code>.proc</code> and not on a
+<code>.section</code>, and not beside <code>in</code>.</p>
+<p><code>as</code> names a Proc and not data. The member declares no argument and no result of
+its own, because its signature is the type's.</p>
+<h3 id="a-proc-is-a-scope">A Proc is a scope</h3>
+<p>A name defined inside is <code>NAME.inner</code>, and you write it that way from outside. A
+plain <code>inner</code> there means nothing. Two Procs may use one name for a label.</p>
+<p>A name inside may hide one outside. A <a href="#namespaces">leading dot</a> reaches past
+it.</p>
+<h3 id="a-proc-has-one-entry">A Proc has one entry</h3>
+<p>From outside, nothing names a position inside a Proc. You may not call one, read
+a table kept there, or patch an operand there.</p>
+<p>A second Label at the Proc's first Chunk is the entry under another name.</p>
+<p>What has to be reached from outside belongs in a <code>.section</code>.</p>
+<h3 id="a-proc-holds-code">A Proc holds code</h3>
+<p>A <code>.res</code> inside a Proc is an error. Use a <code>.ztemp</code>, a <code>.temp</code>, or a
+<code>.section</code>.</p>
+<p>A <code>.section</code> block inside a Proc opens a Section beside it. The Proc's text
+resumes after <code>.ends</code>, and the code before and after the block is one run of
+Chunks.</p>
+<p>A <code>.ztemp</code> or a <code>.temp</code> inside a Proc declares a Section beside it and takes the
+Proc's scope. <code>worker.ptr</code> is how a caller names an argument the Proc reads.</p>
+<h3 id="declare"><code>.declare</code></h3>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-punctuation">[</span> <span class="t-name">TYPE</span> <span class="t-punctuation">|</span> <span class="t-name">PLACE</span> <span class="t-punctuation">]</span>
+<span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">ret</span> <span class="t-punctuation">[</span> <span class="t-name">TYPE</span> <span class="t-punctuation">|</span> <span class="t-name">PLACE</span> <span class="t-punctuation">]</span>
+
+<span class="t-label">TYPE</span>  <span class="t-punctuation">=</span> <span class="t-name">u8</span> <span class="t-punctuation">|</span> <span class="t-name">i8</span> <span class="t-punctuation">|</span> <span class="t-name">u16</span> <span class="t-punctuation">|</span> <span class="t-name">i16</span> <span class="t-punctuation">|</span> <span class="t-name">bool</span> <span class="t-punctuation">|</span> <span class="t-name">u8</span><span class="t-punctuation">[</span><span class="t-name">N</span><span class="t-punctuation">]</span>
+<span class="t-label">PLACE</span> <span class="t-punctuation">=</span> <span class="t-name">a</span> <span class="t-name">letter</span> <span class="t-name">per</span> <span class="t-name">byte</span> <span class="t-name">from</span> <span class="t-name">the</span> <span class="t-name">low</span> <span class="t-name">one</span><span class="t-punctuation">:</span> <span class="t-name">a</span><span class="t-punctuation">,</span> <span class="t-name">x</span> <span class="t-name">or</span> <span class="t-name">y</span> <span class="t-name">for</span> <span class="t-name">a</span> <span class="t-name"><a class="ref" href="../project-file/#register">register</a></span><span class="t-punctuation">,</span>
+        <span class="t-macro">m</span> <span class="t-name">for</span> <span class="t-name">a</span> <span class="t-name">byte</span> <span class="t-name">of</span> <span class="t-name">the</span> <span class="t-name">reservation</span>
+</code></pre>
+<p><code>.declare</code> stands on the line above the <code>.ztemp</code> or <code>.temp</code> it names.
+<code>.declare arg</code> makes that variable an argument. The order of the <code>.declare arg</code>
+lines is the order of the arguments. <code>.declare ret</code> makes one the result.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">twice</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-name">u8</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">ret</span> <span class="t-name">u8</span>
+<span class="t-label">value</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">value</span>
+        <span class="t-mnemonic">asl</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">value</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<p>Two <code>.declare</code>s may stand over one reservation. That byte is then both an
+argument and the result.</p>
+<p>The type is optional. Where you write one, the reservation under it must hold
+exactly its bytes. Where you write none, the shape answers: one byte is a <code>u8</code>,
+two a <code>u16</code>, N a <code>u8[N]</code>.</p>
+<p>A place puts a byte in a register instead. <code>.declare arg a</code> is one byte in <code>A</code>.
+<code>.declare ret ax</code> is two bytes, the low one in <code>A</code> and the high one in <code>X</code>.
+<code>.declare arg am</code> is two bytes, the low one in <code>A</code> and the high one in the
+reservation below.</p>
+<p>A declaration whose bytes are all in registers takes no reservation. A register
+carries one argument. A place names no register twice. The result may use a
+register an argument came in.</p>
+<p>The declarations are the contract of both sides of a call. A caller writes
+<code>draw.x</code>, calls <code>jsr draw</code>, and reads <code>draw.result</code>. An exported Proc exports
+its declared bytes with no <code>.export</code> of its own.</p>
+<h3 id="endp-then-name"><code>.endp then NAME</code></h3>
+<p>Chains this Proc to <code>NAME</code>. The solver places <code>NAME</code> immediately after this
+Proc, in every Phase. Control may fall through, and a conditional branch may
+reach <code>NAME</code>.</p>
+<p>Five rules hold the pair together. <code>NAME</code> must be a Proc of this Module. It
+follows one Proc only. It is neither pinned nor aligned. The two are both
+<code>movable</code> or neither. The two are in one Pane or in none. A chain that comes
+back to where it started is an error.</p>
+<h3 id="branch-reach">Branch reach</h3>
+<p>A Bcc or a <a href="../instructions/">Jcc</a> reaches its own Section, or the entry of a
+Proc chained to it by <code>then</code> in either direction. Nothing else. Use <code>jmp</code>
+anywhere else.</p>
+<h2 id="data">Data</h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-name">ITEM</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">ITEM</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">word</span> <span class="t-name">ITEM</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">ITEM</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">hex</span>    <span class="t-name">STRING</span>
+<span class="t-directive">.</span><span class="t-directive">binary</span> <span class="t-name">STRING</span>
+<span class="t-directive">.</span><span class="t-directive">base64</span> <span class="t-name">STRING</span>
+<span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-name">EXPRESSION</span>
+<span class="t-directive">.</span><span class="t-directive">assert</span> <span class="t-name">EXPRESSION</span>
+</code></pre>
+<p><code>.byte</code> takes <code>Integer</code> or <code>String</code> items. <code>.word</code> takes <code>Integer</code> or <code>Address</code>.</p>
+<p><code>.hex</code>, <code>.binary</code> and <code>.base64</code> emit a payload: bytes written as characters of a
+string literal.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">hex</span>    <span class="t-string">&quot;ad 12 f4&quot;</span>
+<span class="t-directive">.</span><span class="t-directive">binary</span> <span class="t-string">&quot;00011000 00111100&quot;</span>
+<span class="t-directive">.</span><span class="t-directive">base64</span> <span class="t-string">&quot;ICEiIyQlJicoICEiIyQlJicoICEiIw==&quot;</span>
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Directive</th>
+<th>Alphabet</th>
+<th>Bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.hex</code></td>
+<td><code>0-9 A-F a-f</code></td>
+<td>2 characters, 1 byte</td>
+</tr>
+<tr>
+<td><code>.binary</code></td>
+<td><code>0 1</code></td>
+<td>8 characters, 1 byte</td>
+</tr>
+<tr>
+<td><code>.base64</code></td>
+<td><code>A-Z a-z 0-9 + / =</code></td>
+<td>4 characters, 3 bytes</td>
+</tr>
+</tbody>
+</table>
+<p>Space and tab inside the literal are ignored. A character outside the alphabet
+is an error, and so is a length that does not divide into whole bytes.</p>
+<p>A payload operand carries no character set prefix. A prefix says translate this,
+and a payload holds bytes that were never characters.</p>
+<p><code>.res</code> reserves space that occupies addresses and emits no bytes. Its operand is
+an <code>Integer</code> expression. <code>.res</code> takes no fill value.</p>
+<p>Reserved space has no defined value on entry to a Phase. It is not zero, and it
+is not what it held on the last visit, unless the Section is present in every
+Phase in between. Initialise your variables on entry.</p>
+<p>What a Container holds of a Section is its initialised extent: from the first
+statement that emits bytes to the end of the last. Reserved space in front of
+that or behind it costs nothing in storage. Reserved space between initialised
+bytes travels with them and holds whatever the load leaves there.</p>
+<p><code>.assert</code> states a condition checked after Place. Its expression is the one the
+tool cannot fold early.</p>
+<h2 id="ztemp-and-temp"><code>.ztemp</code> and <code>.temp</code></h2>
+<pre><code class="language-asm"><span class="t-label">NAME</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-name">EXPRESSION</span>
+<span class="t-label">NAME</span> <span class="t-directive">.</span><span class="t-directive">temp</span> <span class="t-name">EXPRESSION</span>
+</code></pre>
+<p>A Temporary is a Section whose value is not needed while no Section that names
+it is running or waiting for a call to return. Two Temporaries never active at
+the same time share an address.</p>
+<p>The declaration is your contract and the tool does not check it. A plain <code>.res</code>
+never shares.</p>
+<p><code>.ztemp</code> declares a zero page Section of <code>EXPRESSION</code> bytes, with <code>NAME</code> a Label
+at its start, and <code>temporary</code>. <code>.temp</code> is the same off the zero page. Neither
+takes an attribute. A Temporary that wants one is written as a <code>.section temporary</code> block.</p>
+<p>Two things the tool refuses. You may not take the address of a Temporary, since
+it has none to give while it is not active. A Temporary owned by a Section that
+a call from it comes back to is an error, since the second activation destroys
+the first value.</p>
+<p>A path that comes back through a <code>.transition</code> is not such a path. The routine
+jumps to the entered Phase's entry and resumes no frame.</p>
+<h2 id="transition"><code>.transition</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">transition</span> <span class="t-name">NAME</span>
+</code></pre>
+<p>Enters the Phase named and never returns. What follows it is reached only by a
+Label. It emits bytes and stands where an instruction stands.</p>
+<p><code>NAME</code> must be a Phase of the Project. From every Phase in which the enclosing
+Section is present there must be a <code>then</code> to <code>NAME</code>.</p>
+<h2 id="references-across-phases">References across Phases</h2>
+<p>A Reference from a Section present in Phases <em>R</em> to memory present in Phases <em>S</em>
+is legal only where every Phase of <em>R</em> is in <em>S</em>. Otherwise it encodes an
+address that holds something else in some Phase the referrer runs in, and the
+tool refuses it.</p>
+<p>The rule follows a Constant to the Label behind it. Every use in a statement
+that emits counts.</p>
+<p>Two things are exempt, because they are facts about a Section rather than
+memory: <code>runtimeSectionSize</code> and <code><a class="ref" href="../project-file/#resident">resident</a></code>. <code>.assert</code> emits nothing and may
+look anywhere.</p>
+<p><code>.transition</code> crosses Phases and is not a Reference in this sense.</p>
+<h2 id="slots">Slots</h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">NAME</span><span class="t-punctuation">,</span> <span class="t-name">binding</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">placement</span> <span class="t-punctuation">]</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">SLOT</span><span class="t-punctuation">,</span> <span class="t-name">SYMBOL</span>
+
+<span class="t-label">binding</span>   <span class="t-punctuation">=</span> <span class="t-name">pointer</span> <span class="t-punctuation">|</span> <span class="t-name">vector</span>
+<span class="t-label">placement</span> <span class="t-punctuation">=</span> <span class="t-name">zeropage</span> <span class="t-punctuation">|</span> <span class="t-name">absolute</span>
+</code></pre>
+<p>A <a href="../slots/">Slot</a> is a Symbol with at most one live definition per Phase. It
+is reached through a Cell the Transition routine rewrites on every edge.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">update</span><span class="t-punctuation">,</span> <span class="t-name">vector</span>                 <span class="t-comment">; jsr update</span>
+<span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">screenPtr</span><span class="t-punctuation">,</span> <span class="t-name">pointer</span><span class="t-punctuation">,</span> <span class="t-name">zeropage</span>   <span class="t-comment">; lda (screenPtr),y</span>
+
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">update</span><span class="t-punctuation">,</span> <span class="t-name">levelUpdate</span>
+</code></pre>
+<p>The Binding is required. <code>vector</code> is a <code>jmp</code> and an address. <code>pointer</code> is an
+address alone. The placement is the Cell's and defaults to <code>absolute</code>.</p>
+<p><code>.implements</code> says that SYMBOL fills SLOT wherever that Module is present.
+SYMBOL is a Label or a Section of the Module the directive stands in. Write both
+names in that order, anywhere in the Module. Export a Slot used across Modules.</p>
+<p>At most one Implementation is live in any Phase. A use of the Slot from a Module
+present in a Phase with no Implementation is an error at the use. A Phase with
+no Implementation and no use is fine.</p>
+<p>An Implementation stands in no Pane.</p>
+<h2 id="with"><code>.with</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">PANE</span>
+<span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">FAMILY</span><span class="t-punctuation">,</span> <span class="t-name">x</span>
+<span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">WINDOW</span><span class="t-punctuation">,</span> <span class="t-name">x</span>
+<span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">WINDOW</span> <span class="t-punctuation">=</span> <span class="t-name">STATE</span>
+</code></pre>
+<p>Shows something over the one statement that follows. Then shows again what stood
+before. See <a href="../panes/">Panes</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Shows</th>
+<th>State known</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.with PANE</code></td>
+<td>that Pane</td>
+<td>after Place</td>
+</tr>
+<tr>
+<td><code>.with FAMILY + n</code></td>
+<td>member <code>n</code> of a family</td>
+<td>after Place</td>
+</tr>
+<tr>
+<td><code>.with FAMILY, x</code></td>
+<td>the member whose state is in <code>X</code></td>
+<td>at run time</td>
+</tr>
+<tr>
+<td><code>.with WINDOW, x</code></td>
+<td>the state of the Window that is in <code>X</code></td>
+<td>at run time</td>
+</tr>
+<tr>
+<td><code>.with WINDOW = STATE</code></td>
+<td>a named state of the Window</td>
+<td>where you write it</td>
+</tr>
+</tbody>
+</table>
+<p>Several <code>.with</code> lines over one statement nest, each on a different Window. The
+tool shows them in textual order and puts them back in reverse.</p>
+<p>A <code>.with</code> that shows what the Window shows already changes nothing. The tool
+says so.</p>
+<p>The statement under a <code>.with</code> may not return. It would leave the Window as
+shown. A <code>jsr</code> returns to where the exit stands, so you may write one.</p>
+<p>Code in a Pane of the Window cannot switch that Window. The switch would take
+the code with it.</p>
+<p>A <code>.with</code> may stand in a macro body over one statement of the body. What it
+names may be a parameter.</p>
+<h3 id="window-state"><code>WINDOW = STATE</code></h3>
+<p><code>STATE</code> is a named state of that Window.</p>
+<p>The variant lists a Window's states after <code>views</code>. A name there is a unit set,
+which contributes one state per Bank and has no name of its own, or a named
+state of the hardware. Only a named state may stand after <code>=</code>.</p>
+<pre><code class="language-asm"><span class="t-label"><a class="ref" href="../project-file/#window">window</a></span> <span class="t-macro">os</span> <span class="t-number">$C000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span><span class="t-punctuation">,</span> <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-name">views</span> <span class="t-name">rom</span><span class="t-punctuation">,</span> <span class="t-name">ram</span>  <span class="t-name">base</span> <span class="t-name">rom</span>
+</code></pre>
+<pre><code class="language-asm">        <span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">os</span> <span class="t-punctuation">=</span> <span class="t-name">ram</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">underTheRom</span>
+</code></pre>
+<p><code>rom</code> and <code>ram</code> are named states. A unit set's name is <code><a class="ref" href="../diagnostics/#nga3003">NGA3003</a></code> here, and so is
+a name the Window does not list.</p>
+<p>You name the state where you write it, so the tool knows what the statement
+sees.</p>
+<h3 id="window-x-and-family-x"><code>WINDOW, x</code> and <code>FAMILY, x</code></h3>
+<p><code>X</code> holds the state to show. The tool hands it to the driver's <code>showAt</code> role.</p>
+<p>Use these two forms where the state is data. A loop over Banks is the case they
+exist for.</p>
+<p>Where you know the state at the line you write, use <code>.with PANE</code>.
+<code>ldx #level</code> is legal, and <code>.with ext, x</code> after it shows the right Bank. The
+tool then knows nothing about what stands there. It refuses every name of the
+Pane under the statement. <code>.with level</code> shows the same Bank and keeps the names.</p>
+<h4 id="where-a-state-number-comes-from">Where a state number comes from</h4>
+<p>You do not write it. A Pane's name is the state the solver gave it. A family's
+member is <code>FAMILY + n</code>.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">states</span>  <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-name">level</span><span class="t-punctuation">,</span> <span class="t-name">tables</span><span class="t-punctuation">,</span> <span class="t-name">tables</span> <span class="t-punctuation">+</span> <span class="t-number">1</span>
+<span class="t-label">statesEnd</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre>
+<p>The solver decides those three bytes. Read one at run time and hand it over:</p>
+<pre><code class="language-asm">        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@each</span>   <span class="t-mnemonic">ldx</span> <span class="t-name">states</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">ext</span><span class="t-punctuation">,</span> <span class="t-name">x</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">readThrough</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">cpy</span> <span class="t-punctuation">#</span><span class="t-name">statesEnd</span> <span class="t-punctuation">-</span> <span class="t-name">states</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@each</span>
+</code></pre>
+<p>Only <code>x</code> works. <code>.with ext, y</code> is an error.</p>
+<p>A Pane's value stands in three places: an immediate operand, an item of <code>.byte</code>
+or <code>.word</code>, and the argument of a driver's role. You may compute nothing on it,
+so <code>.assert level == 4</code> is an error. The one admitted operation is <code>FAMILY + n</code>,
+with <code>n</code> from zero to the count.</p>
+<p>A unit set's name is the count of its Banks. <code>extension</code> is 4 where the variant
+declares four Banks.</p>
+<h4 id="what-you-may-do-under-one">What you may do under one</h4>
+<p>You may name nothing of that Window. The tool can promise no state, so it
+refuses the name.</p>
+<p>The rule follows every <code>jsr</code> and <code>jmp</code> out of the statement. A routine two calls
+away that names a Pane's Section is caught:</p>
+<pre><code class="language-asm"><span class="t-label">error</span><span class="t-punctuation">[</span><span class="t-name"><a class="ref" href="../diagnostics/#nga3008">NGA3008</a></span><span class="t-punctuation">]</span><span class="t-punctuation">:</span> <span class="t-name">what</span> <span class="t-name">this</span> <span class="t-name">statement</span> <span class="t-name">reaches</span> <span class="t-name">names</span> <span class="t-unknown">`</span><span class="t-name">levelData</span><span class="t-unknown">`</span><span class="t-punctuation">,</span> <span class="t-name">in</span> <span class="t-name">pane</span> <span class="t-unknown">`</span><span class="t-name">level</span><span class="t-unknown">`</span><span class="t-punctuation">,</span>
+                <span class="t-macro">which</span> <span class="t-name">this</span> <span class="t-unknown">`</span><span class="t-punctuation">.</span><span class="t-name">with</span><span class="t-unknown">`</span> <span class="t-name">does</span> <span class="t-name">not</span> <span class="t-name">show</span>
+</code></pre>
+<p>You may reach the memory through a pointer. The rule holds over Symbols and not
+over addresses.</p>
+<p>A Label of the Pane cannot build that pointer. <code>lda #&lt;levelData</code> outside the
+Pane is <code><a class="ref" href="../diagnostics/#nga2412">NGA2412</a></code>, as <code>lda levelData</code> is. Use the Window's own address, which
+the variant declares:</p>
+<pre><code class="language-asm"><span class="t-label">extWindow</span> <span class="t-punctuation">=</span> <span class="t-number">$4000</span>               <span class="t-comment">; the range the variant gave `ext`</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><span class="t-name">extWindow</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ptr</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><span class="t-name">extWindow</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">ptr</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">states</span>
+        <span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">ext</span><span class="t-punctuation">,</span> <span class="t-name">x</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">readThrough</span>         <span class="t-comment">; reads (ptr),y</span>
+</code></pre>
+<p>Put the Window's address in a pointer, show the state, and work through the
+pointer. <code>fixed</code> memory and the hardware stay visible.</p>
+<p>These two forms suit data laid out the same way in every Bank. To name what one
+Bank holds, declare a Pane and write <code>.with PANE</code>.</p>
+<h2 id="own-and-root"><code>.own</code> and <code>.root</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">own</span> <span class="t-punctuation">[</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span> <span class="t-punctuation">]</span>
+<span class="t-directive">.</span><span class="t-directive">root</span>
+</code></pre>
+<p>Stands on the line before a statement that takes an address: <code>#&lt;name</code>, <code>#&gt;name</code>,
+an item of <code>.byte</code> or <code>.word</code>. See <a href="../roots/">Roots</a>.</p>
+<p><code>.own</code> with no name says this Section follows the address. <code>.own NAME</code> names the
+follower: a Section, a Proc, or a Label, and several separated by commas.</p>
+<p>The tool takes your word for it and checks nothing, except that the follower
+must be present wherever the code it follows is.</p>
+<p><code>.root</code> says the address goes to the hardware. What it names becomes a Root from
+there.</p>
+<p>An address of code taken with neither is an error. So is the address of a
+Temporary.</p>
+<p>A Section that jumps through a pointer and owns no address of code is an error,
+because it would jump nowhere.</p>
+<p>Where a table holds positions of the Section that jumps through it, use
+<a href="#dispatch"><code>.dispatch</code></a> instead. A <code>.own</code> on such a table leaves the flow
+unknown.</p>
+<p>Either directive before anything but an instruction, a <code>.byte</code> or a <code>.word</code> is
+an error. Both on one statement is an error.</p>
+<h2 id="dispatch"><code>.dispatch</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">dispatch</span> <span class="t-name">TARGET</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">TARGET</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+</code></pre>
+<p>Control goes to one of the positions named, chosen by the value in <code>A</code>, and
+never to the statement after it. See <a href="../instructions/">Instructions</a>.</p>
+<p>Every target is a position of the Section the statement stands in. A target may
+stand more than once, which is how you write holes and a default.</p>
+<p>The caller holds the value below the number of targets. The statement does not
+check.</p>
+<p>Written over several rows it is one statement. A <code>.dispatch</code> with no Label
+between it and the one above continues it. A Label between two rows ends the
+statement.</p>
+<p>The form reaches 128 targets on a 65SC02 and 256 on a 6502. Above that is an
+error.</p>
+<p>It stands in a Section or a Proc and not in a macro body.</p>
+<h2 id="macro"><code>.macro</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-name">PATTERN</span> <span class="t-punctuation">]</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+<span class="t-directive">.</span><span class="t-directive">endmacro</span>
+
+<span class="t-label">NAME</span> <span class="t-punctuation">[</span> <span class="t-name">item</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">item</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span> <span class="t-punctuation">]</span>
+
+<span class="t-label">PATTERN</span> <span class="t-punctuation">=</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span> <span class="t-punctuation">[</span> <span class="t-punctuation">...</span> <span class="t-punctuation">]</span>
+<span class="t-label">item</span>    <span class="t-punctuation">=</span> <span class="t-name">expr</span> <span class="t-punctuation">|</span> <span class="t-name">NAME</span><span class="t-punctuation">...</span>
+</code></pre>
+<p>A macro is a body assembled once into a template and instantiated at each use.
+It is never text replayed. See <a href="../macros/">Macros</a>.</p>
+<p>A definition stands at the top level of a Module, outside <code>.section</code>, <code>.proc</code>
+and any other <code>.macro</code>.</p>
+<p>The body holds instructions, <code>.byte</code>, <code>.word</code>, a payload, labels, uses of other
+macros, and a <code>.with</code> over one of its statements. A Constant, a reservation, a
+Section, a <code>.transition</code> or any other directive is an error.</p>
+<p>A use is the macro's name where a mnemonic stands, indented like one, with
+comma-separated arguments. An argument is an expression and nothing else: no
+<code>#</code>, no <code>,x</code> or <code>,y</code>, and no parenthesis that indirects.</p>
+<p>A name may be qualified, such as <code>one.fill</code> or <code>nga.read</code>. A qualified name is a
+use whatever follows it, because no instruction is qualified.</p>
+<p>A macro is a Symbol of kind <code>Macro</code>. It is private to its Module, exported with
+<code>.export</code>, and never a value.</p>
+<p>A macro may use itself. The body's conditionals are decided before any Chunk is
+instantiated, so a use in a branch not taken is never expanded:</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">fill</span> <span class="t-name">n</span>
+<span class="t-directive">.</span><span class="t-directive">if</span> <span class="t-name">n</span> <span class="t-punctuation">&gt;</span> <span class="t-number">0</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-name">n</span>
+        <span class="t-macro">fill</span> <span class="t-name">n</span> <span class="t-punctuation">-</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">endif</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+</code></pre>
+<p>A recursion whose condition never turns false is an error at 1024 uses deep, or
+at 65536 statements produced.</p>
+<p>An argument with a <a href="#declared-values">declared value</a> is substituted as that
+value. This keeps <code>fill n - 1</code> one node deep however far the recursion goes.</p>
+<p>An argument that adds a declared number is carried as a sum. <code>walk n - 1, at + 2</code>
+substitutes <code>table + 6</code> at the fourth use, not <code>table + 2 + 2 + 2</code>.</p>
+<p>A name in the body means what the macro's own Module sees. A name in an argument
+means what the use's Module sees.</p>
+<p>A label of a body is the body's, per expansion, and appears in no symbol table.
+It is unique in its body and may not take a parameter's name.</p>
+<p>A use is one Chunk. A Label before it names its start. Nothing outside can name
+a position inside.</p>
+<h3 id="packs">Packs</h3>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-name">NAME</span> <span class="t-punctuation">,</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span> <span class="t-name">NAME</span><span class="t-punctuation">...</span>
+
+<span class="t-directive">.</span><span class="t-directive">match</span> <span class="t-name">NAME</span>
+<span class="t-directive">.</span><span class="t-directive">case</span> <span class="t-punctuation">[</span> <span class="t-name">PATTERN</span> <span class="t-punctuation">]</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">case</span> <span class="t-punctuation">[</span> <span class="t-name">PATTERN</span> <span class="t-punctuation">]</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endmatch</span>
+</code></pre>
+<p>The last parameter of a macro may be a pack, written <code>rest...</code> with the dots
+touching the name. It takes every argument the names before it do not. Only the
+last parameter may be one.</p>
+<p>A pack has two readings, and the parser tells them apart by where the name
+stands:</p>
+<ul>
+<li><code>rest...</code> as an item of a list spreads the pack. Its elements stand in its
+place. An empty pack spreads to nothing. A spread is an item and never an
+operand.</li>
+<li><code>rest</code> alone in an expression is how many elements it has. It is an <code>Integer</code>
+with a declared value.</li>
+</ul>
+<p><code>.match</code> chooses a <code>.case</code> by how many elements a pack has. A <code>.case</code> fits when
+the pack has exactly as many elements as the pattern's fixed names, or at least
+that many when the pattern ends in a pack of its own. The first case that fits
+is kept. A <code>.case</code> with no names fits the empty pack.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name">push</span> <span class="t-name">args</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">match</span> <span class="t-name">args</span>
+<span class="t-directive">.</span><span class="t-directive">case</span> <span class="t-name">first</span><span class="t-punctuation">,</span> <span class="t-name">rest</span><span class="t-punctuation">...</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-name">first</span>
+        <span class="t-mnemonic">pha</span>
+        <span class="t-macro">push</span> <span class="t-name">rest</span><span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">case</span>
+<span class="t-directive">.</span><span class="t-directive">endmatch</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+</code></pre>
+<p>No case fitting is an error at the use. A case an earlier one always fits before
+is a warning at that case.</p>
+<p>A <code>.match</code> names a pack and stands in a macro body. It holds <code>.case</code> blocks and
+nothing before the first, at least one, and closes with <code>.endmatch</code>.</p>
+<h2 id="conditional-assembly">Conditional assembly</h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">if</span> <span class="t-name">CONDITION</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">elsif</span> <span class="t-name">CONDITION</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">else</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endif</span>
+<span class="t-directive">.</span><span class="t-directive">endi</span>
+</code></pre>
+<p>Chooses which statements are assembled. <code>.elsif</code> may repeat. <code>.elsif</code> after
+<code>.else</code> is an error. See <a href="../conditionals/">Conditionals and packs</a>.</p>
+<p>The condition must be a <a href="#declared-values">declared value</a>. It decides how many
+bytes there are, so a condition naming a position or a size would make a size
+depend on itself.</p>
+<p>The tool answers the condition once every Module's Symbols are known and before
+anything walks a Chunk. A condition inside a branch that was not taken is never
+asked. A macro use in one is never expanded.</p>
+<p>A branch holds what a macro body holds: instructions, <code>.byte</code>, <code>.word</code>, a
+payload, <code>.res</code>, macro uses and a <code>.with</code> over one of them. A Section, a Proc, a
+macro, a Namespace, a Charset, a Constant, a Temporary, a <code>.transition</code>, an
+<code>.assert</code>, an <code>.export</code> or a <code>.off</code> is an error.</p>
+<p>No Symbol is ever conditional. Write a label in a branch as <code>@name</code>.</p>
+<p><code>.if</code> may stand in a <code>.section</code>, a <code>.proc</code> or a macro body. In a <code>.section</code> a
+branch holds no labels at all, because <code>@</code> needs a Proc or a macro body.</p>
+<p>A local label of a branch belongs to that branch. A definition is visible in the
+same branch or one it contains, and nowhere else.</p>
+<p>In a macro body the condition may name a parameter. The tool answers it per use,
+before the body is instantiated.</p>
+<h2 id="namespaces">Namespaces</h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">namespace</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">.</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endnamespace</span>
+<span class="t-directive">.</span><span class="t-directive">endns</span>
+</code></pre>
+<p>A Namespace is a scope for Symbols reached with a dot. A Symbol defined inside
+<code>.namespace one</code> is <code>one.start</code>. <code>.namespace one.two</code> opens both and closes with
+one <code>.endns</code>.</p>
+<p>A block stands at the top level of a Module, or in a Proc, and in no Section and
+no macro body. It holds Sections, Procs, Temporaries, Constants, Slots and
+macros.</p>
+<p>A block in a Proc holds what stands beside the Proc, and not the Proc's code,
+data, labels or declarations.</p>
+<p>Several Modules open one Namespace by opening blocks of one name.</p>
+<p><code>.charset</code> stands at the top level and nowhere else.</p>
+<h3 id="how-a-name-is-found">How a name is found</h3>
+<p>The tool searches from the block outwards. Inside <code>.namespace one.two</code>, <code>NAME</code>
+means <code>one.two.NAME</code> if that exists, then <code>one.NAME</code>, then <code>NAME</code>. At each step
+it takes this Module's own Symbols first and the exported ones second.</p>
+<p>A qualified name such as <code>one.gfx</code> is the same search applied to the whole.</p>
+<p>A Namespace is not a value. A Symbol named exactly as a Namespace is an error,
+except for the Label of a <code>.proc</code>.</p>
+<p>A name defined inside a block hides the one its Module defines under the same
+bare name.</p>
+<p>A leading dot means the Module's top level. Inside <code>.proc worker</code>, <code>.count</code>
+means the <code>count</code> at the top level whatever the enclosing scopes define.</p>
+<p><code>.export</code>, <code>.transform</code>, <code>.driver</code>, <code>.implements</code> and <code>then</code> resolve the name in
+the block they stand in and take no qualification.</p>
+<p><code>nga</code> is the tool's Namespace. No Module opens or defines it.</p>
+<h2 id="charset"><code>.charset</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">:</span> <span class="t-name">BASE</span> <span class="t-punctuation">[</span> <span class="t-punctuation">^</span> <span class="t-name">EXPRESSION</span> <span class="t-punctuation">]</span> <span class="t-punctuation">]</span>
+  <span class="t-macro">STRING</span> <span class="t-punctuation">=</span> <span class="t-name">EXPRESSION</span>
+  <span class="t-punctuation">...</span>
+<span class="t-directive">.</span><span class="t-directive">endcharset</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+</code></pre>
+<p>Declares a Charset and defines a Symbol of that kind. It emits nothing. See
+<a href="../character-sets/">Character sets</a>.</p>
+<p>An entry maps a run. The first character of the string takes the byte on the
+right and the rest follow consecutively.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name">font</span>
+  <span class="t-string">&quot;ABCDEFGHIJKLMNOPRSTUWYZĄĆĘŁŃÓŚŹŻ&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$00</span>
+  <span class="t-string">&quot;0123456789&quot;</span>                        <span class="t-punctuation">=</span> <span class="t-number">$20</span>
+  <span class="t-string">&quot; .,!?&quot;</span>                             <span class="t-punctuation">=</span> <span class="t-number">$2A</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+</code></pre>
+<p>The order is the one you typed. There is no range form. A character literal on
+the left is an error, so write a one-character run as <code>&quot;A&quot; = $21</code>.</p>
+<p>A run is a list of code points rather than text. It may hold whatever the font
+draws. It carries no prefix.</p>
+<p>The right side is an <code>Integer</code> with a <a href="#declared-values">declared value</a>. A run
+that passes <code>$FF</code> is an error.</p>
+<p>Two code points may share a byte and the tool says nothing. Mapping one code
+point twice inside a block is an error.</p>
+<p>The tool checks a prefixed literal once every declaration in the program is
+known. A character its set does not map is an error there.</p>
+<h3 id="derivation">Derivation</h3>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name">inv</span> <span class="t-punctuation">:</span> <span class="t-name">atascii</span> <span class="t-punctuation">^</span> <span class="t-number">$80</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+</code></pre>
+<p>A derived Charset takes every mapping of its base and applies one transform to
+each byte. <code>^</code> is the only transform.</p>
+<p>Entries in a derived block override the base and may add a code point the base
+does not map. The order is base, then transform, then overrides.</p>
+<p>The base may come from another Module. A Charset derived from itself is an
+error.</p>
+<p>A block is closed whether or not it holds anything. A block holds entries, blank
+lines and comments, and nothing else.</p>
+<h2 id="export"><code>.export</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">NAME</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">NAME</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+</code></pre>
+<p>A Symbol is private to its Module until you export it. Any kind may be exported:
+a Label, a Constant, a Charset, a macro, a Slot.</p>
+<p>Exporting a Section name lets another Module read its
+<a href="#attribute-access">attributes</a>. A Section is not a value, so its bare name is
+an error wherever an operand belongs.</p>
+<p><code>.export</code> emits nothing. It may stand anywhere a statement may stand, and before
+the definition as readily as after it.</p>
+<p>Exporting a name the Module does not define is an error. So is exporting a
+position inside a Proc.</p>
+<p>An export is not a Root. A Module that uses the name provides the Reference that
+keeps it.</p>
+<p>The Project needs no export to reach a Section.</p>
+<h2 id="driver-and-transform"><code>.driver</code> and <code>.transform</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">ROLE</span> <span class="t-name">NAME</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">ROLE</span> <span class="t-name">WINDOW</span> <span class="t-name">NAME</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">stream</span> <span class="t-name">WINDOW</span>
+
+<span class="t-directive">.</span><span class="t-directive"><a class="ref" href="../project-file/#transform">transform</a></span> <span class="t-name">FORMAT</span> <span class="t-name">LABEL</span>
+</code></pre>
+<p><code>.driver</code> declares that this Module is the storage driver and what provides each
+role. One Module of the program declares the driver, and its Module is resident.</p>
+<p><code>.transform</code> declares that this Module's <code>LABEL</code> decodes <code>FORMAT</code>. The Label is
+one of this Module's and the declaration exports it. A format has one decoder
+across the program. A program with a Transition declares one for <code>copy</code>.</p>
+<h2 id="off"><code>.off</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">off</span> <span class="t-name">CODE</span> <span class="t-punctuation">[</span> <span class="t-punctuation">,</span> <span class="t-name">CODE</span> <span class="t-punctuation">]</span><span class="t-punctuation">...</span>
+</code></pre>
+<p>Silences the warning each <code>CODE</code> names on the statement that follows, and
+nowhere else. Several <code>.off</code> lines before one statement all apply to it.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">off</span> <span class="t-name"><a class="ref" href="../diagnostics/#nga5218">NGA5218</a></span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0100</span>
+<span class="t-label">stackBottom</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">16</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre>
+<p>Only a warning is silenced. An error never is, so a <code>deny</code> outranks a <code>.off</code>.</p>
+<p>A <code>.off</code> that silenced nothing is a warning of its own, so one left behind after
+the finding went away does not sit in the source looking like it works.</p>
+<p>A <code>CODE</code> naming no diagnostic is an error.</p>
+<h2 id="source"><code>.source</code></h2>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">source</span> <span class="t-string">&quot;PATH&quot;</span><span class="t-punctuation">,</span> <span class="t-name">LINE</span>
+</code></pre>
+<p>Says that the text from here to the next <code>.source</code> came from <code>LINE</code> of the file
+<code>PATH</code>. A <a href="../generators/">generator</a> writes this into the assembler it emits,
+so that a finding on its output names the line of its input.</p>
+<p>The path is a bare string. The line counts from 1. The directive emits nothing
+and applies by position, so it stands wherever a line may stand.</p>
+<h2 id="expressions">Expressions</h2>
+<h3 id="types">Types</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Produced by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Integer</code></td>
+<td>numeric and character literals, <code>label - label</code>, <code>runtimeSectionSize</code>, <code><a class="ref" href="../project-file/#resident">resident</a></code>, comparisons, byte extraction</td>
+</tr>
+<tr>
+<td><code>Address</code></td>
+<td>a Label, a Slot, <code>label + n</code>, <code>runtimeSectionAddress</code></td>
+</tr>
+<tr>
+<td><code>String</code></td>
+<td>a string literal</td>
+</tr>
+<tr>
+<td><code>Section</code></td>
+<td>the name of a Section, only before a dot</td>
+</tr>
+<tr>
+<td><code>Pane</code></td>
+<td>the name of a Pane, and a family's member <code>pane + n</code></td>
+</tr>
+</tbody>
+</table>
+<p>A Charset is not an expression type. A Charset names itself only as a literal's
+prefix.</p>
+<h3 id="operators">Operators</h3>
+<pre><code class="language-asm"><span class="t-punctuation">-</span><span class="t-name">x</span>  <span class="t-punctuation">~</span><span class="t-name">x</span>  <span class="t-punctuation">!</span><span class="t-name">x</span>          <span class="t-name">Integer</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Integer</span><span class="t-comment">;  an Address is an error</span>
+<span class="t-punctuation">&lt;</span><span class="t-name">x</span>  <span class="t-punctuation">&gt;</span><span class="t-name">x</span>              <span class="t-name">Integer</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Integer</span><span class="t-comment">;  Address -&gt; Integer</span>
+
+<span class="t-label">a</span> <span class="t-punctuation">+</span> <span class="t-name">b</span>               <span class="t-name">Int</span><span class="t-punctuation">+</span><span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>   <span class="t-name">Addr</span><span class="t-punctuation">+</span><span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Addr</span>   <span class="t-name">Addr</span><span class="t-punctuation">+</span><span class="t-name">Addr</span> <span class="t-name">is</span> <span class="t-name">an</span> <span class="t-name">error</span>
+<span class="t-label">a</span> <span class="t-punctuation">-</span> <span class="t-name">b</span>               <span class="t-name">Int</span><span class="t-punctuation">-</span><span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>   <span class="t-name">Addr</span><span class="t-punctuation">-</span><span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Addr</span>   <span class="t-name">Addr</span><span class="t-punctuation">-</span><span class="t-name">Addr</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+                                                        <span class="t-macro">Int</span><span class="t-punctuation">-</span><span class="t-name">Addr</span> <span class="t-name">is</span> <span class="t-name">an</span> <span class="t-name">error</span>
+<span class="t-label">a</span> <span class="t-punctuation">*</span> <span class="t-name">b</span>   <span class="t-name">a</span> <span class="t-punctuation">/</span> <span class="t-name">b</span>       <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">&lt;&lt;</span> <span class="t-name">b</span>  <span class="t-name">a</span> <span class="t-punctuation">&gt;&gt;</span> <span class="t-name">b</span>      <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">&amp;</span> <span class="t-name">b</span>  <span class="t-name">a</span> <span class="t-punctuation">|</span> <span class="t-name">b</span>  <span class="t-name">a</span> <span class="t-punctuation">^</span> <span class="t-name">b</span> <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>  <span class="t-name">Addr</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">==</span> <span class="t-name">b</span>  <span class="t-name">a</span> <span class="t-punctuation">!=</span> <span class="t-name">b</span>      <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>  <span class="t-name">Addr</span><span class="t-punctuation">,</span> <span class="t-name">Addr</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>  <span class="t-name">Addr</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">&lt;</span> <span class="t-name">b</span>   <span class="t-name">a</span> <span class="t-punctuation">&lt;=</span> <span class="t-name">b</span>      <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>  <span class="t-name">Addr</span><span class="t-punctuation">,</span> <span class="t-name">Addr</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>  <span class="t-name">Addr</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">&gt;</span> <span class="t-name">b</span>   <span class="t-name">a</span> <span class="t-punctuation">&gt;=</span> <span class="t-name">b</span>
+<span class="t-label">a</span> <span class="t-punctuation">&amp;&amp;</span> <span class="t-name">b</span>  <span class="t-name">a</span> <span class="t-punctuation">||</span> <span class="t-name">b</span>      <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">Int</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">Int</span>
+<span class="t-label">a</span> <span class="t-punctuation">?</span> <span class="t-name">b</span> <span class="t-punctuation">:</span> <span class="t-name">c</span>           <span class="t-name">Int</span><span class="t-punctuation">,</span> <span class="t-name">then</span> <span class="t-name">two</span> <span class="t-name">of</span> <span class="t-name">one</span> <span class="t-name">type</span> <span class="t-punctuation">-</span><span class="t-punctuation">&gt;</span> <span class="t-name">that</span> <span class="t-name">type</span>
+</code></pre>
+<p><code>String</code> and <code>Section</code> have no operators.</p>
+<p>Negating one Address is an error although subtracting two is not. The distance
+between two positions is a quantity. The negation of one position is not.</p>
+<p>Bitwise operators accept an Address with an Integer and yield an Integer, so
+<code>buffer &amp; $FF00</code> is a page base.</p>
+<p>Comparisons accept an Address with an Integer, so <code>.assert displayList == $2000</code>
+asks the question <code>.assert</code> exists to ask.</p>
+<h3 id="the-conditional-value">The conditional value</h3>
+<pre><code class="language-asm"><span class="t-label">CONDITION</span> <span class="t-punctuation">?</span> <span class="t-name">TAKEN</span> <span class="t-punctuation">:</span> <span class="t-name">OTHERWISE</span>
+</code></pre>
+<p>Chooses between two values. The condition is an <code>Integer</code>. The two answers must
+be of one type, which is the type of the whole. That type is an <code>Integer</code> or an
+<code>Address</code>.</p>
+<p>The tool evaluates the condition and the answer taken, and nothing else. So
+<code>narrow ? 4 : buffer.runtimeSectionSize</code> has a declared value when <code>narrow</code>
+holds, and it can decide the width of an instruction.</p>
+<p>Two <code>Address</code> answers must lie in one Section and one space.</p>
+<p>This is a conditional value and not conditional assembly. Both answers are
+References, so both keep what they name from being pruned.</p>
+<h3 id="subtracting-addresses">Subtracting addresses</h3>
+<p><code>Addr - Addr</code> is legal only where both sides lie in the same Section and the same
+space. A comparison between two Addresses follows the same rule. One against an
+Integer does not.</p>
+<p>The tool refuses the rest because the number would be a property of the layout
+rather than of the program. Another build may produce a different one with no
+change to the source.</p>
+<p>Within one Section the rule gives two things. <code>dataEnd - data</code> is the size of
+what lies between them, known after Size and before any address exists. The
+offset of a Label inside its Section is <code>label - mySection.runtimeSectionAddress</code>.</p>
+<h3 id="precedence">Precedence</h3>
+<p>Weakest to strongest:</p>
+<pre><code class="language-asm"><span class="t-punctuation">?</span> <span class="t-punctuation">:</span>                   <span class="t-name">conditional</span><span class="t-punctuation">,</span> <span class="t-name">right</span><span class="t-punctuation">-</span><span class="t-name">associative</span>
+<span class="t-punctuation">||</span>
+<span class="t-punctuation">&amp;&amp;</span>
+<span class="t-punctuation">|</span>
+<span class="t-punctuation">^</span>
+<span class="t-punctuation">&amp;</span>
+<span class="t-punctuation">==</span>  <span class="t-punctuation">!=</span>
+<span class="t-punctuation">&lt;</span>  <span class="t-punctuation">&lt;=</span>  <span class="t-punctuation">&gt;</span>  <span class="t-punctuation">&gt;=</span>          <span class="t-name">comparison</span>
+<span class="t-punctuation">&lt;</span><span class="t-name">x</span>  <span class="t-punctuation">&gt;</span><span class="t-name">x</span>                <span class="t-name">byte</span> <span class="t-name">extraction</span><span class="t-punctuation">,</span> <span class="t-name">prefix</span>
+<span class="t-punctuation">&lt;&lt;</span>  <span class="t-punctuation">&gt;&gt;</span>
+<span class="t-punctuation">+</span>  <span class="t-punctuation">-</span>
+<span class="t-punctuation">*</span>  <span class="t-punctuation">/</span>
+<span class="t-punctuation">-</span><span class="t-name">x</span>  <span class="t-punctuation">~</span><span class="t-name">x</span>  <span class="t-punctuation">!</span><span class="t-name">x</span>            <span class="t-name">other</span> <span class="t-name">prefixes</span>
+<span class="t-directive">.</span>                     <span class="t-directive">attribute</span> <span class="t-name">access</span>
+</code></pre>
+<p>Every level except byte extraction is C's, in C's order. The conditional is C's
+too: loosest of all, and right-associative.</p>
+<p>Byte extraction is the one level C does not have. It binds looser than
+arithmetic and tighter than comparison, so <code>&lt;foo+1</code> is the low byte of <code>foo+1</code>,
+and <code>&lt;foo == 0</code> is <code>(&lt;foo) == 0</code>. Write <code>(&lt;foo)+1</code> for the other reading.</p>
+<p>Two combinations require parentheses rather than being resolved:</p>
+<pre><code class="language-asm"><span class="t-label">a</span> <span class="t-punctuation">+</span> <span class="t-name">b</span> <span class="t-punctuation">&lt;&lt;</span> <span class="t-number">2</span>            <span class="t-comment">; error: parenthesise</span>
+<span class="t-label">a</span> <span class="t-punctuation">&amp;</span> <span class="t-number">$FF</span> <span class="t-punctuation">==</span> <span class="t-number">0</span>          <span class="t-comment">; error: parenthesise</span>
+</code></pre>
+<p>The parser refuses to guess in exactly these two places and names the two
+readings it is between.</p>
+<h3 id="depth">Depth</h3>
+<p>Operators nest at most 64 deep, and so do parentheses. The two are counted
+apart.</p>
+<h3 id="attribute-access">Attribute access</h3>
+<pre><code class="language-asm"><span class="t-label">label</span><span class="t-directive">.</span><span class="t-directive">runtimeSectionAddress</span>     <span class="t-name">Address</span><span class="t-punctuation">:</span> <span class="t-name">where</span> <span class="t-name">the</span> <span class="t-name">Section</span> <span class="t-name">starts</span>
+<span class="t-label">label</span><span class="t-directive">.</span><span class="t-directive">runtimeSectionSize</span>        <span class="t-name">Integer</span><span class="t-punctuation">:</span> <span class="t-name">the</span> <span class="t-character">Section&#x27;s size, reservations included</span>
+<span class="t-label">label</span><span class="t-directive">.</span><span class="t-directive"><a class="ref" href="../project-file/#resident">resident</a></span>                  <span class="t-name">Integer</span><span class="t-punctuation">:</span> <span class="t-number">1</span> <span class="t-name">when</span> <span class="t-name">the</span> <span class="t-name">Section</span> <span class="t-name">is</span> <span class="t-name">present</span> <span class="t-name">in</span> <span class="t-name">every</span> <span class="t-name">Phase</span>
+</code></pre>
+<p>The attributes belong to a Section. Every Label of the Section reaches them,
+wherever in it the Label stands. Anything that is not a Label has no attributes.</p>
+<p>A name inside a Proc cannot take them, because <code>NAME.runtimeSectionSize</code> is the
+Proc's size.</p>
+<p><code><a class="ref" href="../project-file/#resident">resident</a></code> is read from the Project. <code>.assert vars.resident</code> is how source states
+that it depends on a Section being present in every Phase.</p>
+<p><code>storagePayloadAddress</code> and <code>storagePayloadSize</code> are reserved and not built.</p>
+<h2 id="declared-values">Declared values</h2>
+<p>An expression has a declared value when every leaf of it is a numeric or
+character literal, or a Constant whose own expression has a declared value.
+Nothing that names a position or a size may appear in it.</p>
+<p>The rule is about the shape of the definitions and not about when a value
+becomes available. <code>lda VBLANK + 2</code> is legal whether <code>VBLANK</code> is defined above,
+below, or in another Module. A cycle among Constants is an error.</p>
+<p>A declared value is required by <code>at</code>, <code>align</code>, <code>within</code>, a <code>.charset</code> entry, a
+derivation mask, an <code>.if</code> condition, and any operand that is an <code>Integer</code> rather
+than an <code>Address</code>.</p>
+<h3 id="integer-operands">Integer operands</h3>
+<p>An operand may be an <code>Integer</code> rather than an <code>Address</code>. Use this to reach a
+hardware register. A register the Target names is such an <code>Integer</code>.</p>
+<pre><code class="language-asm"><span class="t-label">lda</span> <span class="t-number">$D01A</span>
+<span class="t-label">lda</span> <span class="t-macro">COLBK</span>
+<span class="t-label">lda</span> <span class="t-macro">VBLANK</span> <span class="t-punctuation">+</span> <span class="t-number">2</span>
+</code></pre>
+<p>Such an operand has no PlacementClass to inherit, so its value decides the width
+of the instruction. That is why the value must be declared.</p>
+<p><code>lda dataEnd - data</code> has Labels at its leaves and has no declared value. The
+tool reports that it cannot determine the placement class.</p>
+<p>A hardcoded address is a claim the solver cannot see. What the tool says depends
+on the Region the address falls in:</p>
+<table>
+<thead>
+<tr>
+<th>Where the address lands</th>
+<th>Reported</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>where the solver never allocates: hardware, ROM, or a reserved Region</td>
+<td>a note, and only where a name exists that you could have written instead</td>
+</tr>
+<tr>
+<td>in allocatable RAM covered by no reserved Region</td>
+<td>a warning: the solver may give that byte to something else</td>
+</tr>
+</tbody>
+</table>
+<p>Severity is controllable per identifier from the Project.</p>
+<h2 id="abbreviations">Abbreviations</h2>
+<p>A directive that closes a block has two spellings: the full name and one
+unambiguous prefix of it.</p>
+<table>
+<thead>
+<tr>
+<th>Full</th>
+<th>Short</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.endsection</code></td>
+<td><code>.ends</code></td>
+</tr>
+<tr>
+<td><code>.endproc</code></td>
+<td><code>.endp</code></td>
+</tr>
+<tr>
+<td><code>.endmacro</code></td>
+<td><code>.endm</code></td>
+</tr>
+<tr>
+<td><code>.endnamespace</code></td>
+<td><code>.endns</code></td>
+</tr>
+<tr>
+<td><code>.endcharset</code></td>
+<td><code>.endch</code></td>
+</tr>
+<tr>
+<td><code>.endif</code></td>
+<td><code>.endi</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>.end</code> alone is never legal, because it does not say which block it closes.
+<code>.endch</code> is one letter longer than the rule alone would make it, because
+<code>.endc</code> would stop being unambiguous later.</p>
+<p>Nothing else in the language is abbreviated.</p>
+<h2 id="errors">Errors</h2>
+<p>The parser reports every error in a file. An unclosed <code>.section</code>, <code>.proc</code> or
+<code>.macro</code> is reported at the directive that opened it.</p>
+<p>The parser does not resolve names. An undefined symbol is not a parse error, and
+a file full of names declared in other Modules parses cleanly.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

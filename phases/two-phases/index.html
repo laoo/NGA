@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>two-phases — Phases</title>
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../../assembler/#charset"},{"n":".declare","u":"../../assembler/#declare"},{"n":".dispatch","u":"../../assembler/#dispatch"},{"n":".endp then NAME","u":"../../assembler/#endp-then-name"},{"n":".export","u":"../../assembler/#export"},{"n":".macro","u":"../../assembler/#macro"},{"n":".off","u":"../../assembler/#off"},{"n":".proc","u":"../../assembler/#proc"},{"n":".section","u":"../../assembler/#section"},{"n":".source","u":"../../assembler/#source"},{"n":".transition","u":"../../assembler/#transition"},{"n":".with","u":"../../assembler/#with"},{"n":"WINDOW = STATE","u":"../../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../../c-dialect/#placement"},{"n":"[[striped]]","u":"../../c-dialect/#striped"},{"n":"auto","u":"../../c-dialect/#auto"},{"n":"constants","u":"../../project-file/#constants"},{"n":"container","u":"../../project-file/#container"},{"n":"containers","u":"../../project-file/#containers"},{"n":"cpu","u":"../../project-file/#cpu"},{"n":"diagnostics","u":"../../project-file/#diagnostics"},{"n":"entry","u":"../../project-file/#entry"},{"n":"group","u":"../../project-file/#group"},{"n":"in NAME","u":"../../assembler/#in-name"},{"n":"include","u":"../../project-file/#include"},{"n":"modules","u":"../../project-file/#modules"},{"n":"movable","u":"../../assembler/#movable"},{"n":"optimize","u":"../../project-file/#optimize"},{"n":"panes","u":"../../project-file/#panes"},{"n":"phase","u":"../../project-file/#phase"},{"n":"region","u":"../../project-file/#region"},{"n":"register","u":"../../project-file/#register"},{"n":"resident","u":"../../project-file/#resident"},{"n":"root","u":"../../assembler/#root"},{"n":"storage","u":"../../project-file/#storage"},{"n":"target","u":"../../project-file/#target"},{"n":"temporary","u":"../../assembler/#temporary"},{"n":"transform","u":"../../project-file/#transform"},{"n":"units","u":"../../project-file/#units"},{"n":"window","u":"../../project-file/#window"},{"n":"The Project and Modules","u":"../../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../../temporaries-and-liveness/"},{"n":"Targets","u":"../../targets/"},{"n":"Phases","u":"../../phases/"},{"n":"Banks and Windows","u":"../../banks-and-windows/"},{"n":"Panes","u":"../../panes/"},{"n":"Slots","u":"../../slots/"},{"n":"Generators","u":"../../generators/"},{"n":"Macros","u":"../../macros/"},{"n":"Conditionals and packs","u":"../../conditionals/"},{"n":"Character sets","u":"../../character-sets/"},{"n":"Instructions","u":"../../instructions/"},{"n":"Roots","u":"../../roots/"},{"n":"Cartridges","u":"../../cartridges/"},{"n":"The Project file","u":"../../project-file/"},{"n":"The assembler","u":"../../assembler/"},{"n":"The C dialect","u":"../../c-dialect/"},{"n":"Diagnostics","u":"../../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../../targets/">Targets</a>
+</li>
+<li class="here"><a href="../../phases/">Phases</a>
+<ul class="programs"><li><a href="../../phases/compressed/">compressed</a></li><li><a href="../../phases/crossed/">crossed</a></li><li><a href="../../phases/in-c/">in-c</a></li><li><a href="../../phases/two-phases/">two-phases</a></li></ul>
+</li>
+<li><a href="../../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../../panes/">Panes</a>
+</li>
+<li><a href="../../slots/">Slots</a>
+</li>
+<li><a href="../../generators/">Generators</a>
+</li>
+<li><a href="../../macros/">Macros</a>
+</li>
+<li><a href="../../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../../character-sets/">Character sets</a>
+</li>
+<li><a href="../../instructions/">Instructions</a>
+</li>
+<li><a href="../../roots/">Roots</a>
+</li>
+<li><a href="../../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../../project-file/">The Project file</a>
+</li>
+<li><a href="../../assembler/">The assembler</a>
+</li>
+<li><a href="../../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1>two-phases</h1>
+<p class="aside">A program of <a href="../../phases/">Phases</a>.</p>
+<h2 class="file">main.ngp</h2>
+<pre><code class="language-project"><span class="t-keyword">include</span> <span class="t-string">&quot;atari/800xl.ngp&quot;</span>
+
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;print.asm&quot;</span> <span class="t-string">&quot;intro.asm&quot;</span> <span class="t-string">&quot;level.asm&quot;</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">print</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">phase</span> <span class="t-name">intro</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">intro</span>  <span class="t-keyword">then</span> <span class="t-name">level</span>  <span class="t-keyword">entry</span> <span class="t-name">introStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">phase</span> <span class="t-name">level</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">level</span>             <span class="t-keyword">entry</span> <span class="t-name">levelStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">entry</span> <span class="t-name">intro</span>
+
+<span class="t-keyword">container</span> <span class="t-name">atr</span>
+</code></pre>
+<details class="aside-file"><summary>800xl.ngp<span> project</span></summary><pre><code class="language-project"><span class="t-comment">; An Atari 800XL with a double-density disk drive: sixty-four kilobytes and no</span>
+<span class="t-comment">; banking, so storage is the diskette&#x27;s own sectors, which nothing maps into</span>
+<span class="t-comment">; memory. There is no unit set and no Window for that reason, and the driver</span>
+<span class="t-comment">; shows nothing. The Container is the `.atr`, a bootable diskette whose first</span>
+<span class="t-comment">; three sectors the tool writes itself.</span>
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">cpu</span> <span class="t-string">&quot;6502&quot;</span>
+
+  <span class="t-comment">; A diskette it boots, or a `.xex` a DOS loads. A Project naming any other</span>
+  <span class="t-comment">; is refused here rather than at the writer.</span>
+  <span class="t-keyword">containers</span> <span class="t-name">atr</span><span class="t-punctuation">,</span> <span class="t-name">xex</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The diskette&#x27;s sectors, from the fourth: the boot record has the first three</span>
+<span class="t-comment">; and the load image whatever is left after the storage a program uses. A unit</span>
+<span class="t-comment">; is 256 sectors, which is the one size the `.atr` takes, and three of them</span>
+<span class="t-comment">; reach past the 180 KB a double-density diskette holds. It is a ceiling and</span>
+<span class="t-comment">; not a reservation: what the image costs is what the program&#x27;s Payloads came</span>
+<span class="t-comment">; to.</span>
+<span class="t-keyword">storage</span> <span class="t-punctuation">{</span> <span class="t-keyword">units</span> <span class="t-number">3</span> <span class="t-keyword">size</span> <span class="t-number">65536</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">region</span> <span class="t-name def" id="sym-nga.regions-ram">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$06FF</span>  <span class="t-name">ram</span>
+  <span class="t-comment">; $0700 to $087F is the boot record&#x27;s. It stands in no Region, so the solver</span>
+  <span class="t-comment">; never allocates there and the record&#x27;s own pins are the author&#x27;s word.</span>
+  <span class="t-keyword">region</span>        <span class="t-number">$0880</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword">region</span>        <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword">region</span> <span class="t-name def" id="sym-nga.regions-stack">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword">region</span> <span class="t-name def" id="sym-nga.regions-io">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword">register</span>
+
+  <span class="t-comment">; A Project that wants more of the hardware by name declares it, as it</span>
+  <span class="t-comment">; declares the memory its DOS holds.</span>
+  <span class="t-keyword">register</span> <span class="t-name def" id="sym-nga.regions-PORTB">PORTB</span>  <span class="t-number">$D301</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The OS, the driver for a diskette and the decoders the tool ships, listed as</span>
+<span class="t-comment">; a file of the Project&#x27;s own would be. Every Transition calls the driver and</span>
+<span class="t-comment">; the decoders, so they are resident, and the OS is resident because the driver</span>
+<span class="t-comment">; calls into it; a decoder nothing uses is dropped.</span>
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;atari/os.asm&quot;</span>  <span class="t-string">&quot;atari/charsets.asm&quot;</span>  <span class="t-string">&quot;atari/disk.asm&quot;</span>  <span class="t-string">&quot;stream/zx0.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">resident</span> <span class="t-punctuation">{</span> <span class="t-name">os</span><span class="t-punctuation">,</span> <span class="t-name">charsets</span><span class="t-punctuation">,</span> <span class="t-name">disk</span><span class="t-punctuation">,</span> <span class="t-name">zx0</span> <span class="t-punctuation">}</span>
+</code></pre></details>
+<details class="aside-file"><summary>os.asm<span> os</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Atari OS as a Module: what it occupies while it is in memory, and the</span>
+<span class="t-comment">; names a program reaches it by. Sections that hold no bytes, pinned where</span>
+<span class="t-comment">; the OS lives, so the solver sees memory that is taken rather than a Region</span>
+<span class="t-comment">; it may never allocate from — which is what lets a Phase that switches the</span>
+<span class="t-comment">; ROM out have those addresses back, once there is a way to say so. See</span>
+<span class="t-comment">; 0038 for why what occupies memory for a while is a Module, and 0051 for</span>
+<span class="t-comment">; what this first cut settles and what it leaves.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Every Section here is `root`: the OS and the hardware reach them with no</span>
+<span class="t-comment">; Reference in any Chunk, so nothing else would keep them. None holds bytes,</span>
+<span class="t-comment">; so none has a Payload and no Transition loads one.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; This is the OS as an XL or XE ships it. A machine whose OS lives elsewhere</span>
+<span class="t-comment">; declares a Module of its own; the variant is what chooses.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">RTCLOK</span><span class="t-punctuation">,</span> <span class="t-name">SDMCTL</span><span class="t-punctuation">,</span> <span class="t-name">SDLSTL</span><span class="t-punctuation">,</span> <span class="t-name">SDLSTH</span><span class="t-punctuation">,</span> <span class="t-name">CH</span><span class="t-punctuation">,</span> <span class="t-name">SETVBV</span><span class="t-punctuation">,</span> <span class="t-name">XITVBV</span>
+
+<span class="t-comment">; The OS&#x27;s half of the zero page. The program&#x27;s own variables live above it,</span>
+<span class="t-comment">; in the half the variant leaves to the solver.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span> <span class="t-name">at</span> <span class="t-number">$0000</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-os-osZero">osZero</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$12</span>
+<span class="t-label def" id="sym-os-RTCLOK">RTCLOK</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $0012: the frame counter, three bytes</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$6B</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The OS&#x27;s variables and buffers. The shadow registers are among them and</span>
+<span class="t-comment">; are Labels here rather than registers of the variant: they are the OS&#x27;s</span>
+<span class="t-comment">; memory, which the OS copies to the hardware on every vertical blank, and</span>
+<span class="t-comment">; a `register` Region inside this Section would be an address the Section</span>
+<span class="t-comment">; may not cover.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0200</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-os-osRam">osRam</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$2F</span>
+<span class="t-label def" id="sym-os-SDMCTL">SDMCTL</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $022F: shadows DMACTL</span>
+<span class="t-label def" id="sym-os-SDLSTL">SDLSTL</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $0230: the display list address, low</span>
+<span class="t-label def" id="sym-os-SDLSTH">SDLSTH</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $0231: and high</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$CA</span>
+<span class="t-label def" id="sym-os-CH">CH</span>      <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                          <span class="t-comment">; $02FC: the last key pressed, $FF for none</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$403</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The ROM, in the two ranges the hardware registers leave between them, and</span>
+<span class="t-comment">; the entry points a program calls in the second. The RAM underneath is what</span>
+<span class="t-comment">; a Phase without the OS would be given.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$C000</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-os-osRomLow">osRomLow</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$1000</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$D800</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-os-osRomHigh">osRomHigh</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$C5C</span>
+<span class="t-label def" id="sym-os-SETVBV">SETVBV</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $E45C: A = the stage, X/Y = the routine</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>
+<span class="t-label def" id="sym-os-XITVBV">XITVBV</span>  <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">3</span>                          <span class="t-comment">; $E462: the end of a deferred routine</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">$1B9B</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre></details>
+<details class="aside-file"><summary>charsets.asm<span> charsets</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Atari&#x27;s two codes for the same letters, as Charsets.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; `atascii` is what the character I/O takes: the machine&#x27;s own code, with the</span>
+<span class="t-comment">; graphics characters where an ASCII machine keeps its control codes, and the</span>
+<span class="t-comment">; letters where ASCII has them — which is why an unprefixed literal of plain</span>
+<span class="t-comment">; letters has always worked and why nothing else has. `\n` is `$9B`, the end of</span>
+<span class="t-comment">; line, and not `$0A`.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; `screen` is what the display reads out of screen memory, which is the same</span>
+<span class="t-comment">; letters at other numbers. A program that writes where the display looks</span>
+<span class="t-comment">; rather than through the OS wants this one.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; The graphics characters are written here as the Unicode the box-drawing and</span>
+<span class="t-comment">; block characters have, so a picture drawn in the source is the picture the</span>
+<span class="t-comment">; machine draws. A letter in inverse video is one of those too — Unicode squares</span>
+<span class="t-comment">; them off in a negative, and `atascii&quot;PRESS 🆂&quot;` is seven bytes with the last</span>
+<span class="t-comment">; one inverse. A whole line of inverse text is better asked of a Charset</span>
+<span class="t-comment">; derived from this one, `.charset bright : atascii ^ $80`, which is what a</span>
+<span class="t-comment">; derivation is for. Two of them have no exact Unicode: `$02` and `$0D` are a</span>
+<span class="t-comment">; quarter of a cell where the nearest character is an eighth, and are written</span>
+<span class="t-comment">; as `▕` and `▔`. Everything else, the inverse entries included, was read off</span>
+<span class="t-comment">; the machine&#x27;s own font and matches it.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; This Module emits nothing: it is two names and two tables.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">atascii</span><span class="t-punctuation">,</span> <span class="t-name">screen</span>
+
+<span class="t-comment">; tag atascii</span>
+<span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name def" id="sym-charsets-atascii">atascii</span>
+  <span class="t-string">&quot;♥├▕┘┤┐╱╲◢▗◣▝▘▔▂▖♣┌─┼●▄▎┬┴▌└&quot;</span>                                       <span class="t-punctuation">=</span> <span class="t-number">$00</span>
+  <span class="t-string">&quot;↑↓←→&quot;</span>                                                              <span class="t-punctuation">=</span> <span class="t-number">$1C</span>
+  <span class="t-string">&quot; !\&quot;#$%&amp;&#x27;()*+,-./0123456789:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$20</span>
+  <span class="t-string">&quot;♦&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$60</span>
+  <span class="t-string">&quot;abcdefghijklmnopqrstuvwxyz&quot;</span>                                        <span class="t-punctuation">=</span> <span class="t-number">$61</span>
+  <span class="t-string">&quot;♠&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7B</span>
+  <span class="t-string">&quot;│&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7C</span>
+  <span class="t-string">&quot;\n&quot;</span>                                                                <span class="t-punctuation">=</span> <span class="t-number">$9B</span>
+
+  <span class="t-comment">; Inverse video is the same glyph with the bits the other way round, which</span>
+  <span class="t-comment">; for the blocks and the triangles is another character Unicode draws. Every</span>
+  <span class="t-comment">; one of these was read off the machine&#x27;s own font and is exact; the rest of</span>
+  <span class="t-comment">; the inverse half has no glyph to be written as, and is reached by adding</span>
+  <span class="t-comment">; $80 or by a Charset derived from this one.</span>
+  <span class="t-string">&quot;▊&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$82</span>        <span class="t-comment">; ▕</span>
+  <span class="t-string">&quot;◤&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$88</span>        <span class="t-comment">; ◢</span>
+  <span class="t-string">&quot;▛&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$89</span>        <span class="t-comment">; ▗</span>
+  <span class="t-string">&quot;◥&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8A</span>        <span class="t-comment">; ◣</span>
+  <span class="t-string">&quot;▙&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8B</span>        <span class="t-comment">; ▝</span>
+  <span class="t-string">&quot;▟&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8C</span>        <span class="t-comment">; ▘</span>
+  <span class="t-string">&quot;▆&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8D</span>        <span class="t-comment">; ▔</span>
+  <span class="t-string">&quot;▜&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$8F</span>        <span class="t-comment">; ▖</span>
+  <span class="t-string">&quot;▀&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$95</span>        <span class="t-comment">; ▄</span>
+  <span class="t-string">&quot;▐&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$99</span>        <span class="t-comment">; ▌</span>
+  <span class="t-string">&quot;█&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$A0</span>        <span class="t-comment">; the space</span>
+
+  <span class="t-comment">; And the letters, which Unicode squares off in a negative.</span>
+  <span class="t-string">&quot;🅰🅱🅲🅳🅴🅵🅶🅷🅸🅹🅺🅻🅼🅽🅾🅿🆀🆁🆂🆃🆄🆅🆆🆇🆈🆉&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C1</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+<span class="t-comment">; end atascii</span>
+
+<span class="t-directive">.</span><span class="t-directive">charset</span> <span class="t-name def" id="sym-charsets-screen">screen</span>
+  <span class="t-string">&quot; !\&quot;#$%&amp;&#x27;()*+,-./0123456789:;&lt;=&gt;?&quot;</span>                                 <span class="t-punctuation">=</span> <span class="t-number">$00</span>
+  <span class="t-string">&quot;@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_&quot;</span>                                 <span class="t-punctuation">=</span> <span class="t-number">$20</span>
+  <span class="t-string">&quot;♥├▕┘┤┐╱╲◢▗◣▝▘▔▂▖♣┌─┼●▄▎┬┴▌└&quot;</span>                                       <span class="t-punctuation">=</span> <span class="t-number">$40</span>
+  <span class="t-string">&quot;♦&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$60</span>
+  <span class="t-string">&quot;abcdefghijklmnopqrstuvwxyz&quot;</span>                                        <span class="t-punctuation">=</span> <span class="t-number">$61</span>
+  <span class="t-string">&quot;♠&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7B</span>
+  <span class="t-string">&quot;│&quot;</span>                                                                 <span class="t-punctuation">=</span> <span class="t-number">$7C</span>
+
+  <span class="t-comment">; The same inverses, at the display&#x27;s numbers.</span>
+  <span class="t-string">&quot;▊&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C2</span>
+  <span class="t-string">&quot;◤&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C8</span>
+  <span class="t-string">&quot;▛&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$C9</span>
+  <span class="t-string">&quot;◥&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CA</span>
+  <span class="t-string">&quot;▙&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CB</span>
+  <span class="t-string">&quot;▟&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CC</span>
+  <span class="t-string">&quot;▆&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CD</span>
+  <span class="t-string">&quot;▜&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$CF</span>
+  <span class="t-string">&quot;▀&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$D5</span>
+  <span class="t-string">&quot;▐&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$D9</span>
+  <span class="t-string">&quot;█&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$80</span>
+  <span class="t-string">&quot;🅰🅱🅲🅳🅴🅵🅶🅷🅸🅹🅺🅻🅼🅽🅾🅿🆀🆁🆂🆃🆄🆅🆆🆇🆈🆉&quot;</span> <span class="t-punctuation">=</span> <span class="t-number">$A1</span>
+<span class="t-directive">.</span><span class="t-directive">endch</span>
+</code></pre></details>
+<details class="aside-file"><summary>disk.asm<span> disk</span></summary><pre><code class="language-assembler"><span class="t-comment">; The storage driver for a diskette: a unit of storage is 256 sectors of 256</span>
+<span class="t-comment">; bytes, and unit zero begins at sector 4, the first after the boot record.</span>
+<span class="t-comment">; That size is what makes the three bytes the model addresses storage with —</span>
+<span class="t-comment">; a unit and a two-byte offset — the address the hardware takes, so this driver</span>
+<span class="t-comment">; does no arithmetic: the unit is the sector number&#x27;s high byte, the offset&#x27;s</span>
+<span class="t-comment">; high byte is its low one, and the offset&#x27;s low byte is the position in the</span>
+<span class="t-comment">; sector. Reading a sector is the OS&#x27;s own disk handler, called through</span>
+<span class="t-comment">; `DSKINV` with the request in the device control block, which is why this</span>
+<span class="t-comment">; driver needs no register of its own and knows nothing about a drive.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; The medium maps nothing, so this driver names no Window: `stream`, `show`</span>
+<span class="t-comment">; and `showAt` are not declared, and the two Procs that put base memory back</span>
+<span class="t-comment">; after a Transition are a `rts`.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Resident, since every Transition calls it; the variant lists it so.</span>
+
+<span class="t-label def" id="sym-disk-DSKINV">DSKINV</span> <span class="t-punctuation">=</span> <span class="t-number">$E453</span>                  <span class="t-comment">; the OS&#x27;s disk handler: one sector per call</span>
+<span class="t-label def" id="sym-disk-DUNIT">DUNIT</span>  <span class="t-punctuation">=</span> <span class="t-number">$0301</span>                  <span class="t-comment">; the drive, 1 for D1:</span>
+<span class="t-label def" id="sym-disk-DCOMND">DCOMND</span> <span class="t-punctuation">=</span> <span class="t-number">$0302</span>                  <span class="t-comment">; &#x27;R&#x27; reads</span>
+<span class="t-label def" id="sym-disk-DBUFLO">DBUFLO</span> <span class="t-punctuation">=</span> <span class="t-number">$0304</span>
+<span class="t-label def" id="sym-disk-DBUFHI">DBUFHI</span> <span class="t-punctuation">=</span> <span class="t-number">$0305</span>
+<span class="t-label def" id="sym-disk-DAUX1">DAUX1</span>  <span class="t-punctuation">=</span> <span class="t-number">$030A</span>                  <span class="t-comment">; the sector, two bytes</span>
+<span class="t-label def" id="sym-disk-DAUX2">DAUX2</span>  <span class="t-punctuation">=</span> <span class="t-number">$030B</span>
+
+<span class="t-label def" id="sym-disk-diskFirst">diskFirst</span> <span class="t-punctuation">=</span> <span class="t-number">4</span>                   <span class="t-comment">; the sector unit zero begins at</span>
+
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">open</span> <span class="t-name">diskOpen</span>
+<span class="t-directive">.</span><span class="t-directive">driver</span> <span class="t-name">read</span> <span class="t-name">diskRead</span>
+
+<span class="t-directive">.</span><span class="t-directive">transform</span> <span class="t-name">copy</span> <span class="t-name">diskCopy</span>
+
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name def" id="sym-disk-diskOpen">diskOpen</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">diskOpenStream</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-directive">.</span><span class="t-directive">macro</span> <span class="t-name def" id="sym-disk-diskRead">diskRead</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">diskReadByte</span>
+<span class="t-directive">.</span><span class="t-directive">endm</span>
+
+<span class="t-comment">; The stream: which sector the buffer holds, where in it the next byte is, and</span>
+<span class="t-comment">; whether the position has run off its end. A plain Section rather than</span>
+<span class="t-comment">; Temporaries, because the value has to survive between one call and the next</span>
+<span class="t-comment">; while nothing here is running.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span>
+<span class="t-label def" id="sym-disk-diskAt">diskAt</span>          <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-disk-diskPos">diskPos</span>         <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-label def" id="sym-disk-diskNeed">diskNeed</span>        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The sector the stream reads through. A Section of reservations alone, so it</span>
+<span class="t-comment">; is in no Container and no load writes it. `within 256` keeps it off a page</span>
+<span class="t-comment">; boundary: every byte of it is read as `diskBuffer,y`, and an index that</span>
+<span class="t-comment">; carries into the next page costs a cycle.</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">within</span> <span class="t-number">256</span>
+<span class="t-label def" id="sym-disk-diskBuffer">diskBuffer</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">256</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; A = the unit, X/Y = the offset in it: the stream stands there. An offset past</span>
+<span class="t-comment">; the unit&#x27;s end carries into the units after, since the routine counts on in a</span>
+<span class="t-comment">; Frame without knowing where a unit ends — and here it carries by itself, the</span>
+<span class="t-comment">; three bytes being one position that the sector number takes the top two of.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-disk-diskOpenStream">diskOpenStream</span>
+        <span class="t-mnemonic def" id="f1-2503">stx</span> <a class="use" href="#sym-disk-diskPos"><span class="t-name">diskPos</span></a>
+        <span class="t-mnemonic def" id="f1-2523">sta</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>            <span class="t-comment">; the unit is the sector number&#x27;s high byte</span>
+        <span class="t-mnemonic def" id="f1-2599">tya</span>                     <span class="t-comment">; and the offset&#x27;s high byte is its low one</span>
+        <span class="t-mnemonic def" id="f1-2675">clc</span>
+        <span class="t-mnemonic def" id="f1-2687">adc</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><a class="use" href="#sym-disk-diskFirst"><span class="t-name">diskFirst</span></a>
+        <span class="t-mnemonic def" id="f1-2711">sta</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a>
+        <span class="t-mnemonic def" id="f1-2730">lda</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-2751">adc</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><a class="use" href="#sym-disk-diskFirst"><span class="t-name">diskFirst</span></a>
+        <span class="t-mnemonic def" id="f1-2775">sta</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-2796">jmp</span> <a class="use" href="#sym-disk-diskFill"><span class="t-name">diskFill</span></a>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; A = the next byte of the stream. X and Y are not preserved.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-disk-diskReadByte">diskReadByte</span>
+        <span class="t-mnemonic def" id="f1-2905">lda</span> <a class="use" href="#sym-disk-diskNeed"><span class="t-name">diskNeed</span></a>
+        <span class="t-mnemonic def" id="f1-2926">beq</span> <span class="t-name">@have</span>
+        <span class="t-mnemonic def" id="f1-2944">inc</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a>
+        <span class="t-mnemonic def" id="f1-2963">bne</span> <span class="t-name">@next</span>
+        <span class="t-mnemonic def" id="f1-2981">inc</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@next</span>
+        <span class="t-mnemonic def" id="f1-3008">jsr</span> <a class="use" href="#sym-disk-diskFill"><span class="t-name">diskFill</span></a>
+<span class="t-label">@have</span>
+        <span class="t-mnemonic def" id="f1-3035">ldy</span> <a class="use" href="#sym-disk-diskPos"><span class="t-name">diskPos</span></a>
+        <span class="t-mnemonic def" id="f1-3055">inc</span> <a class="use" href="#sym-disk-diskPos"><span class="t-name">diskPos</span></a>
+        <span class="t-mnemonic def" id="f1-3075">bne</span> <span class="t-name">@within</span>
+        <span class="t-mnemonic def" id="f1-3095">sty</span> <a class="use" href="#sym-disk-diskNeed"><span class="t-name">diskNeed</span></a>            <span class="t-comment">; Y is $FF here, and any non-zero will do</span>
+<span class="t-label">@within</span>
+        <span class="t-mnemonic def" id="f1-3177">lda</span> <a class="use" href="#sym-disk-diskBuffer"><span class="t-name">diskBuffer</span></a><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f1-3202">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The sector in diskAt into the buffer, asked for again until the handler says</span>
+<span class="t-comment">; it has it: a Transition that cannot read cannot go on, and the drive answered</span>
+<span class="t-comment">; when the OS read the boot record off this diskette.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-disk-diskFill">diskFill</span>
+        <span class="t-mnemonic def" id="f1-3449">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f1-3464">sta</span> <a class="use" href="#sym-disk-diskNeed"><span class="t-name">diskNeed</span></a>
+        <span class="t-mnemonic def" id="f1-3485">lda</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a>
+        <span class="t-mnemonic def" id="f1-3504">sta</span> <a class="use" href="#sym-disk-DAUX1"><span class="t-name">DAUX1</span></a>
+        <span class="t-mnemonic def" id="f1-3522">lda</span> <a class="use" href="#sym-disk-diskAt"><span class="t-name">diskAt</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-3543">sta</span> <a class="use" href="#sym-disk-DAUX2"><span class="t-name">DAUX2</span></a>
+<span class="t-label">@again</span>
+        <span class="t-mnemonic def" id="f1-3568">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-3583">sta</span> <a class="use" href="#sym-disk-DUNIT"><span class="t-name">DUNIT</span></a>
+        <span class="t-mnemonic def" id="f1-3601">lda</span> <span class="t-punctuation">#</span><span class="t-number">$52</span>
+        <span class="t-mnemonic def" id="f1-3618">sta</span> <a class="use" href="#sym-disk-DCOMND"><span class="t-name">DCOMND</span></a>
+        <span class="t-mnemonic def" id="f1-3637">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><a class="use" href="#sym-disk-diskBuffer"><span class="t-name">diskBuffer</span></a>
+        <span class="t-mnemonic def" id="f1-3662">sta</span> <a class="use" href="#sym-disk-DBUFLO"><span class="t-name">DBUFLO</span></a>
+        <span class="t-mnemonic def" id="f1-3681">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><a class="use" href="#sym-disk-diskBuffer"><span class="t-name">diskBuffer</span></a>
+        <span class="t-mnemonic def" id="f1-3706">sta</span> <a class="use" href="#sym-disk-DBUFHI"><span class="t-name">DBUFHI</span></a>
+        <span class="t-mnemonic def" id="f1-3725">jsr</span> <a class="use" href="#sym-disk-DSKINV"><span class="t-name">DSKINV</span></a>
+        <span class="t-mnemonic def" id="f1-3744">bmi</span> <span class="t-name">@again</span>
+        <span class="t-mnemonic def" id="f1-3763">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The decoder of `copy`: X/Y = the destination, the stream at the stored size</span>
+<span class="t-comment">; and then the bytes. A byte at a time through the stream, because what this</span>
+<span class="t-comment">; costs is the sector reads underneath it — a run copied out of the buffer</span>
+<span class="t-comment">; would save a few hundred cycles against the tens of thousands a sector takes</span>
+<span class="t-comment">; to arrive.</span>
+<span class="t-label def" id="sym-disk-diskDst">diskDst</span>  <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-disk-diskLeft">diskLeft</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-disk-diskCopy">diskCopy</span>
+        <span class="t-mnemonic def" id="f1-4158">stx</span> <a class="use" href="#sym-disk-diskDst"><span class="t-name">diskDst</span></a>
+        <span class="t-mnemonic def" id="f1-4178">sty</span> <a class="use" href="#sym-disk-diskDst"><span class="t-name">diskDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-4200">jsr</span> <a class="use" href="#sym-disk-diskReadByte"><span class="t-name">diskReadByte</span></a>
+        <span class="t-mnemonic def" id="f1-4225">sta</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a>
+        <span class="t-mnemonic def" id="f1-4246">jsr</span> <a class="use" href="#sym-disk-diskReadByte"><span class="t-name">diskReadByte</span></a>
+        <span class="t-mnemonic def" id="f1-4271">sta</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@byte</span>
+        <span class="t-mnemonic def" id="f1-4300">lda</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a>
+        <span class="t-mnemonic def" id="f1-4321">ora</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f1-4344">beq</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic def" id="f1-4362">jsr</span> <a class="use" href="#sym-disk-diskReadByte"><span class="t-name">diskReadByte</span></a>
+        <span class="t-mnemonic def" id="f1-4387">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f1-4402">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-disk-diskDst"><span class="t-name">diskDst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f1-4426">inc</span> <a class="use" href="#sym-disk-diskDst"><span class="t-name">diskDst</span></a>
+        <span class="t-mnemonic def" id="f1-4446">bne</span> <span class="t-name">@counted</span>
+        <span class="t-mnemonic def" id="f1-4467">inc</span> <a class="use" href="#sym-disk-diskDst"><span class="t-name">diskDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic def" id="f1-4498">lda</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a>
+        <span class="t-mnemonic def" id="f1-4519">bne</span> <span class="t-name">@low</span>
+        <span class="t-mnemonic def" id="f1-4536">dec</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@low</span>
+        <span class="t-mnemonic def" id="f1-4564">dec</span> <a class="use" href="#sym-disk-diskLeft"><span class="t-name">diskLeft</span></a>
+        <span class="t-mnemonic def" id="f1-4585">jmp</span> <span class="t-name">@byte</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic def" id="f1-4609">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<details class="aside-file"><summary>zx0.asm<span> zx0</span></summary><pre><code class="language-assembler"><span class="t-comment">; The decoder of `zx0` over any driver&#x27;s stream: Einar Saukas&#x27;s ZX0, version</span>
+<span class="t-comment">; 2&#x27;s standard forward stream, decoded as the reference dzx0.c does, driven</span>
+<span class="t-comment">; by the stream&#x27;s own end marker. Written here from the format, not ported:</span>
+<span class="t-comment">; nothing of the reference&#x27;s text is in it, and it is licensed as everything</span>
+<span class="t-comment">; under lib/ is, see lib/LICENSE. Entered with X/Y = the destination and the</span>
+<span class="t-comment">; stream at the stored size, which it reads past. A match is copied a byte</span>
+<span class="t-comment">; at a time, forward, from what was written, which is what makes an offset</span>
+<span class="t-comment">; shorter than its length — the run — come out right. Resident, and outside</span>
+<span class="t-comment">; the driver&#x27;s window.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">;   zx0Bits      the bit buffer, a sentinel one above the bits still unread</span>
+<span class="t-comment">;   zx0Offset    the last offset</span>
+<span class="t-comment">;   zx0Length    the length in hand, or an offset&#x27;s MSB while one is read</span>
+<span class="t-comment">;   zx0Invert    one while an offset&#x27;s MSB is read, whose data bits the</span>
+<span class="t-comment">;                stream carries complemented; zero otherwise</span>
+
+<span class="t-directive">.</span><span class="t-directive">transform</span> <span class="t-name">zx0</span> <span class="t-name">zx0Decode</span>
+
+<span class="t-label def" id="sym-zx0-zx0Dst">zx0Dst</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-zx0-zx0Src">zx0Src</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-zx0-zx0Bits">zx0Bits</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label def" id="sym-zx0-zx0Offset">zx0Offset</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-zx0-zx0Length">zx0Length</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-zx0-zx0Invert">zx0Invert</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+<span class="t-comment">; The next bit of the stream, in A as zero or one and in the Z flag. The</span>
+<span class="t-comment">; buffer holds a sentinel above the unread bits, so shifting it to nothing is</span>
+<span class="t-comment">; the signal to fetch the next byte and put the sentinel back below it.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0Bit">zx0Bit</span>
+        <span class="t-mnemonic">asl</span> <a class="use" href="#sym-zx0-zx0Bits"><span class="t-name">zx0Bits</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@have</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">rol</span>                     <span class="t-comment">; the carry the asl left is the sentinel</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Bits"><span class="t-name">zx0Bits</span></a>
+<span class="t-label">@have</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">rol</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; An interlaced Elias gamma value into zx0Length: a control bit says whether</span>
+<span class="t-comment">; a data bit follows, and the value begins at one. Three Procs chained by</span>
+<span class="t-comment">; `then` because the value after an offset is entered with its first control</span>
+<span class="t-comment">; bit already read, at zx0EliasData: the first falls through into the</span>
+<span class="t-comment">; second, and the second branches into the third, which the chain is what</span>
+<span class="t-comment">; allows.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0Elias">zx0Elias</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">zx0EliasMore</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0EliasMore">zx0EliasMore</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Bit"><span class="t-name">zx0Bit</span></a>
+        <span class="t-mnemonic">beq</span> <a class="use" href="#sym-zx0-zx0EliasData"><span class="t-name">zx0EliasData</span></a>        <span class="t-comment">; zero: a data bit follows</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">zx0EliasData</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0EliasData">zx0EliasData</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Bit"><span class="t-name">zx0Bit</span></a>
+        <span class="t-mnemonic">eor</span> <a class="use" href="#sym-zx0-zx0Invert"><span class="t-name">zx0Invert</span></a>
+        <span class="t-mnemonic">lsr</span>
+        <span class="t-mnemonic">rol</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">rol</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jmp</span> <a class="use" href="#sym-zx0-zx0EliasMore"><span class="t-name">zx0EliasMore</span></a>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; One byte written: the destination moves on and the length in hand comes</span>
+<span class="t-comment">; down, leaving Z set when it reaches zero.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0Step">zx0Step</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@moved</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@moved</span>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@low</span>
+        <span class="t-mnemonic">dec</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@low</span>
+        <span class="t-mnemonic">dec</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">ora</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The length in hand copied from zx0Dst less the last offset to zx0Dst.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0Copy">zx0Copy</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a>
+        <span class="t-mnemonic">sbc</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Src"><span class="t-name">zx0Src</span></a>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sbc</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Src"><span class="t-name">zx0Src</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@byte</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-zx0-zx0Src"><span class="t-name">zx0Src</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Src"><span class="t-name">zx0Src</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@from</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Src"><span class="t-name">zx0Src</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@from</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Step"><span class="t-name">zx0Step</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@byte</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-zx0-zx0Decode">zx0Decode</span>
+        <span class="t-mnemonic">stx</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a>
+        <span class="t-mnemonic">sty</span> <a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>             <span class="t-comment">; the stored size, which the end marker makes unnecessary</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">$80</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Bits"><span class="t-name">zx0Bits</span></a>             <span class="t-comment">; an empty buffer: the sentinel alone</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>         <span class="t-comment">; the last offset begins at one</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Invert"><span class="t-name">zx0Invert</span></a>
+<span class="t-label">@literals</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Elias"><span class="t-name">zx0Elias</span></a>
+<span class="t-label">@literal</span>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-zx0-zx0Dst"><span class="t-name">zx0Dst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Step"><span class="t-name">zx0Step</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@literal</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Bit"><span class="t-name">zx0Bit</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@offset</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Elias"><span class="t-name">zx0Elias</span></a>            <span class="t-comment">; a match at the last offset</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Copy"><span class="t-name">zx0Copy</span></a>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Bit"><span class="t-name">zx0Bit</span></a>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@literals</span>
+<span class="t-label">@offset</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Invert"><span class="t-name">zx0Invert</span></a>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Elias"><span class="t-name">zx0Elias</span></a>            <span class="t-comment">; the new offset&#x27;s MSB, complemented in the stream</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Invert"><span class="t-name">zx0Invert</span></a>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@done</span>               <span class="t-comment">; 256 is the end marker, and the one value with a low byte of zero</span>
+        <span class="t-mnemonic">lsr</span>                     <span class="t-comment">; offset = MSB * 128 - LSB / 2</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">ror</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a>
+        <span class="t-macro">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic">lsr</span>                     <span class="t-comment">; the LSB&#x27;s low bit is the length&#x27;s first control bit</span>
+        <span class="t-mnemonic">php</span>
+        <span class="t-mnemonic">eor</span> <span class="t-punctuation">#</span><span class="t-number">$FF</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">adc</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a>
+        <span class="t-mnemonic">bcs</span> <span class="t-name">@subtracted</span>
+        <span class="t-mnemonic">dec</span> <a class="use" href="#sym-zx0-zx0Offset"><span class="t-name">zx0Offset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@subtracted</span>
+        <span class="t-mnemonic">plp</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">bcs</span> <span class="t-name">@counted</span>            <span class="t-comment">; a control bit of one: the value is one</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0EliasData"><span class="t-name">zx0EliasData</span></a>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a>           <span class="t-comment">; a match at a new offset is one longer than written</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@copy</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-zx0-zx0Length"><span class="t-name">zx0Length</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@copy</span>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Copy"><span class="t-name">zx0Copy</span></a>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-zx0-zx0Bit"><span class="t-name">zx0Bit</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@offset</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@literals</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<h2 class="file">print.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; The one thing both Phases need: a line on the screen, through the character</span>
+<span class="t-comment">; I/O the OS opens on channel 0 before a program starts. `PUTREC` writes a</span>
+<span class="t-comment">; record, so it ends the line itself.</span>
+
+<span class="t-label def" id="sym-print-CIOV">CIOV</span>   <span class="t-punctuation">=</span> <span class="t-number">$E456</span>
+<span class="t-label def" id="sym-print-ICCOM">ICCOM</span>  <span class="t-punctuation">=</span> <span class="t-number">$0342</span>
+<span class="t-label def" id="sym-print-ICBAL">ICBAL</span>  <span class="t-punctuation">=</span> <span class="t-number">$0344</span>
+<span class="t-label def" id="sym-print-ICBLL">ICBLL</span>  <span class="t-punctuation">=</span> <span class="t-number">$0348</span>
+<span class="t-label def" id="sym-print-PUTREC">PUTREC</span> <span class="t-punctuation">=</span> <span class="t-number">9</span>
+
+<span class="t-comment">; Both Phases call it, so both have to see the name.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">printLine</span>
+
+<span class="t-comment">; Where the line stands, and how long it is. Declaring where the two arguments</span>
+<span class="t-comment">; are is what lets a Module of C call this one as a function.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-print-printLine">printLine</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-name">xy</span>
+        <span class="t-directive">.</span><span class="t-directive">declare</span> <span class="t-name">arg</span> <span class="t-name">a</span>
+
+        <span class="t-mnemonic def" id="f2-549">stx</span> <a class="use" href="#sym-print-ICBAL"><span class="t-name">ICBAL</span></a>
+        <span class="t-mnemonic def" id="f2-567">sty</span> <a class="use" href="#sym-print-ICBAL"><span class="t-name">ICBAL</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f2-587">sta</span> <a class="use" href="#sym-print-ICBLL"><span class="t-name">ICBLL</span></a>
+        <span class="t-mnemonic def" id="f2-605">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f2-620">sta</span> <a class="use" href="#sym-print-ICBLL"><span class="t-name">ICBLL</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f2-640">lda</span> <span class="t-punctuation">#</span><a class="use" href="#sym-print-PUTREC"><span class="t-name">PUTREC</span></a>
+        <span class="t-mnemonic def" id="f2-660">sta</span> <a class="use" href="#sym-print-ICCOM"><span class="t-name">ICCOM</span></a>
+        <span class="t-mnemonic def" id="f2-678">ldx</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f2-693">jsr</span> <a class="use" href="#sym-print-CIOV"><span class="t-name">CIOV</span></a>
+        <span class="t-mnemonic def" id="f2-710">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<h2 class="file">intro.asm</h2>
+<pre><code class="language-assembler"><span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label def" id="sym-intro-introText">introText</span>
+        <span class="t-directive def" id="f3-27">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;INTRO&quot;</span>
+<span class="t-label def" id="sym-intro-introTextEnd">introTextEnd</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-intro-introStart">introStart</span>
+        <span class="t-mnemonic def" id="f3-86">ldx</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><a class="use" href="#sym-intro-introText"><span class="t-name">introText</span></a>
+        <span class="t-mnemonic def" id="f3-110">ldy</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><a class="use" href="#sym-intro-introText"><span class="t-name">introText</span></a>
+        <span class="t-mnemonic def" id="f3-134">lda</span> <span class="t-punctuation">#</span><a class="use" href="#sym-intro-introTextEnd"><span class="t-name">introTextEnd</span></a> <span class="t-punctuation">-</span> <a class="use" href="#sym-intro-introText"><span class="t-name">introText</span></a>
+        <span class="t-mnemonic def" id="f3-172">jsr</span> <a class="use" href="#sym-print-printLine"><span class="t-name">printLine</span></a>
+        <span class="t-directive def" id="f3-194">.</span><span class="t-directive">transition</span> <span class="t-name">level</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<h2 class="file">level.asm</h2>
+<pre><code class="language-assembler"><span class="t-comment">; What the Phase is for: a map of ten rows, which is what waits in storage</span>
+<span class="t-comment">; while the program is in `intro`. Thirty-seven characters is what a row of</span>
+<span class="t-comment">; the screen holds once the OS&#x27;s left margin is taken off.</span>
+
+<span class="t-label def" id="sym-level-levelWidth">levelWidth</span> <span class="t-punctuation">=</span> <span class="t-number">37</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label def" id="sym-level-levelMap">levelMap</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#####################################&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......########.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......#......#.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......#......#.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......########.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#####################################&quot;</span>
+<span class="t-label def" id="sym-level-levelMapEnd">levelMapEnd</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; A row at a time. `at` and `left` are Temporaries of this Proc, as chapter</span>
+<span class="t-comment">; two&#x27;s were, and `printLine` keeps neither of them.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-level-levelStart">levelStart</span>
+<span class="t-label def" id="sym-level-levelStart.at">at</span>      <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-level-levelStart.left">left</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><a class="use" href="#sym-level-levelMap"><span class="t-name">levelMap</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><a class="use" href="#sym-level-levelMap"><span class="t-name">levelMap</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">(</span> <a class="use" href="#sym-level-levelMapEnd"><span class="t-name">levelMapEnd</span></a> <span class="t-punctuation">-</span> <a class="use" href="#sym-level-levelMap"><span class="t-name">levelMap</span></a> <span class="t-punctuation">)</span> <span class="t-punctuation">/</span> <a class="use" href="#sym-level-levelWidth"><span class="t-name">levelWidth</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-level-levelStart.left"><span class="t-name">left</span></a>
+<span class="t-label">@row</span>
+        <span class="t-mnemonic">ldx</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a>
+        <span class="t-mnemonic">ldy</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><a class="use" href="#sym-level-levelWidth"><span class="t-name">levelWidth</span></a>
+        <span class="t-mnemonic">jsr</span> <a class="use" href="#sym-print-printLine"><span class="t-name">printLine</span></a>
+        <span class="t-mnemonic">clc</span>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a>
+        <span class="t-mnemonic">adc</span> <span class="t-punctuation">#</span><a class="use" href="#sym-level-levelWidth"><span class="t-name">levelWidth</span></a>
+        <span class="t-mnemonic">sta</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a>
+        <span class="t-mnemonic">bcc</span> <span class="t-name">@counted</span>
+        <span class="t-mnemonic">inc</span> <a class="use" href="#sym-level-levelStart.at"><span class="t-name">at</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic">dec</span> <a class="use" href="#sym-level-levelStart.left"><span class="t-name">left</span></a>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@row</span>
+<span class="t-label">@stop</span>   <span class="t-mnemonic">jmp</span> <span class="t-name">@stop</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre>
+<details class="aside-file"><summary>transition.asm<span> nga.transition</span></summary><pre><code class="language-assembler"><span class="t-comment">; The Transition routine. Called by `jsr` from a `.transition`, with the</span>
+<span class="t-comment">; statement&#x27;s list right behind the call: the Phase to enter, and per Phase</span>
+<span class="t-comment">; the code may be in, the unit and offset where the edge&#x27;s Frame waits.</span>
+<span class="t-comment">; nga.open and nga.read are the driver&#x27;s roles, macros of the driver&#x27;s</span>
+<span class="t-comment">; Module expanded here; ngaShowBases is the Proc the tool generates beside</span>
+<span class="t-comment">; the dispatcher, which reads from the Frame the base the entered Phase gives</span>
+<span class="t-comment">; every Window and shows it, the stream&#x27;s last; and ngaCurrentPhase is the</span>
+<span class="t-comment">; Cell the tool generates. Everything else the edge has to say waits in the</span>
+<span class="t-comment">; Frame, in storage. See docs/spec/transition.md.</span>
+<span class="t-comment">;</span>
+<span class="t-comment">; Its zero page is Temporaries: nothing of it is needed once the routine has</span>
+<span class="t-comment">; jumped to the entered Phase&#x27;s entry, and a `.transition` is a jump into the</span>
+<span class="t-comment">; routine, so whatever the statement&#x27;s Section had on the zero page is dead by</span>
+<span class="t-comment">; then too. Two Temporaries never live at once share an address — see</span>
+<span class="t-comment">; docs/decisions/0034-trace.md.</span>
+
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaTransition</span>
+
+<span class="t-label def" id="sym-nga.transition-ngaPtr">ngaPtr</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaEntry">ngaEntry</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaDst">ngaDst</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaValue">ngaValue</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaOffset">ngaOffset</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaFramePos">ngaFramePos</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">2</span>
+<span class="t-label def" id="sym-nga.transition-ngaWanted">ngaWanted</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label def" id="sym-nga.transition-ngaCount">ngaCount</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label def" id="sym-nga.transition-ngaFrameUnit">ngaFrameUnit</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label def" id="sym-nga.transition-ngaUnit">ngaUnit</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transition-ngaTransition">ngaTransition</span>
+        <span class="t-mnemonic def" id="f4-1223">pla</span>
+        <span class="t-mnemonic def" id="f4-1235">sta</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a>
+        <span class="t-mnemonic def" id="f4-1254">pla</span>
+        <span class="t-mnemonic def" id="f4-1266">sta</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>            <span class="t-comment">; the return address: one below the statement&#x27;s list</span>
+        <span class="t-mnemonic def" id="f4-1351">ldy</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f4-1366">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-1389">sta</span> <a class="use" href="#sym-nga.transition-ngaWanted"><span class="t-name">ngaWanted</span></a>           <span class="t-comment">; the Phase to enter</span>
+        <span class="t-mnemonic def" id="f4-1442">iny</span>
+        <span class="t-mnemonic def" id="f4-1454">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-1477">sta</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>            <span class="t-comment">; entries that follow</span>
+        <span class="t-mnemonic def" id="f4-1531">lda</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a>
+        <span class="t-mnemonic def" id="f4-1550">clc</span>
+        <span class="t-mnemonic def" id="f4-1562">adc</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic def" id="f4-1577">sta</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a>
+        <span class="t-mnemonic def" id="f4-1596">bcc</span> <span class="t-name">@scan</span>
+        <span class="t-mnemonic def" id="f4-1614">inc</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@scan</span>
+        <span class="t-mnemonic def" id="f4-1641">lda</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-1662">bne</span> <span class="t-name">@check</span>
+        <span class="t-mnemonic def" id="f4-1681">brk</span>                     <span class="t-comment">; no entry for the current Phase: unreachable while the static rule holds</span>
+<span class="t-label">@check</span>
+        <span class="t-mnemonic def" id="f4-1794">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f4-1809">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-1832">cmp</span> <a class="use" href="#sym-nga.cell-ngaCurrentPhase"><span class="t-name">ngaCurrentPhase</span></a>
+        <span class="t-mnemonic def" id="f4-1860">beq</span> <span class="t-name">@found</span>
+        <span class="t-mnemonic def" id="f4-1879">lda</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a>              <span class="t-comment">; the next entry: four bytes on</span>
+        <span class="t-mnemonic def" id="f4-1943">clc</span>
+        <span class="t-mnemonic def" id="f4-1955">adc</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+        <span class="t-mnemonic def" id="f4-1970">sta</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a>
+        <span class="t-mnemonic def" id="f4-1989">bcc</span> <span class="t-name">@skipped</span>
+        <span class="t-mnemonic def" id="f4-2010">inc</span> <a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@skipped</span>
+        <span class="t-mnemonic def" id="f4-2040">dec</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-2061">jmp</span> <span class="t-name">@scan</span>
+<span class="t-label">@found</span>
+        <span class="t-mnemonic def" id="f4-2086">iny</span>
+        <span class="t-mnemonic def" id="f4-2098">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-2121">sta</span> <a class="use" href="#sym-nga.transition-ngaFrameUnit"><span class="t-name">ngaFrameUnit</span></a>        <span class="t-comment">; the unit the Frame waits in</span>
+        <span class="t-mnemonic def" id="f4-2183">iny</span>
+        <span class="t-mnemonic def" id="f4-2195">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-2218">sta</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a>
+        <span class="t-mnemonic def" id="f4-2242">iny</span>
+        <span class="t-mnemonic def" id="f4-2254">lda</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaPtr"><span class="t-name">ngaPtr</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-2277">sta</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>       <span class="t-comment">; and where in it</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span> <span class="t-name">then</span> <span class="t-name">ngaEnter</span>
+
+<span class="t-comment">; The rest of it, and the way in for a Container that has no current Phase to</span>
+<span class="t-comment">; look one up by: ngaWanted holds the Phase to enter and ngaFrameUnit and</span>
+<span class="t-comment">; ngaFramePos where its Frame waits. The cold start comes here — see</span>
+<span class="t-comment">; docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaEnter</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transition-ngaEnter">ngaEnter</span>
+        <span class="t-mnemonic def" id="f4-2682">jsr</span> <a class="use" href="#sym-nga.transition-ngaFrameOpen"><span class="t-name">ngaFrameOpen</span></a>
+        <span class="t-macro def" id="f4-2707">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-2724">sta</span> <a class="use" href="#sym-nga.transition-ngaEntry"><span class="t-name">ngaEntry</span></a>
+        <span class="t-macro def" id="f4-2745">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-2762">sta</span> <a class="use" href="#sym-nga.transition-ngaEntry"><span class="t-name">ngaEntry</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-2785">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-2802">sta</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>            <span class="t-comment">; blocks that follow</span>
+        <span class="t-mnemonic def" id="f4-2855">lda</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic def" id="f4-2870">jsr</span> <a class="use" href="#sym-nga.transition-ngaFrameSkip"><span class="t-name">ngaFrameSkip</span></a>
+<span class="t-label">@block</span>
+        <span class="t-mnemonic def" id="f4-2902">lda</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-2923">beq</span> <span class="t-name">@cells</span>
+        <span class="t-mnemonic def" id="f4-2942">jsr</span> <a class="use" href="#sym-nga.transition-ngaFrameOpen"><span class="t-name">ngaFrameOpen</span></a>        <span class="t-comment">; back to the Frame: a block&#x27;s stream replaced it</span>
+        <span class="t-macro def" id="f4-3024">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3041">sta</span> <a class="use" href="#sym-nga.transition-ngaUnit"><span class="t-name">ngaUnit</span></a>
+        <span class="t-macro def" id="f4-3061">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3078">sta</span> <a class="use" href="#sym-nga.transition-ngaOffset"><span class="t-name">ngaOffset</span></a>
+        <span class="t-macro def" id="f4-3100">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3117">sta</span> <a class="use" href="#sym-nga.transition-ngaOffset"><span class="t-name">ngaOffset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-3141">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3158">sta</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a>
+        <span class="t-macro def" id="f4-3177">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3194">sta</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-3215">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3232">pha</span>                     <span class="t-comment">; the decoder&#x27;s number</span>
+        <span class="t-mnemonic def" id="f4-3287">lda</span> <span class="t-punctuation">#</span><span class="t-number">6</span>
+        <span class="t-mnemonic def" id="f4-3302">jsr</span> <a class="use" href="#sym-nga.transition-ngaFrameSkip"><span class="t-name">ngaFrameSkip</span></a>
+        <span class="t-mnemonic def" id="f4-3327">lda</span> <a class="use" href="#sym-nga.transition-ngaUnit"><span class="t-name">ngaUnit</span></a>
+        <span class="t-mnemonic def" id="f4-3347">ldx</span> <a class="use" href="#sym-nga.transition-ngaOffset"><span class="t-name">ngaOffset</span></a>
+        <span class="t-mnemonic def" id="f4-3369">ldy</span> <a class="use" href="#sym-nga.transition-ngaOffset"><span class="t-name">ngaOffset</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-3393">nga</span><span class="t-punctuation">.</span><span class="t-name">open</span>                <span class="t-comment">; the block&#x27;s stream: its stored size, then its bytes</span>
+        <span class="t-mnemonic def" id="f4-3479">pla</span>
+        <span class="t-mnemonic def" id="f4-3491">ldx</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a>
+        <span class="t-mnemonic def" id="f4-3510">ldy</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f4-3531">jsr</span> <a class="use" href="#sym-nga.transforms-ngaTransform"><span class="t-name">ngaTransform</span></a>
+        <span class="t-mnemonic def" id="f4-3556">dec</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-3577">jmp</span> <span class="t-name">@block</span>
+<span class="t-label">@cells</span>
+        <span class="t-mnemonic def" id="f4-3603">jsr</span> <a class="use" href="#sym-nga.transition-ngaFrameOpen"><span class="t-name">ngaFrameOpen</span></a>
+        <span class="t-macro def" id="f4-3628">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3645">sta</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>            <span class="t-comment">; Cell writes that follow, read in one stream</span>
+<span class="t-label">@cell</span>
+        <span class="t-mnemonic def" id="f4-3729">lda</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-3750">beq</span> <span class="t-name">@enter</span>
+        <span class="t-macro def" id="f4-3769">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3786">sta</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a>
+        <span class="t-macro def" id="f4-3805">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3822">sta</span> <a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-3843">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3860">sta</span> <a class="use" href="#sym-nga.transition-ngaValue"><span class="t-name">ngaValue</span></a>
+        <span class="t-macro def" id="f4-3881">nga</span><span class="t-punctuation">.</span><span class="t-name">read</span>
+        <span class="t-mnemonic def" id="f4-3898">sta</span> <a class="use" href="#sym-nga.transition-ngaValue"><span class="t-name">ngaValue</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f4-3921">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f4-3936">lda</span> <a class="use" href="#sym-nga.transition-ngaValue"><span class="t-name">ngaValue</span></a>
+        <span class="t-mnemonic def" id="f4-3957">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>          <span class="t-comment">; a Cell stands outside the driver&#x27;s window</span>
+        <span class="t-mnemonic def" id="f4-4033">iny</span>
+        <span class="t-mnemonic def" id="f4-4045">lda</span> <a class="use" href="#sym-nga.transition-ngaValue"><span class="t-name">ngaValue</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f4-4068">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaDst"><span class="t-name">ngaDst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f4-4091">dec</span> <a class="use" href="#sym-nga.transition-ngaCount"><span class="t-name">ngaCount</span></a>
+        <span class="t-mnemonic def" id="f4-4112">jmp</span> <span class="t-name">@cell</span>
+<span class="t-label">@enter</span>
+        <span class="t-mnemonic def" id="f4-4137">jsr</span> <a class="use" href="#sym-nga.transforms-ngaShowBases"><span class="t-name">ngaShowBases</span></a>        <span class="t-comment">; the entered Phase&#x27;s base in every Window, read from the Frame</span>
+        <span class="t-mnemonic def" id="f4-4233">lda</span> <a class="use" href="#sym-nga.transition-ngaWanted"><span class="t-name">ngaWanted</span></a>
+        <span class="t-mnemonic def" id="f4-4255">sta</span> <a class="use" href="#sym-nga.cell-ngaCurrentPhase"><span class="t-name">ngaCurrentPhase</span></a>     <span class="t-comment">; the Phase the program is in from here on</span>
+        <span class="t-mnemonic def" id="f4-4330">jmp</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.transition-ngaEntry"><span class="t-name">ngaEntry</span></a><span class="t-punctuation">)</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; The Frame&#x27;s stream, from where the routine last left it.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transition-ngaFrameOpen">ngaFrameOpen</span>
+        <span class="t-mnemonic def" id="f4-4438">lda</span> <a class="use" href="#sym-nga.transition-ngaFrameUnit"><span class="t-name">ngaFrameUnit</span></a>
+        <span class="t-mnemonic def" id="f4-4463">ldx</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a>
+        <span class="t-mnemonic def" id="f4-4487">ldy</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-macro def" id="f4-4513">nga</span><span class="t-punctuation">.</span><span class="t-name">open</span>
+        <span class="t-mnemonic def" id="f4-4530">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; A bytes on in the Frame, which is where its stream is opened next.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transition-ngaFrameSkip">ngaFrameSkip</span>
+        <span class="t-mnemonic def" id="f4-4637">clc</span>
+        <span class="t-mnemonic def" id="f4-4649">adc</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a>
+        <span class="t-mnemonic def" id="f4-4673">sta</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a>
+        <span class="t-mnemonic def" id="f4-4697">bcc</span> <span class="t-name">@done</span>
+        <span class="t-mnemonic def" id="f4-4715">inc</span> <a class="use" href="#sym-nga.transition-ngaFramePos"><span class="t-name">ngaFramePos</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@done</span>
+        <span class="t-mnemonic def" id="f4-4747">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<details class="aside-file"><summary>cell<span> nga.cell</span></summary><pre><code class="language-assembler"><span class="t-label def" id="sym-nga.cell-ngaCurrentPhase">ngaCurrentPhase</span></code></pre></details>
+<details class="aside-file"><summary>boot.asm<span> nga.boot</span></summary><pre><code class="language-assembler"><span class="t-comment">; The boot record of an .atr: the first three sectors, which the OS reads to</span>
+<span class="t-comment">; $0700 and calls at $0706. Those three hold 128 bytes, because the OS boots</span>
+<span class="t-comment">; with DSCTLN at 128; every sector after them holds 256, so the first thing the</span>
+<span class="t-comment">; loader does is say so. What it loads is the load image, the stream of segments</span>
+<span class="t-comment">; a `.xex` is made of with $FFFF closing it, waiting in the sectors after</span>
+<span class="t-comment">; storage. See docs/spec/atr.md.</span>
+
+<span class="t-label def" id="sym-nga.boot-DSKINV">DSKINV</span> <span class="t-punctuation">=</span> <span class="t-number">$E453</span>
+<span class="t-label def" id="sym-nga.boot-DUNIT">DUNIT</span>  <span class="t-punctuation">=</span> <span class="t-number">$0301</span>
+<span class="t-label def" id="sym-nga.boot-DCOMND">DCOMND</span> <span class="t-punctuation">=</span> <span class="t-number">$0302</span>
+<span class="t-label def" id="sym-nga.boot-DBUFLO">DBUFLO</span> <span class="t-punctuation">=</span> <span class="t-number">$0304</span>
+<span class="t-label def" id="sym-nga.boot-DBUFHI">DBUFHI</span> <span class="t-punctuation">=</span> <span class="t-number">$0305</span>
+<span class="t-label def" id="sym-nga.boot-DAUX1">DAUX1</span>  <span class="t-punctuation">=</span> <span class="t-number">$030A</span>
+<span class="t-label def" id="sym-nga.boot-DAUX2">DAUX2</span>  <span class="t-punctuation">=</span> <span class="t-number">$030B</span>
+<span class="t-label def" id="sym-nga.boot-DSCTLN">DSCTLN</span> <span class="t-punctuation">=</span> <span class="t-number">$02D5</span>                  <span class="t-comment">; what a sector holds, which DSKINV transfers</span>
+<span class="t-label def" id="sym-nga.boot-RUNAD">RUNAD</span>  <span class="t-punctuation">=</span> <span class="t-number">$02E0</span>
+<span class="t-label def" id="sym-nga.boot-DOSVEC">DOSVEC</span> <span class="t-punctuation">=</span> <span class="t-number">$000A</span>
+
+<span class="t-label def" id="sym-nga.boot-bootBuf">bootBuf</span> <span class="t-punctuation">=</span> <span class="t-number">$0400</span>                 <span class="t-comment">; the cassette buffer and the spare page after</span>
+                                <span class="t-comment">; it, both free once the record is in: 256</span>
+                                <span class="t-comment">; bytes, which is what a sector holds here</span>
+
+<span class="t-comment">; The zero page the OS leaves once it has booted: RAMLO and CASINI were the</span>
+<span class="t-comment">; boot&#x27;s own scratch and TSTDAT is spare. TRAMSZ, $06, is not among them —</span>
+<span class="t-comment">; coldstart reads it after the boot has returned.</span>
+<span class="t-label def" id="sym-nga.boot-bootDst">bootDst</span>    <span class="t-punctuation">=</span> <span class="t-number">$0000</span>              <span class="t-comment">; where the segment being read lands</span>
+<span class="t-label def" id="sym-nga.boot-bootLeft">bootLeft</span>   <span class="t-punctuation">=</span> <span class="t-number">$0002</span>              <span class="t-comment">; bytes of it still to come</span>
+<span class="t-label def" id="sym-nga.boot-bootSector">bootSector</span> <span class="t-punctuation">=</span> <span class="t-number">$0004</span>              <span class="t-comment">; the sector the buffer holds</span>
+<span class="t-label def" id="sym-nga.boot-bootPos">bootPos</span>    <span class="t-punctuation">=</span> <span class="t-number">$0007</span>              <span class="t-comment">; where in the buffer the stream stands, a byte</span>
+                                <span class="t-comment">; that wraps because a sector holds 256</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0700</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-nga.boot-ngaBootRecord">ngaBootRecord</span>
+        <span class="t-directive def" id="f0-1469">.</span><span class="t-directive">byte</span> <span class="t-number">0</span>                 <span class="t-comment">; the OS ignores this byte</span>
+        <span class="t-directive def" id="f0-1528">.</span><span class="t-directive">byte</span> <span class="t-number">3</span>                 <span class="t-comment">; sectors it reads, from the first</span>
+        <span class="t-directive def" id="f0-1595">.</span><span class="t-directive">word</span> <span class="t-number">$0700</span>             <span class="t-comment">; where it puts them</span>
+        <span class="t-directive">.</span><span class="t-directive">root</span>                   <span class="t-comment">; the OS calls what stands here</span>
+        <span class="t-directive def" id="f0-1712">.</span><span class="t-directive">word</span> <a class="use" href="#sym-nga.boot-ngaBootIdle"><span class="t-name">ngaBootIdle</span></a>       <span class="t-comment">; DOSINI, called once the load returns and on reset</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; The first sector of the load image, which the tool writes here once it knows</span>
+<span class="t-comment">; how much storage the program came to use, and one byte of the loader&#x27;s own.</span>
+<span class="t-comment">; At the end of the record, out of the loader&#x27;s way; the zero page the OS</span>
+<span class="t-comment">; leaves is spoken for, and $0006 is TRAMSZ, which the cold start reads after</span>
+<span class="t-comment">; the boot has returned.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaBootImage</span>
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$087D</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+<span class="t-label def" id="sym-nga.boot-ngaBootImage">ngaBootImage</span>
+        <span class="t-directive def" id="f0-2204">.</span><span class="t-directive">word</span> <span class="t-number">0</span>
+<span class="t-label def" id="sym-nga.boot-bootNeed">bootNeed</span>
+        <span class="t-directive def" id="f0-2229">.</span><span class="t-directive">res</span> <span class="t-number">1</span>                  <span class="t-comment">; set once the position has wrapped: the next</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>                           <span class="t-comment">; byte stands in the sector after</span>
+
+<span class="t-comment">; The OS jsr&#x27;s here once the three sectors stand at $0700, and a carry set on</span>
+<span class="t-comment">; return is a boot it tries again.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.boot-ngaBootLoad">ngaBootLoad</span><span class="t-punctuation">,</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0706</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+        <span class="t-mnemonic def" id="f0-2530">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>                  <span class="t-comment">; every sector from here on holds 256 bytes</span>
+        <span class="t-mnemonic def" id="f0-2606">sta</span> <a class="use" href="#sym-nga.boot-DSCTLN"><span class="t-name">DSCTLN</span></a>
+        <span class="t-mnemonic def" id="f0-2625">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-2640">sta</span> <a class="use" href="#sym-nga.boot-DSCTLN"><span class="t-name">DSCTLN</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-2661">lda</span> <a class="use" href="#sym-nga.boot-ngaBootImage"><span class="t-name">ngaBootImage</span></a>
+        <span class="t-mnemonic def" id="f0-2686">sta</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a>
+        <span class="t-mnemonic def" id="f0-2709">lda</span> <a class="use" href="#sym-nga.boot-ngaBootImage"><span class="t-name">ngaBootImage</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-2736">sta</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-2761">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.fill"><span class="t-name">fill</span></a>
+<span class="t-label">@segment</span>
+        <span class="t-mnemonic def" id="f0-2787">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.byte"><span class="t-name">byte</span></a>
+        <span class="t-mnemonic def" id="f0-2804">sta</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a>
+        <span class="t-mnemonic def" id="f0-2824">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.byte"><span class="t-name">byte</span></a>
+        <span class="t-mnemonic def" id="f0-2841">sta</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-2863">and</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a>             <span class="t-comment">; $FFFF closes the stream, and no segment starts there</span>
+        <span class="t-mnemonic def" id="f0-2950">cmp</span> <span class="t-punctuation">#</span><span class="t-number">$FF</span>
+        <span class="t-mnemonic def" id="f0-2967">beq</span> <span class="t-name">@run</span>
+        <span class="t-mnemonic def" id="f0-2984">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.byte"><span class="t-name">byte</span></a>                <span class="t-comment">; the end address, inclusive</span>
+        <span class="t-mnemonic def" id="f0-3045">sta</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3066">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.byte"><span class="t-name">byte</span></a>
+        <span class="t-mnemonic def" id="f0-3083">sta</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3106">sec</span>                     <span class="t-comment">; the count is end - start + 1</span>
+        <span class="t-mnemonic def" id="f0-3169">lda</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3190">sbc</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a>
+        <span class="t-mnemonic def" id="f0-3210">sta</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3231">lda</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3254">sbc</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3276">sta</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3299">inc</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3320">bne</span> <span class="t-name">@bytes</span>
+        <span class="t-mnemonic def" id="f0-3339">inc</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@bytes</span>
+        <span class="t-mnemonic def" id="f0-3369">lda</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3390">ora</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3413">beq</span> <span class="t-name">@segment</span>
+        <span class="t-mnemonic def" id="f0-3434">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.byte"><span class="t-name">byte</span></a>
+        <span class="t-mnemonic def" id="f0-3451">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f0-3466">sta</span> <span class="t-punctuation">(</span><a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f0-3490">inc</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a>
+        <span class="t-mnemonic def" id="f0-3510">bne</span> <span class="t-name">@counted</span>
+        <span class="t-mnemonic def" id="f0-3531">inc</span> <a class="use" href="#sym-nga.boot-bootDst"><span class="t-name">bootDst</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@counted</span>
+        <span class="t-mnemonic def" id="f0-3562">lda</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3583">bne</span> <span class="t-name">@low</span>
+        <span class="t-mnemonic def" id="f0-3600">dec</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@low</span>
+        <span class="t-mnemonic def" id="f0-3628">dec</span> <a class="use" href="#sym-nga.boot-bootLeft"><span class="t-name">bootLeft</span></a>
+        <span class="t-mnemonic def" id="f0-3649">jmp</span> <span class="t-name">@bytes</span>
+<span class="t-label">@run</span>
+        <span class="t-mnemonic def" id="f0-3673">lda</span> <a class="use" href="#sym-nga.boot-RUNAD"><span class="t-name">RUNAD</span></a>               <span class="t-comment">; where the program starts, which the OS jumps to</span>
+        <span class="t-mnemonic def" id="f0-3755">sta</span> <a class="use" href="#sym-nga.boot-DOSVEC"><span class="t-name">DOSVEC</span></a>
+        <span class="t-mnemonic def" id="f0-3774">lda</span> <a class="use" href="#sym-nga.boot-RUNAD"><span class="t-name">RUNAD</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3794">sta</span> <a class="use" href="#sym-nga.boot-DOSVEC"><span class="t-name">DOSVEC</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-3815">clc</span>                     <span class="t-comment">; a boot the OS keeps</span>
+        <span class="t-mnemonic def" id="f0-3869">rts</span>
+
+<span class="t-comment">; A = the next byte of the image, which runs from one sector into the next.</span>
+<span class="t-comment">; The position wraps to zero at the sector&#x27;s end, and bootNeed says the buffer</span>
+<span class="t-comment">; no longer holds what stands there.</span>
+<span class="t-label def" id="sym-nga.boot-ngaBootLoad.byte">byte</span>
+        <span class="t-mnemonic def" id="f0-4079">lda</span> <a class="use" href="#sym-nga.boot-bootNeed"><span class="t-name">bootNeed</span></a>
+        <span class="t-mnemonic def" id="f0-4100">beq</span> <span class="t-name">@have</span>
+        <span class="t-mnemonic def" id="f0-4118">inc</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a>
+        <span class="t-mnemonic def" id="f0-4141">bne</span> <span class="t-name">@next</span>
+        <span class="t-mnemonic def" id="f0-4159">inc</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+<span class="t-label">@next</span>
+        <span class="t-mnemonic def" id="f0-4190">jsr</span> <a class="use" href="#sym-nga.boot-ngaBootLoad.fill"><span class="t-name">fill</span></a>
+<span class="t-label">@have</span>
+        <span class="t-mnemonic def" id="f0-4213">ldy</span> <a class="use" href="#sym-nga.boot-bootPos"><span class="t-name">bootPos</span></a>
+        <span class="t-mnemonic def" id="f0-4233">inc</span> <a class="use" href="#sym-nga.boot-bootPos"><span class="t-name">bootPos</span></a>
+        <span class="t-mnemonic def" id="f0-4253">bne</span> <span class="t-name">@within</span>
+        <span class="t-mnemonic def" id="f0-4273">sty</span> <a class="use" href="#sym-nga.boot-bootNeed"><span class="t-name">bootNeed</span></a>            <span class="t-comment">; Y is $FF here, and any non-zero will do</span>
+<span class="t-label">@within</span>
+        <span class="t-mnemonic def" id="f0-4355">lda</span> <a class="use" href="#sym-nga.boot-bootBuf"><span class="t-name">bootBuf</span></a><span class="t-punctuation">,</span><span class="t-name">y</span>
+        <span class="t-mnemonic def" id="f0-4377">rts</span>
+
+<span class="t-comment">; The sector in bootSector into the buffer, tried again until it is read: the</span>
+<span class="t-comment">; OS read this record off this diskette, so the drive is there.</span>
+<span class="t-label def" id="sym-nga.boot-ngaBootLoad.fill">fill</span>
+        <span class="t-mnemonic def" id="f0-4537">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f0-4552">sta</span> <a class="use" href="#sym-nga.boot-bootPos"><span class="t-name">bootPos</span></a>
+        <span class="t-mnemonic def" id="f0-4572">sta</span> <a class="use" href="#sym-nga.boot-bootNeed"><span class="t-name">bootNeed</span></a>
+        <span class="t-mnemonic def" id="f0-4593">lda</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a>
+        <span class="t-mnemonic def" id="f0-4616">sta</span> <a class="use" href="#sym-nga.boot-DAUX1"><span class="t-name">DAUX1</span></a>
+        <span class="t-mnemonic def" id="f0-4634">lda</span> <a class="use" href="#sym-nga.boot-bootSector"><span class="t-name">bootSector</span></a><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-4659">sta</span> <a class="use" href="#sym-nga.boot-DAUX2"><span class="t-name">DAUX2</span></a>
+<span class="t-label">@again</span>
+        <span class="t-mnemonic def" id="f0-4684">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic def" id="f0-4699">sta</span> <a class="use" href="#sym-nga.boot-DUNIT"><span class="t-name">DUNIT</span></a>
+        <span class="t-mnemonic def" id="f0-4717">lda</span> <span class="t-punctuation">#</span><span class="t-number">$52</span>
+        <span class="t-mnemonic def" id="f0-4734">sta</span> <a class="use" href="#sym-nga.boot-DCOMND"><span class="t-name">DCOMND</span></a>
+        <span class="t-mnemonic def" id="f0-4753">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&lt;</span><a class="use" href="#sym-nga.boot-bootBuf"><span class="t-name">bootBuf</span></a>
+        <span class="t-mnemonic def" id="f0-4775">sta</span> <a class="use" href="#sym-nga.boot-DBUFLO"><span class="t-name">DBUFLO</span></a>
+        <span class="t-mnemonic def" id="f0-4794">lda</span> <span class="t-punctuation">#</span><span class="t-punctuation">&gt;</span><a class="use" href="#sym-nga.boot-bootBuf"><span class="t-name">bootBuf</span></a>
+        <span class="t-mnemonic def" id="f0-4816">sta</span> <a class="use" href="#sym-nga.boot-DBUFHI"><span class="t-name">DBUFHI</span></a>
+        <span class="t-mnemonic def" id="f0-4835">jsr</span> <a class="use" href="#sym-nga.boot-DSKINV"><span class="t-name">DSKINV</span></a>
+        <span class="t-mnemonic def" id="f0-4854">bmi</span> <span class="t-name">@again</span>
+        <span class="t-mnemonic def" id="f0-4873">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+
+<span class="t-comment">; DOSINI: the OS calls it once the load has returned and on every reset, so it</span>
+<span class="t-comment">; is in memory by then and the solver places it as it places any Proc.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.boot-ngaBootIdle">ngaBootIdle</span><span class="t-punctuation">,</span> <span class="t-name">root</span>
+        <span class="t-mnemonic def" id="f0-5066">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<details class="aside-file"><summary>transforms.asm<span> nga.transforms</span></summary><pre><code class="language-assembler"><span class="t-comment">; The dispatcher over the decoders the program declared, in the order the</span>
+<span class="t-comment">; tool numbered them. See docs/spec/transition.md.</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaShowBases</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transforms-ngaShowBases">ngaShowBases</span>
+        <span class="t-mnemonic def" id="f5-173">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaRestore</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transforms-ngaRestore">ngaRestore</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+<span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">ngaTransform</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-nga.transforms-ngaTransform">ngaTransform</span>
+        <span class="t-mnemonic def" id="f5-285">cmp</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic def" id="f5-300">bne</span> <span class="t-name">@not0</span>
+        <span class="t-mnemonic def" id="f5-318">jmp</span> <a class="use" href="#sym-disk-diskCopy"><span class="t-name">diskCopy</span></a>
+<span class="t-label">@not0</span>
+        <span class="t-mnemonic def" id="f5-345">brk</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre></details>
+<h2>Memory map</h2>
+<ol class="pools"><li>intro<span>144 zero page, 16487 bytes</span></li><li>level<span>144 zero page, 16873 bytes</span></li></ol>
+<div class="wide"><table class="map">
+<tr><th>Address</th><th>Bytes</th><th>Section</th><th>Module</th><th>Kind</th><th>Phases</th><th>Waits</th></tr>
+<tr><td>$0000–$007F</td><td>128</td><td>osZero</td><td>os</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0080–$0083</td><td>4</td><td>diskAt</td><td>disk</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0084–$0085</td><td>2</td><td>diskDst</td><td>disk</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0084–$0085</td><td>2</td><td>ngaDst</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0084–$0085</td><td>2</td><td>ngaPtr</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0086–$0087</td><td>2</td><td>diskLeft</td><td>disk</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0086–$0087</td><td>2</td><td>ngaOffset</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0086–$0087</td><td>2</td><td>ngaValue</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0088–$0089</td><td>2</td><td>ngaEntry</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$008A–$008B</td><td>2</td><td>ngaFramePos</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$008C–$008C</td><td>1</td><td>ngaWanted</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$008D–$008D</td><td>1</td><td>ngaCount</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$008E–$008E</td><td>1</td><td>ngaFrameUnit</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$008F–$008F</td><td>1</td><td>ngaUnit</td><td>nga.transition</td><td>temporary</td><td>0..1</td><td></td></tr>
+<tr><td>$0200–$06FF</td><td>1280</td><td>osRam</td><td>os</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0700–$0705</td><td>6</td><td>ngaBootRecord</td><td>nga.boot</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0706–$07B9</td><td>180</td><td>ngaBootLoad</td><td>nga.boot</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$087D–$087F</td><td>3</td><td>ngaBootImage</td><td>nga.boot</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0880–$0892</td><td>19</td><td>diskOpenStream</td><td>disk</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0893–$08AB</td><td>25</td><td>diskReadByte</td><td>disk</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$08AC–$08D3</td><td>40</td><td>diskFill</td><td>disk</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$08D4–$08EC</td><td>25</td><td>printLine</td><td>print</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$08ED–$08F1</td><td>5</td><td>introText</td><td>intro</td><td>section</td><td>0</td><td></td></tr>
+<tr><td>$08F2–$08FB</td><td>10</td><td>ngaFrameOpen</td><td>nga.transition</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$08FC–$08FC</td><td>1</td><td>ngaCurrentPhase</td><td>nga.cell</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$08FD–$08FD</td><td>1</td><td>ngaBootIdle</td><td>nga.boot</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$08FE–$08FE</td><td>1</td><td>ngaShowBases</td><td>nga.transforms</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0900–$09FF</td><td>256</td><td>diskBuffer</td><td>disk</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0A00–$0A2C</td><td>45</td><td>diskCopy</td><td>disk</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0A2D–$0A3E</td><td>18</td><td>introStart</td><td>intro</td><td>proc</td><td>0</td><td></td></tr>
+<tr><td>$0BC6–$0C0E</td><td>73</td><td>ngaTransition</td><td>nga.transition</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0C0F–$0C9F</td><td>145</td><td>ngaEnter</td><td>nga.transition</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0CA0–$0CA9</td><td>10</td><td>ngaFrameSkip</td><td>nga.transition</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$0CAA–$0CB1</td><td>8</td><td>ngaTransform</td><td>nga.transforms</td><td>proc</td><td>0..1</td><td></td></tr>
+<tr><td>$C000–$CFFF</td><td>4096</td><td>osRomLow</td><td>os</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$D800–$FFFF</td><td>10240</td><td>osRomHigh</td><td>os</td><td>section</td><td>0..1</td><td></td></tr>
+<tr><td>$0084–$0085</td><td>2</td><td>levelStart.at</td><td>level</td><td>temporary</td><td>1</td><td></td></tr>
+<tr><td>$0086–$0086</td><td>1</td><td>levelStart.left</td><td>level</td><td>temporary</td><td>1</td><td></td></tr>
+<tr><td>$0A2D–$0B9E</td><td>370</td><td>levelMap</td><td>level</td><td>section</td><td>1</td><td>unit 0 +$0010 (copy, 372 B)</td></tr>
+<tr><td>$0B9F–$0BC5</td><td>39</td><td>levelStart</td><td>level</td><td>proc</td><td>1</td><td>unit 0 +$0184 (copy, 41 B)</td></tr>
+</table></div>
+<h2>The atr</h2>
+<p class="aside">183952 bytes, 12 segments, 0 unaccounted.</p>
+<div class="wide"><table class="runs"><tr><td>0</td><td>16</td><td>container header</td><td></td></tr><tr><td>829</td><td>83</td><td>unused sectors</td><td></td></tr><tr><td>1380</td><td>2</td><td>end of image</td><td></td></tr><tr><td>1382</td><td>182570</td><td>unused sectors</td><td></td></tr></table></div>
+<details class="seg"><summary>$0700–$087F<span> 384 bytes at 16</span></summary><div class="wide"><table class="runs">
+<tr><td>$0700</td><td>1</td><td>nga.boot.ngaBootRecord</td><td><a href="#f0-1469">boot.asm</a></td></tr>
+<tr><td>$0701</td><td>1</td><td>nga.boot.ngaBootRecord</td><td><a href="#f0-1528">boot.asm</a></td></tr>
+<tr><td>$0702</td><td>2</td><td>nga.boot.ngaBootRecord</td><td><a href="#f0-1595">boot.asm</a></td></tr>
+<tr><td>$0704</td><td>2</td><td>nga.boot.ngaBootRecord</td><td><a href="#f0-1712">boot.asm</a></td></tr>
+<tr><td>$0706</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2530">boot.asm</a></td></tr>
+<tr><td>$0708</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2606">boot.asm</a></td></tr>
+<tr><td>$070B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2625">boot.asm</a></td></tr>
+<tr><td>$070D</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2640">boot.asm</a></td></tr>
+<tr><td>$0710</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2661">boot.asm</a></td></tr>
+<tr><td>$0713</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2686">boot.asm</a></td></tr>
+<tr><td>$0715</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2709">boot.asm</a></td></tr>
+<tr><td>$0718</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2736">boot.asm</a></td></tr>
+<tr><td>$071A</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2761">boot.asm</a></td></tr>
+<tr><td>$071D</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2787">boot.asm</a></td></tr>
+<tr><td>$0720</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2804">boot.asm</a></td></tr>
+<tr><td>$0722</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2824">boot.asm</a></td></tr>
+<tr><td>$0725</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2841">boot.asm</a></td></tr>
+<tr><td>$0727</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2863">boot.asm</a></td></tr>
+<tr><td>$0729</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2950">boot.asm</a></td></tr>
+<tr><td>$072B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2967">boot.asm</a></td></tr>
+<tr><td>$072D</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-2984">boot.asm</a></td></tr>
+<tr><td>$0730</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3045">boot.asm</a></td></tr>
+<tr><td>$0732</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3066">boot.asm</a></td></tr>
+<tr><td>$0735</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3083">boot.asm</a></td></tr>
+<tr><td>$0737</td><td>1</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3106">boot.asm</a></td></tr>
+<tr><td>$0738</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3169">boot.asm</a></td></tr>
+<tr><td>$073A</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3190">boot.asm</a></td></tr>
+<tr><td>$073C</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3210">boot.asm</a></td></tr>
+<tr><td>$073E</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3231">boot.asm</a></td></tr>
+<tr><td>$0740</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3254">boot.asm</a></td></tr>
+<tr><td>$0742</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3276">boot.asm</a></td></tr>
+<tr><td>$0744</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3299">boot.asm</a></td></tr>
+<tr><td>$0746</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3320">boot.asm</a></td></tr>
+<tr><td>$0748</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3339">boot.asm</a></td></tr>
+<tr><td>$074A</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3369">boot.asm</a></td></tr>
+<tr><td>$074C</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3390">boot.asm</a></td></tr>
+<tr><td>$074E</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3413">boot.asm</a></td></tr>
+<tr><td>$0750</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3434">boot.asm</a></td></tr>
+<tr><td>$0753</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3451">boot.asm</a></td></tr>
+<tr><td>$0755</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3466">boot.asm</a></td></tr>
+<tr><td>$0757</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3490">boot.asm</a></td></tr>
+<tr><td>$0759</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3510">boot.asm</a></td></tr>
+<tr><td>$075B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3531">boot.asm</a></td></tr>
+<tr><td>$075D</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3562">boot.asm</a></td></tr>
+<tr><td>$075F</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3583">boot.asm</a></td></tr>
+<tr><td>$0761</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3600">boot.asm</a></td></tr>
+<tr><td>$0763</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3628">boot.asm</a></td></tr>
+<tr><td>$0765</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3649">boot.asm</a></td></tr>
+<tr><td>$0768</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3673">boot.asm</a></td></tr>
+<tr><td>$076B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3755">boot.asm</a></td></tr>
+<tr><td>$076D</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3774">boot.asm</a></td></tr>
+<tr><td>$0770</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3794">boot.asm</a></td></tr>
+<tr><td>$0772</td><td>1</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3815">boot.asm</a></td></tr>
+<tr><td>$0773</td><td>1</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-3869">boot.asm</a></td></tr>
+<tr><td>$0774</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4079">boot.asm</a></td></tr>
+<tr><td>$0777</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4100">boot.asm</a></td></tr>
+<tr><td>$0779</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4118">boot.asm</a></td></tr>
+<tr><td>$077B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4141">boot.asm</a></td></tr>
+<tr><td>$077D</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4159">boot.asm</a></td></tr>
+<tr><td>$077F</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4190">boot.asm</a></td></tr>
+<tr><td>$0782</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4213">boot.asm</a></td></tr>
+<tr><td>$0784</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4233">boot.asm</a></td></tr>
+<tr><td>$0786</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4253">boot.asm</a></td></tr>
+<tr><td>$0788</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4273">boot.asm</a></td></tr>
+<tr><td>$078B</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4355">boot.asm</a></td></tr>
+<tr><td>$078E</td><td>1</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4377">boot.asm</a></td></tr>
+<tr><td>$078F</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4537">boot.asm</a></td></tr>
+<tr><td>$0791</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4552">boot.asm</a></td></tr>
+<tr><td>$0793</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4572">boot.asm</a></td></tr>
+<tr><td>$0796</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4593">boot.asm</a></td></tr>
+<tr><td>$0798</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4616">boot.asm</a></td></tr>
+<tr><td>$079B</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4634">boot.asm</a></td></tr>
+<tr><td>$079D</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4659">boot.asm</a></td></tr>
+<tr><td>$07A0</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4684">boot.asm</a></td></tr>
+<tr><td>$07A2</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4699">boot.asm</a></td></tr>
+<tr><td>$07A5</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4717">boot.asm</a></td></tr>
+<tr><td>$07A7</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4734">boot.asm</a></td></tr>
+<tr><td>$07AA</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4753">boot.asm</a></td></tr>
+<tr><td>$07AC</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4775">boot.asm</a></td></tr>
+<tr><td>$07AF</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4794">boot.asm</a></td></tr>
+<tr><td>$07B1</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4816">boot.asm</a></td></tr>
+<tr><td>$07B4</td><td>3</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4835">boot.asm</a></td></tr>
+<tr><td>$07B7</td><td>2</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4854">boot.asm</a></td></tr>
+<tr><td>$07B9</td><td>1</td><td>nga.boot.ngaBootLoad</td><td><a href="#f0-4873">boot.asm</a></td></tr>
+<tr><td>$07BA</td><td>195</td><td>storage image</td><td></td></tr>
+<tr><td>$087D</td><td>2</td><td>nga.boot.ngaBootImage</td><td><a href="#f0-2204">boot.asm</a></td></tr>
+<tr><td>$087F</td><td>1</td><td>nga.boot.ngaBootImage</td><td><a href="#f0-2229">boot.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>Storage<span> 3 images at 400</span></summary><div class="wide"><table class="runs">
+<tr><td>$0000</td><td>16</td><td>frame</td><td></td></tr>
+<tr><td>$0A2D</td><td>372</td><td>payload, copy</td><td></td></tr>
+<tr><td>$0B9F</td><td>41</td><td>payload, copy</td><td></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0880–$08D3<span> 84 bytes at 912</span></summary><div class="wide"><table class="runs">
+<tr><td>$0880</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2503">disk.asm</a></td></tr>
+<tr><td>$0882</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2523">disk.asm</a></td></tr>
+<tr><td>$0884</td><td>1</td><td>disk.diskOpenStream</td><td><a href="#f1-2599">disk.asm</a></td></tr>
+<tr><td>$0885</td><td>1</td><td>disk.diskOpenStream</td><td><a href="#f1-2675">disk.asm</a></td></tr>
+<tr><td>$0886</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2687">disk.asm</a></td></tr>
+<tr><td>$0888</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2711">disk.asm</a></td></tr>
+<tr><td>$088A</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2730">disk.asm</a></td></tr>
+<tr><td>$088C</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2751">disk.asm</a></td></tr>
+<tr><td>$088E</td><td>2</td><td>disk.diskOpenStream</td><td><a href="#f1-2775">disk.asm</a></td></tr>
+<tr><td>$0890</td><td>3</td><td>disk.diskOpenStream</td><td><a href="#f1-2796">disk.asm</a></td></tr>
+<tr><td>$0893</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-2905">disk.asm</a></td></tr>
+<tr><td>$0895</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-2926">disk.asm</a></td></tr>
+<tr><td>$0897</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-2944">disk.asm</a></td></tr>
+<tr><td>$0899</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-2963">disk.asm</a></td></tr>
+<tr><td>$089B</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-2981">disk.asm</a></td></tr>
+<tr><td>$089D</td><td>3</td><td>disk.diskReadByte</td><td><a href="#f1-3008">disk.asm</a></td></tr>
+<tr><td>$08A0</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-3035">disk.asm</a></td></tr>
+<tr><td>$08A2</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-3055">disk.asm</a></td></tr>
+<tr><td>$08A4</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-3075">disk.asm</a></td></tr>
+<tr><td>$08A6</td><td>2</td><td>disk.diskReadByte</td><td><a href="#f1-3095">disk.asm</a></td></tr>
+<tr><td>$08A8</td><td>3</td><td>disk.diskReadByte</td><td><a href="#f1-3177">disk.asm</a></td></tr>
+<tr><td>$08AB</td><td>1</td><td>disk.diskReadByte</td><td><a href="#f1-3202">disk.asm</a></td></tr>
+<tr><td>$08AC</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3449">disk.asm</a></td></tr>
+<tr><td>$08AE</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3464">disk.asm</a></td></tr>
+<tr><td>$08B0</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3485">disk.asm</a></td></tr>
+<tr><td>$08B2</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3504">disk.asm</a></td></tr>
+<tr><td>$08B5</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3522">disk.asm</a></td></tr>
+<tr><td>$08B7</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3543">disk.asm</a></td></tr>
+<tr><td>$08BA</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3568">disk.asm</a></td></tr>
+<tr><td>$08BC</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3583">disk.asm</a></td></tr>
+<tr><td>$08BF</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3601">disk.asm</a></td></tr>
+<tr><td>$08C1</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3618">disk.asm</a></td></tr>
+<tr><td>$08C4</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3637">disk.asm</a></td></tr>
+<tr><td>$08C6</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3662">disk.asm</a></td></tr>
+<tr><td>$08C9</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3681">disk.asm</a></td></tr>
+<tr><td>$08CB</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3706">disk.asm</a></td></tr>
+<tr><td>$08CE</td><td>3</td><td>disk.diskFill</td><td><a href="#f1-3725">disk.asm</a></td></tr>
+<tr><td>$08D1</td><td>2</td><td>disk.diskFill</td><td><a href="#f1-3744">disk.asm</a></td></tr>
+<tr><td>$08D3</td><td>1</td><td>disk.diskFill</td><td><a href="#f1-3763">disk.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0A00–$0A2C<span> 45 bytes at 1000</span></summary><div class="wide"><table class="runs">
+<tr><td>$0A00</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4158">disk.asm</a></td></tr>
+<tr><td>$0A02</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4178">disk.asm</a></td></tr>
+<tr><td>$0A04</td><td>3</td><td>disk.diskCopy</td><td><a href="#f1-4200">disk.asm</a></td></tr>
+<tr><td>$0A07</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4225">disk.asm</a></td></tr>
+<tr><td>$0A09</td><td>3</td><td>disk.diskCopy</td><td><a href="#f1-4246">disk.asm</a></td></tr>
+<tr><td>$0A0C</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4271">disk.asm</a></td></tr>
+<tr><td>$0A0E</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4300">disk.asm</a></td></tr>
+<tr><td>$0A10</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4321">disk.asm</a></td></tr>
+<tr><td>$0A12</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4344">disk.asm</a></td></tr>
+<tr><td>$0A14</td><td>3</td><td>disk.diskCopy</td><td><a href="#f1-4362">disk.asm</a></td></tr>
+<tr><td>$0A17</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4387">disk.asm</a></td></tr>
+<tr><td>$0A19</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4402">disk.asm</a></td></tr>
+<tr><td>$0A1B</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4426">disk.asm</a></td></tr>
+<tr><td>$0A1D</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4446">disk.asm</a></td></tr>
+<tr><td>$0A1F</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4467">disk.asm</a></td></tr>
+<tr><td>$0A21</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4498">disk.asm</a></td></tr>
+<tr><td>$0A23</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4519">disk.asm</a></td></tr>
+<tr><td>$0A25</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4536">disk.asm</a></td></tr>
+<tr><td>$0A27</td><td>2</td><td>disk.diskCopy</td><td><a href="#f1-4564">disk.asm</a></td></tr>
+<tr><td>$0A29</td><td>3</td><td>disk.diskCopy</td><td><a href="#f1-4585">disk.asm</a></td></tr>
+<tr><td>$0A2C</td><td>1</td><td>disk.diskCopy</td><td><a href="#f1-4609">disk.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$08D4–$08F1<span> 30 bytes at 1049</span></summary><div class="wide"><table class="runs">
+<tr><td>$08D4</td><td>3</td><td>print.printLine</td><td><a href="#f2-549">print.asm</a></td></tr>
+<tr><td>$08D7</td><td>3</td><td>print.printLine</td><td><a href="#f2-567">print.asm</a></td></tr>
+<tr><td>$08DA</td><td>3</td><td>print.printLine</td><td><a href="#f2-587">print.asm</a></td></tr>
+<tr><td>$08DD</td><td>2</td><td>print.printLine</td><td><a href="#f2-605">print.asm</a></td></tr>
+<tr><td>$08DF</td><td>3</td><td>print.printLine</td><td><a href="#f2-620">print.asm</a></td></tr>
+<tr><td>$08E2</td><td>2</td><td>print.printLine</td><td><a href="#f2-640">print.asm</a></td></tr>
+<tr><td>$08E4</td><td>3</td><td>print.printLine</td><td><a href="#f2-660">print.asm</a></td></tr>
+<tr><td>$08E7</td><td>2</td><td>print.printLine</td><td><a href="#f2-678">print.asm</a></td></tr>
+<tr><td>$08E9</td><td>3</td><td>print.printLine</td><td><a href="#f2-693">print.asm</a></td></tr>
+<tr><td>$08EC</td><td>1</td><td>print.printLine</td><td><a href="#f2-710">print.asm</a></td></tr>
+<tr><td>$08ED</td><td>5</td><td>intro.introText</td><td><a href="#f3-27">intro.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0A2D–$0A3E<span> 18 bytes at 1083</span></summary><div class="wide"><table class="runs">
+<tr><td>$0A2D</td><td>2</td><td>intro.introStart</td><td><a href="#f3-86">intro.asm</a></td></tr>
+<tr><td>$0A2F</td><td>2</td><td>intro.introStart</td><td><a href="#f3-110">intro.asm</a></td></tr>
+<tr><td>$0A31</td><td>2</td><td>intro.introStart</td><td><a href="#f3-134">intro.asm</a></td></tr>
+<tr><td>$0A33</td><td>3</td><td>intro.introStart</td><td><a href="#f3-172">intro.asm</a></td></tr>
+<tr><td>$0A36</td><td>9</td><td>intro.introStart</td><td><a href="#f3-194">intro.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0BC6–$0C9F<span> 218 bytes at 1105</span></summary><div class="wide"><table class="runs">
+<tr><td>$0BC6</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1223">transition.asm</a></td></tr>
+<tr><td>$0BC7</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1235">transition.asm</a></td></tr>
+<tr><td>$0BC9</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1254">transition.asm</a></td></tr>
+<tr><td>$0BCA</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1266">transition.asm</a></td></tr>
+<tr><td>$0BCC</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1351">transition.asm</a></td></tr>
+<tr><td>$0BCE</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1366">transition.asm</a></td></tr>
+<tr><td>$0BD0</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1389">transition.asm</a></td></tr>
+<tr><td>$0BD2</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1442">transition.asm</a></td></tr>
+<tr><td>$0BD3</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1454">transition.asm</a></td></tr>
+<tr><td>$0BD5</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1477">transition.asm</a></td></tr>
+<tr><td>$0BD7</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1531">transition.asm</a></td></tr>
+<tr><td>$0BD9</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1550">transition.asm</a></td></tr>
+<tr><td>$0BDA</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1562">transition.asm</a></td></tr>
+<tr><td>$0BDC</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1577">transition.asm</a></td></tr>
+<tr><td>$0BDE</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1596">transition.asm</a></td></tr>
+<tr><td>$0BE0</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1614">transition.asm</a></td></tr>
+<tr><td>$0BE2</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1641">transition.asm</a></td></tr>
+<tr><td>$0BE4</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1662">transition.asm</a></td></tr>
+<tr><td>$0BE6</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1681">transition.asm</a></td></tr>
+<tr><td>$0BE7</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1794">transition.asm</a></td></tr>
+<tr><td>$0BE9</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1809">transition.asm</a></td></tr>
+<tr><td>$0BEB</td><td>3</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1832">transition.asm</a></td></tr>
+<tr><td>$0BEE</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1860">transition.asm</a></td></tr>
+<tr><td>$0BF0</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1879">transition.asm</a></td></tr>
+<tr><td>$0BF2</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1943">transition.asm</a></td></tr>
+<tr><td>$0BF3</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1955">transition.asm</a></td></tr>
+<tr><td>$0BF5</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1970">transition.asm</a></td></tr>
+<tr><td>$0BF7</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-1989">transition.asm</a></td></tr>
+<tr><td>$0BF9</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2010">transition.asm</a></td></tr>
+<tr><td>$0BFB</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2040">transition.asm</a></td></tr>
+<tr><td>$0BFD</td><td>3</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2061">transition.asm</a></td></tr>
+<tr><td>$0C00</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2086">transition.asm</a></td></tr>
+<tr><td>$0C01</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2098">transition.asm</a></td></tr>
+<tr><td>$0C03</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2121">transition.asm</a></td></tr>
+<tr><td>$0C05</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2183">transition.asm</a></td></tr>
+<tr><td>$0C06</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2195">transition.asm</a></td></tr>
+<tr><td>$0C08</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2218">transition.asm</a></td></tr>
+<tr><td>$0C0A</td><td>1</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2242">transition.asm</a></td></tr>
+<tr><td>$0C0B</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2254">transition.asm</a></td></tr>
+<tr><td>$0C0D</td><td>2</td><td>nga.transition.ngaTransition</td><td><a href="#f4-2277">transition.asm</a></td></tr>
+<tr><td>$0C0F</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2682">transition.asm</a></td></tr>
+<tr><td>$0C12</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2707">transition.asm</a></td></tr>
+<tr><td>$0C15</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2724">transition.asm</a></td></tr>
+<tr><td>$0C17</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2745">transition.asm</a></td></tr>
+<tr><td>$0C1A</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2762">transition.asm</a></td></tr>
+<tr><td>$0C1C</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2785">transition.asm</a></td></tr>
+<tr><td>$0C1F</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2802">transition.asm</a></td></tr>
+<tr><td>$0C21</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2855">transition.asm</a></td></tr>
+<tr><td>$0C23</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2870">transition.asm</a></td></tr>
+<tr><td>$0C26</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2902">transition.asm</a></td></tr>
+<tr><td>$0C28</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2923">transition.asm</a></td></tr>
+<tr><td>$0C2A</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-2942">transition.asm</a></td></tr>
+<tr><td>$0C2D</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3024">transition.asm</a></td></tr>
+<tr><td>$0C30</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3041">transition.asm</a></td></tr>
+<tr><td>$0C32</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3061">transition.asm</a></td></tr>
+<tr><td>$0C35</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3078">transition.asm</a></td></tr>
+<tr><td>$0C37</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3100">transition.asm</a></td></tr>
+<tr><td>$0C3A</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3117">transition.asm</a></td></tr>
+<tr><td>$0C3C</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3141">transition.asm</a></td></tr>
+<tr><td>$0C3F</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3158">transition.asm</a></td></tr>
+<tr><td>$0C41</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3177">transition.asm</a></td></tr>
+<tr><td>$0C44</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3194">transition.asm</a></td></tr>
+<tr><td>$0C46</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3215">transition.asm</a></td></tr>
+<tr><td>$0C49</td><td>1</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3232">transition.asm</a></td></tr>
+<tr><td>$0C4A</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3287">transition.asm</a></td></tr>
+<tr><td>$0C4C</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3302">transition.asm</a></td></tr>
+<tr><td>$0C4F</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3327">transition.asm</a></td></tr>
+<tr><td>$0C51</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3347">transition.asm</a></td></tr>
+<tr><td>$0C53</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3369">transition.asm</a></td></tr>
+<tr><td>$0C55</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3393">transition.asm</a></td></tr>
+<tr><td>$0C58</td><td>1</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3479">transition.asm</a></td></tr>
+<tr><td>$0C59</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3491">transition.asm</a></td></tr>
+<tr><td>$0C5B</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3510">transition.asm</a></td></tr>
+<tr><td>$0C5D</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3531">transition.asm</a></td></tr>
+<tr><td>$0C60</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3556">transition.asm</a></td></tr>
+<tr><td>$0C62</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3577">transition.asm</a></td></tr>
+<tr><td>$0C65</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3603">transition.asm</a></td></tr>
+<tr><td>$0C68</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3628">transition.asm</a></td></tr>
+<tr><td>$0C6B</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3645">transition.asm</a></td></tr>
+<tr><td>$0C6D</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3729">transition.asm</a></td></tr>
+<tr><td>$0C6F</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3750">transition.asm</a></td></tr>
+<tr><td>$0C71</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3769">transition.asm</a></td></tr>
+<tr><td>$0C74</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3786">transition.asm</a></td></tr>
+<tr><td>$0C76</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3805">transition.asm</a></td></tr>
+<tr><td>$0C79</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3822">transition.asm</a></td></tr>
+<tr><td>$0C7B</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3843">transition.asm</a></td></tr>
+<tr><td>$0C7E</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3860">transition.asm</a></td></tr>
+<tr><td>$0C80</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3881">transition.asm</a></td></tr>
+<tr><td>$0C83</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3898">transition.asm</a></td></tr>
+<tr><td>$0C85</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3921">transition.asm</a></td></tr>
+<tr><td>$0C87</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3936">transition.asm</a></td></tr>
+<tr><td>$0C89</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-3957">transition.asm</a></td></tr>
+<tr><td>$0C8B</td><td>1</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4033">transition.asm</a></td></tr>
+<tr><td>$0C8C</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4045">transition.asm</a></td></tr>
+<tr><td>$0C8E</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4068">transition.asm</a></td></tr>
+<tr><td>$0C90</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4091">transition.asm</a></td></tr>
+<tr><td>$0C92</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4112">transition.asm</a></td></tr>
+<tr><td>$0C95</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4137">transition.asm</a></td></tr>
+<tr><td>$0C98</td><td>2</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4233">transition.asm</a></td></tr>
+<tr><td>$0C9A</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4255">transition.asm</a></td></tr>
+<tr><td>$0C9D</td><td>3</td><td>nga.transition.ngaEnter</td><td><a href="#f4-4330">transition.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$08F2–$08FB<span> 10 bytes at 1327</span></summary><div class="wide"><table class="runs">
+<tr><td>$08F2</td><td>2</td><td>nga.transition.ngaFrameOpen</td><td><a href="#f4-4438">transition.asm</a></td></tr>
+<tr><td>$08F4</td><td>2</td><td>nga.transition.ngaFrameOpen</td><td><a href="#f4-4463">transition.asm</a></td></tr>
+<tr><td>$08F6</td><td>2</td><td>nga.transition.ngaFrameOpen</td><td><a href="#f4-4487">transition.asm</a></td></tr>
+<tr><td>$08F8</td><td>3</td><td>nga.transition.ngaFrameOpen</td><td><a href="#f4-4513">transition.asm</a></td></tr>
+<tr><td>$08FB</td><td>1</td><td>nga.transition.ngaFrameOpen</td><td><a href="#f4-4530">transition.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0CA0–$0CA9<span> 10 bytes at 1341</span></summary><div class="wide"><table class="runs">
+<tr><td>$0CA0</td><td>1</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4637">transition.asm</a></td></tr>
+<tr><td>$0CA1</td><td>2</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4649">transition.asm</a></td></tr>
+<tr><td>$0CA3</td><td>2</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4673">transition.asm</a></td></tr>
+<tr><td>$0CA5</td><td>2</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4697">transition.asm</a></td></tr>
+<tr><td>$0CA7</td><td>2</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4715">transition.asm</a></td></tr>
+<tr><td>$0CA9</td><td>1</td><td>nga.transition.ngaFrameSkip</td><td><a href="#f4-4747">transition.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$08FC–$08FE<span> 3 bytes at 1355</span></summary><div class="wide"><table class="runs">
+<tr><td>$08FC</td><td>1</td><td>nga.cell.ngaCurrentPhase</td><td></td></tr>
+<tr><td>$08FD</td><td>1</td><td>nga.boot.ngaBootIdle</td><td><a href="#f0-5066">boot.asm</a></td></tr>
+<tr><td>$08FE</td><td>1</td><td>nga.transforms.ngaShowBases</td><td><a href="#f5-173">transforms.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$0CAA–$0CB1<span> 8 bytes at 1362</span></summary><div class="wide"><table class="runs">
+<tr><td>$0CAA</td><td>2</td><td>nga.transforms.ngaTransform</td><td><a href="#f5-285">transforms.asm</a></td></tr>
+<tr><td>$0CAC</td><td>2</td><td>nga.transforms.ngaTransform</td><td><a href="#f5-300">transforms.asm</a></td></tr>
+<tr><td>$0CAE</td><td>3</td><td>nga.transforms.ngaTransform</td><td><a href="#f5-318">transforms.asm</a></td></tr>
+<tr><td>$0CB1</td><td>1</td><td>nga.transforms.ngaTransform</td><td><a href="#f5-345">transforms.asm</a></td></tr>
+</table></div></details>
+<details class="seg"><summary>$02E0–$02E1<span> 2 bytes at 1374</span></summary><div class="wide"><table class="runs">
+<tr><td>$02E0</td><td>2</td><td>runad</td><td></td></tr>
+</table></div></details>
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

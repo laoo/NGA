@@ -1,0 +1,3190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnostics — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li class="here"><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="diagnostics">Diagnostics</h1>
+<p>Every finding the tool reports carries an identifier. It is <code>NGA</code> and four
+digits, and it never changes meaning. This chapter lists all of them.</p>
+<p>Read it when the tool said something you want to look up. Do not read it in
+order.</p>
+<h2 id="how-to-read-a-finding">How to read a finding</h2>
+<pre><code>error[NGA5205]: `level.map` is loaded from storage, and cannot live where the
+                stream reads through, at $4000
+ --&gt; main.ngp:12:3
+</code></pre>
+<p>The identifier comes first. The message follows, with the names of the program
+written into it. The location points at the line that caused the finding, and a
+finding about the whole program has no location.</p>
+<p>The number says which part of the tool raised it, so the number alone says
+where to look. The tables below are grouped that way.</p>
+<p>A number is never reused. A diagnostic that is retired takes its number with
+it.</p>
+<h2 id="severity">Severity</h2>
+<p>An error stops the build at the next gate. A warning does not stop anything. A
+note never stands alone and always explains the finding above it.</p>
+<p>The severity in the tables is the default. A Project changes it in its
+<a href="../project-file/#diagnostics"><code>diagnostics</code> block</a>, and the command line
+changes it with <code>--deny</code>, <code>--allow</code> and <code>--off</code>. The command line wins.</p>
+<h2 id="what-the-message-shows-here">What the message shows here</h2>
+<p>The tables show the message as the tool holds it, with named arguments in
+braces. A real finding has values there instead. So <code>`{section}` is pinned at {address:hex}</code> is printed as <code>`hud` is pinned at $2000</code>.</p>
+<p>Some findings have more to say than the message has room for. Those carry a
+note below the tables, and their identifier is a link to it.</p>
+<h3 id="source-lexing">Source lexing</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga0001">
+<td><code>NGA0001</code></td>
+<td>error</td>
+<td>unexpected character <code>{character}</code></td>
+</tr>
+<tr id="nga0002">
+<td><code>NGA0002</code></td>
+<td>error</td>
+<td>unterminated string literal</td>
+</tr>
+<tr id="nga0003">
+<td><code>NGA0003</code></td>
+<td>error</td>
+<td>string literal is not closed before the end of the line</td>
+</tr>
+<tr id="nga0004">
+<td><code>NGA0004</code></td>
+<td>error</td>
+<td>unterminated character literal</td>
+</tr>
+<tr id="nga0005">
+<td><code>NGA0005</code></td>
+<td>error</td>
+<td>character literal is empty</td>
+</tr>
+<tr id="nga0006">
+<td><code>NGA0006</code></td>
+<td>error</td>
+<td>character literal holds more than one character</td>
+</tr>
+<tr id="nga0007">
+<td><code>NGA0007</code></td>
+<td>error</td>
+<td>unknown escape sequence <code>\{escape}</code></td>
+</tr>
+<tr id="nga0009">
+<td><code>NGA0009</code></td>
+<td>error</td>
+<td>invalid UTF-8 encoding</td>
+</tr>
+<tr id="nga0010">
+<td><code>NGA0010</code></td>
+<td>error</td>
+<td><code>{prefix}</code> is not followed by any digits</td>
+</tr>
+<tr id="nga0011">
+<td><code>NGA0011</code></td>
+<td>error</td>
+<td><code>{character}</code> is not valid in a {base} literal</td>
+</tr>
+<tr id="nga0012">
+<td><code>NGA0012</code></td>
+<td>error</td>
+<td><code>_</code> in a numeric literal must stand between digits</td>
+</tr>
+<tr id="nga0013">
+<td><code>NGA0013</code></td>
+<td>error</td>
+<td>hexadecimal literals are written <code>$1F</code>, not <code>0x1F</code></td>
+</tr>
+<tr id="nga0014">
+<td><code>NGA0014</code></td>
+<td>error</td>
+<td>numeric local labels do not exist; use <code>@</code>, <code>@+</code>, <code>@-</code>, or a name</td>
+</tr>
+<tr id="nga0015">
+<td><code>NGA0015</code></td>
+<td>error</td>
+<td>control character {code:hex} in source</td>
+</tr>
+<tr id="nga0016">
+<td><code>NGA0016</code></td>
+<td>error</td>
+<td>this number is too large to be represented</td>
+</tr>
+</tbody>
+</table>
+<h3 id="source-parsing">Source parsing</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga0100">
+<td><code>NGA0100</code></td>
+<td>error</td>
+<td>expected an expression</td>
+</tr>
+<tr id="nga0101">
+<td><code>NGA0101</code></td>
+<td>error</td>
+<td>expected <code>)</code> to close this parenthesis</td>
+</tr>
+<tr id="nga0102">
+<td><code>NGA0102</code></td>
+<td>error</td>
+<td><code>&lt;&lt;</code> is a shift; the low byte of an operand is <code>&lt;</code></td>
+</tr>
+<tr id="nga0103">
+<td><code>NGA0103</code></td>
+<td>error</td>
+<td><code>{outer}</code> and <code>{inner}</code> need parentheses to say which one binds first</td>
+</tr>
+<tr id="nga0104">
+<td><code>NGA0104</code></td>
+<td>error</td>
+<td>this expression nests more than {limit} deep</td>
+</tr>
+<tr id="nga0110">
+<td><code>NGA0110</code></td>
+<td>error</td>
+<td><code>{token}</code> cannot begin a statement</td>
+</tr>
+<tr id="nga0111">
+<td><code>NGA0111</code></td>
+<td>error</td>
+<td>unexpected <code>{token}</code> after the end of the statement</td>
+</tr>
+<tr id="nga0112">
+<td><code>NGA0112</code></td>
+<td>error</td>
+<td><code>{name}</code> at column one defines a label; indent it to write an instruction</td>
+</tr>
+<tr>
+<td><a href="#nga0113"><code>NGA0113</code></a></td>
+<td>warning</td>
+<td><code>{name}</code> at column one defines a label named like an instruction</td>
+</tr>
+<tr id="nga0114">
+<td><code>NGA0114</code></td>
+<td>error</td>
+<td>a direction marks a reference, not a definition</td>
+</tr>
+<tr id="nga0115">
+<td><code>NGA0115</code></td>
+<td>error</td>
+<td>a local label has no scope outside a <code><a class="ref" href="../assembler/#proc">.proc</a></code></td>
+</tr>
+<tr id="nga0116">
+<td><code>NGA0116</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#declare">.declare</a></code> says what a byte of a proc is, and this stands outside one</td>
+</tr>
+<tr id="nga0117">
+<td><code>NGA0117</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#declare">.declare</a></code> says what the <code>.ztemp</code> or <code>.temp</code> below it is, and this is not one</td>
+</tr>
+<tr id="nga0118">
+<td><code>NGA0118</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#declare">.declare</a></code> says <code>arg</code> or <code>ret</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga0119">
+<td><code>NGA0119</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a type or a place; a declared byte is <code>u8</code>, <code>i8</code>, <code>u16</code>, <code>i16</code>, <code>bool</code> or <code>u8[N]</code>, or lies in <code>a</code>, <code>x</code>, <code>y</code> or <code>m</code>, a letter a byte from the low one</td>
+</tr>
+<tr id="nga0120">
+<td><code>NGA0120</code></td>
+<td>error</td>
+<td>unknown directive <code>.{name}</code></td>
+</tr>
+<tr id="nga0121">
+<td><code>NGA0121</code></td>
+<td>error</td>
+<td><code>.end</code> does not say what it closes; write <code>.ends</code> or <code>.endp</code></td>
+</tr>
+<tr id="nga0122">
+<td><code>NGA0122</code></td>
+<td>error</td>
+<td>expected a name after <code>{after}</code></td>
+</tr>
+<tr id="nga0123">
+<td><code>NGA0123</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a section attribute</td>
+</tr>
+<tr id="nga0124">
+<td><code>NGA0124</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#section">.section</a></code> is never closed</td>
+</tr>
+<tr id="nga0125">
+<td><code>NGA0125</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#proc">.proc</a></code> is never closed</td>
+</tr>
+<tr id="nga0126">
+<td><code>NGA0126</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code><a class="ref" href="../assembler/#section">.section</a></code></td>
+</tr>
+<tr id="nga0127">
+<td><code>NGA0127</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code><a class="ref" href="../assembler/#proc">.proc</a></code></td>
+</tr>
+<tr id="nga0128">
+<td><code>NGA0128</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#section">.section</a></code> cannot open inside another; close the first one</td>
+</tr>
+<tr id="nga0129">
+<td><code>NGA0129</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#proc">.proc</a></code> cannot open inside another</td>
+</tr>
+<tr id="nga0130">
+<td><code>NGA0130</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#proc">.proc</a></code> already declares its result, and a proc has one</td>
+</tr>
+<tr id="nga0131">
+<td><code>NGA0131</code></td>
+<td>error</td>
+<td><code>{name}</code> gives a placement this <code><a class="ref" href="../assembler/#section">.section</a></code> already has</td>
+</tr>
+<tr id="nga0132">
+<td><code>NGA0132</code></td>
+<td>error</td>
+<td><code>{name}</code> is already given for this placement</td>
+</tr>
+<tr id="nga0133">
+<td><code>NGA0133</code></td>
+<td>error</td>
+<td><code>{name}</code> is already given for this <code><a class="ref" href="../assembler/#section">.section</a></code></td>
+</tr>
+<tr id="nga0134">
+<td><code>NGA0134</code></td>
+<td>error</td>
+<td>a slot is <code>pointer</code> or <code>vector</code>, and this is {name}</td>
+</tr>
+<tr id="nga0135">
+<td><code>NGA0135</code></td>
+<td>error</td>
+<td>a slot's placement is <code>zeropage</code> or <code>absolute</code>, and this is {name}</td>
+</tr>
+<tr id="nga0136">
+<td><code>NGA0136</code></td>
+<td>error</td>
+<td><code>.ztemp</code> and <code>.temp</code> declare a variable and need its name at column one</td>
+</tr>
+<tr id="nga0137">
+<td><code>NGA0137</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#proc">.proc</a></code> is a section of its own and cannot open inside a <code><a class="ref" href="../assembler/#section">.section</a></code></td>
+</tr>
+<tr>
+<td><a href="#nga0138"><code>NGA0138</code></a></td>
+<td>error</td>
+<td><code>{what}</code> stands in no section; what has an address is written in a <code><a class="ref" href="../assembler/#section">.section</a></code> or a <code><a class="ref" href="../assembler/#proc">.proc</a></code></td>
+</tr>
+<tr id="nga0139">
+<td><code>NGA0139</code></td>
+<td>error</td>
+<td>this byte is already an argument, and a byte is one argument or none</td>
+</tr>
+<tr id="nga0140">
+<td><code>NGA0140</code></td>
+<td>error</td>
+<td>there is no <code>(expression,{register})</code> addressing mode</td>
+</tr>
+<tr>
+<td><a href="#nga0141"><code>NGA0141</code></a></td>
+<td>warning</td>
+<td>these parentheses group rather than indirect; <code>(expression,x)</code> is the indirect form</td>
+</tr>
+<tr id="nga0142">
+<td><code>NGA0142</code></td>
+<td>error</td>
+<td>expected <code>x</code> or <code>y</code> after <code>,</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga0143">
+<td><code>NGA0143</code></td>
+<td>error</td>
+<td><code>{code}</code> names no diagnostic</td>
+</tr>
+<tr id="nga0144">
+<td><code>NGA0144</code></td>
+<td>warning</td>
+<td><code>.off {code}</code> silenced nothing: no such warning stood on the line below</td>
+</tr>
+<tr id="nga0150">
+<td><code>NGA0150</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#charset">.charset</a></code> is never closed</td>
+</tr>
+<tr id="nga0151">
+<td><code>NGA0151</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code><a class="ref" href="../assembler/#charset">.charset</a></code></td>
+</tr>
+<tr id="nga0152">
+<td><code>NGA0152</code></td>
+<td>error</td>
+<td>expected a character set entry, written <code>&quot;...&quot; = value</code></td>
+</tr>
+<tr id="nga0153">
+<td><code>NGA0153</code></td>
+<td>error</td>
+<td>a character set entry maps at least one character</td>
+</tr>
+<tr id="nga0154">
+<td><code>NGA0154</code></td>
+<td>error</td>
+<td>the left side of an entry names no character set; the set is the one being declared</td>
+</tr>
+<tr id="nga0155">
+<td><code>NGA0155</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#macro">.macro</a></code> cannot open inside a <code><a class="ref" href="../assembler/#section">.section</a></code>, a <code><a class="ref" href="../assembler/#proc">.proc</a></code> or another <code><a class="ref" href="../assembler/#macro">.macro</a></code></td>
+</tr>
+<tr id="nga0156">
+<td><code>NGA0156</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#macro">.macro</a></code> is never closed</td>
+</tr>
+<tr id="nga0157">
+<td><code>NGA0157</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code><a class="ref" href="../assembler/#macro">.macro</a></code></td>
+</tr>
+<tr>
+<td><a href="#nga0158"><code>NGA0158</code></a></td>
+<td>error</td>
+<td>{what} cannot stand in a macro body, which holds instructions and data</td>
+</tr>
+<tr id="nga0160">
+<td><code>NGA0160</code></td>
+<td>error</td>
+<td><code>.namespace</code> cannot open inside a <code><a class="ref" href="../assembler/#section">.section</a></code> or a <code><a class="ref" href="../assembler/#macro">.macro</a></code></td>
+</tr>
+<tr id="nga0161">
+<td><code>NGA0161</code></td>
+<td>error</td>
+<td>this <code>.namespace</code> is never closed</td>
+</tr>
+<tr id="nga0162">
+<td><code>NGA0162</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code>.namespace</code></td>
+</tr>
+<tr id="nga0163">
+<td><code>NGA0163</code></td>
+<td>error</td>
+<td><code>{directive}</code> closes a namespace while a <code><a class="ref" href="../assembler/#section">.section</a></code>, <code><a class="ref" href="../assembler/#proc">.proc</a></code> or <code><a class="ref" href="../assembler/#macro">.macro</a></code> is still open</td>
+</tr>
+<tr id="nga0164">
+<td><code>NGA0164</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#charset">.charset</a></code> stands at the top level: a literal's prefix is one name</td>
+</tr>
+<tr id="nga0165">
+<td><code>NGA0165</code></td>
+<td>error</td>
+<td>expected <code>:</code> here, and the answer for a false condition after it</td>
+</tr>
+<tr id="nga0166">
+<td><code>NGA0166</code></td>
+<td>error</td>
+<td>this <code>.if</code> is never closed</td>
+</tr>
+<tr id="nga0167">
+<td><code>NGA0167</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code>.if</code></td>
+</tr>
+<tr id="nga0168">
+<td><code>NGA0168</code></td>
+<td>error</td>
+<td><code>.elsif</code> cannot follow <code>.else</code>, which is the branch taken when none is</td>
+</tr>
+<tr>
+<td><a href="#nga0169"><code>NGA0169</code></a></td>
+<td>error</td>
+<td>{what} cannot stand in a conditional branch, which holds instructions and data</td>
+</tr>
+<tr id="nga0170">
+<td><code>NGA0170</code></td>
+<td>error</td>
+<td>a label in a conditional branch is written <code>@name</code>: a branch defines no symbol, and two branches want one name</td>
+</tr>
+<tr id="nga0171">
+<td><code>NGA0171</code></td>
+<td>error</td>
+<td><code>{name}...</code> takes every argument left, so it stands last</td>
+</tr>
+<tr id="nga0172">
+<td><code>NGA0172</code></td>
+<td>error</td>
+<td><code>.match</code> stands in a macro body, which is where a pack is</td>
+</tr>
+<tr id="nga0173">
+<td><code>NGA0173</code></td>
+<td>error</td>
+<td><code>.case</code> without an open <code>.match</code></td>
+</tr>
+<tr id="nga0174">
+<td><code>NGA0174</code></td>
+<td>error</td>
+<td><code>{directive}</code> without an open <code>.match</code></td>
+</tr>
+<tr id="nga0175">
+<td><code>NGA0175</code></td>
+<td>error</td>
+<td>this <code>.match</code> is never closed</td>
+</tr>
+<tr id="nga0176">
+<td><code>NGA0176</code></td>
+<td>error</td>
+<td>a <code>.match</code> holds <code>.case</code>s, and this stands before the first</td>
+</tr>
+<tr id="nga0177">
+<td><code>NGA0177</code></td>
+<td>error</td>
+<td><code>...</code> spreads a pack and follows its name, touching it</td>
+</tr>
+<tr id="nga0178">
+<td><code>NGA0178</code></td>
+<td>error</td>
+<td>this <code>.match</code> has no <code>.case</code>, so nothing could ever fit</td>
+</tr>
+<tr id="nga0179">
+<td><code>NGA0179</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#temporary">temporary</a></code> does not go with <code>{other}</code></td>
+</tr>
+<tr id="nga0180">
+<td><code>NGA0180</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#proc">.proc</a></code> is code, and <code><a class="ref" href="../assembler/#temporary">temporary</a></code> is a reservation</td>
+</tr>
+<tr id="nga0181">
+<td><code>NGA0181</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#source">.source</a></code> is followed by a quoted path, a comma and a line number, found <code>{token}</code></td>
+</tr>
+<tr id="nga0182">
+<td><code>NGA0182</code></td>
+<td>error</td>
+<td>a source line is counted from 1, and this is {line}</td>
+</tr>
+<tr id="nga0183">
+<td><code>NGA0183</code></td>
+<td>error</td>
+<td>a <code>.{encoding}</code> payload is written as a quoted literal, found <code>{token}</code></td>
+</tr>
+<tr id="nga0184">
+<td><code>NGA0184</code></td>
+<td>error</td>
+<td><code>{character}</code> is not valid in a <code>.{encoding}</code> payload</td>
+</tr>
+<tr id="nga0185">
+<td><code>NGA0185</code></td>
+<td>error</td>
+<td><code>=</code> pads the end of a <code>.base64</code> payload and stands nowhere else</td>
+</tr>
+<tr id="nga0186">
+<td><code>NGA0186</code></td>
+<td>error</td>
+<td>a <code>.{encoding}</code> payload takes {group} characters to the byte, and this one has {count}</td>
+</tr>
+<tr id="nga0187">
+<td><code>NGA0187</code></td>
+<td>error</td>
+<td>a payload is bytes and not text, so it names no character set</td>
+</tr>
+<tr id="nga0188">
+<td><code>NGA0188</code></td>
+<td>error</td>
+<td>a <code>.namespace</code> in a <code><a class="ref" href="../assembler/#proc">.proc</a></code> holds sections, temporaries and constants, and <code>{what}</code> is none of them</td>
+</tr>
+<tr id="nga0189">
+<td><code>NGA0189</code></td>
+<td>error</td>
+<td>this <code><a class="ref" href="../assembler/#declare">.declare</a></code> keeps every byte in a register, and a <code>.ztemp</code> or <code>.temp</code> stands below it</td>
+</tr>
+<tr id="nga0190">
+<td><code>NGA0190</code></td>
+<td>error</td>
+<td><code>{register}</code> already carries an argument of this proc</td>
+</tr>
+<tr id="nga0191">
+<td><code>NGA0191</code></td>
+<td>error</td>
+<td><code>{place}</code> names one register for two bytes</td>
+</tr>
+<tr id="nga0192">
+<td><code>NGA0192</code></td>
+<td>error</td>
+<td><code>readonly</code> does not go with <code>{other}</code></td>
+</tr>
+<tr id="nga0193">
+<td><code>NGA0193</code></td>
+<td>warning</td>
+<td>a <code><a class="ref" href="../assembler/#proc">.proc</a></code> holds code, which nothing writes unless a statement says so, and <code>readonly</code> changes nothing</td>
+</tr>
+</tbody>
+</table>
+<h3 id="project-file-and-run-configuration">Project file and run configuration</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga1101">
+<td><code>NGA1101</code></td>
+<td>error</td>
+<td>project refers to <code>{module}</code>, which names no module and no group</td>
+</tr>
+<tr id="nga1102">
+<td><code>NGA1102</code></td>
+<td>error</td>
+<td><code>{module}</code> would name more than one file; naming modules is a Project file's business</td>
+</tr>
+<tr id="nga1103">
+<td><code>NGA1103</code></td>
+<td>error</td>
+<td><code>{path}</code> is not a project file, and a run is given nothing else</td>
+</tr>
+<tr id="nga1104">
+<td><code>NGA1104</code></td>
+<td>note</td>
+<td>a source file becomes a module where a project's <code><a class="ref" href="../project-file/#modules">modules</a></code> block names it</td>
+</tr>
+<tr id="nga1105">
+<td><code>NGA1105</code></td>
+<td>error</td>
+<td>a constant is a name, <code>=</code> and a number, found <code>{token}</code></td>
+</tr>
+<tr id="nga1106">
+<td><code>NGA1106</code></td>
+<td>error</td>
+<td>the value of <code>{name}</code> is set more than once</td>
+</tr>
+<tr id="nga1107">
+<td><code>NGA1107</code></td>
+<td>note</td>
+<td><code>{name}</code> was already set here</td>
+</tr>
+<tr id="nga1108">
+<td><code>NGA1108</code></td>
+<td>error</td>
+<td><code>{name}</code> names no container; the tool writes {known}</td>
+</tr>
+<tr id="nga1109">
+<td><code>NGA1109</code></td>
+<td>error</td>
+<td>the container is set more than once</td>
+</tr>
+<tr id="nga1110">
+<td><code>NGA1110</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a project block</td>
+</tr>
+<tr id="nga1111">
+<td><code>NGA1111</code></td>
+<td>error</td>
+<td>this <code>{name}</code> block is never closed</td>
+</tr>
+<tr id="nga1112">
+<td><code>NGA1112</code></td>
+<td>error</td>
+<td>expected a block or an <code><a class="ref" href="../project-file/#include">include</a></code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1113">
+<td><code>NGA1113</code></td>
+<td>error</td>
+<td>expected <code>{{</code> to open the body of <code>{name}</code></td>
+</tr>
+<tr id="nga1114">
+<td><code>NGA1114</code></td>
+<td>error</td>
+<td>a module is a quoted path, optionally followed by <code>as</code> and a name</td>
+</tr>
+<tr id="nga1115">
+<td><code>NGA1115</code></td>
+<td>error</td>
+<td>expected a name after <code>as</code></td>
+</tr>
+<tr id="nga1116">
+<td><code>NGA1116</code></td>
+<td>error</td>
+<td>a path is not translated, so it names no character set</td>
+</tr>
+<tr id="nga1117">
+<td><code>NGA1117</code></td>
+<td>error</td>
+<td>expected <code>deny</code>, <code>allow</code> or <code>off</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1118">
+<td><code>NGA1118</code></td>
+<td>error</td>
+<td><code>{code}</code> names no diagnostic</td>
+</tr>
+<tr id="nga1119">
+<td><code>NGA1119</code></td>
+<td>error</td>
+<td>the severity of <code>{code}</code> is set more than once</td>
+</tr>
+<tr id="nga1120">
+<td><code>NGA1120</code></td>
+<td>note</td>
+<td><code>{code}</code> was already set here</td>
+</tr>
+<tr id="nga1121">
+<td><code>NGA1121</code></td>
+<td>error</td>
+<td>this include reaches a file that is already being read</td>
+</tr>
+<tr id="nga1122">
+<td><code>NGA1122</code></td>
+<td>error</td>
+<td>cannot read <code>{path}</code></td>
+</tr>
+<tr id="nga1123">
+<td><code>NGA1123</code></td>
+<td>error</td>
+<td>this project declares no modules</td>
+</tr>
+<tr id="nga1125">
+<td><code>NGA1125</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../project-file/#phase">phase</a></code> is followed by the phase's name, found <code>{token}</code></td>
+</tr>
+<tr id="nga1126">
+<td><code>NGA1126</code></td>
+<td>error</td>
+<td>expected <code>needs</code>, <code>then</code> or <code><a class="ref" href="../project-file/#entry">entry</a></code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1127">
+<td><code>NGA1127</code></td>
+<td>error</td>
+<td>expected a name after <code>{after}</code></td>
+</tr>
+<tr id="nga1128">
+<td><code>NGA1128</code></td>
+<td>error</td>
+<td>a resident entry names a module or a group, found <code>{token}</code></td>
+</tr>
+<tr id="nga1129">
+<td><code>NGA1129</code></td>
+<td>error</td>
+<td>expected <code>,</code> between <code>{previous}</code> and <code>{next}</code></td>
+</tr>
+<tr id="nga1130">
+<td><code>NGA1130</code></td>
+<td>error</td>
+<td>project refers to phase <code>{phase}</code>, which is not declared</td>
+</tr>
+<tr id="nga1131">
+<td><code>NGA1131</code></td>
+<td>error</td>
+<td>the entry phase is set more than once</td>
+</tr>
+<tr id="nga1132">
+<td><code>NGA1132</code></td>
+<td>note</td>
+<td>the entry phase was already set here</td>
+</tr>
+<tr id="nga1133">
+<td><code>NGA1133</code></td>
+<td>error</td>
+<td>this project declares phases and no <code><a class="ref" href="../project-file/#entry">entry</a></code></td>
+</tr>
+<tr id="nga1134">
+<td><code>NGA1134</code></td>
+<td>warning</td>
+<td>module <code>{module}</code> is in no phase, so it is never in memory</td>
+</tr>
+<tr id="nga1135">
+<td><code>NGA1135</code></td>
+<td>error</td>
+<td>expected <code><a class="ref" href="../project-file/#region">region</a></code>, <code><a class="ref" href="../project-file/#register">register</a></code>, <code><a class="ref" href="../project-file/#units">units</a></code>, <code><a class="ref" href="../project-file/#window">window</a></code> or <code><a class="ref" href="../project-file/#containers">containers</a></code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1136">
+<td><code>NGA1136</code></td>
+<td>error</td>
+<td>expected a value after <code>{after}</code></td>
+</tr>
+<tr id="nga1137">
+<td><code>NGA1137</code></td>
+<td>error</td>
+<td>a value here is written out, and <code>{name}</code> names nothing</td>
+</tr>
+<tr id="nga1138">
+<td><code>NGA1138</code></td>
+<td>error</td>
+<td>this does not come to a number</td>
+</tr>
+<tr id="nga1139">
+<td><code>NGA1139</code></td>
+<td>error</td>
+<td>a range is written <code>start .. end</code></td>
+</tr>
+<tr id="nga1140">
+<td><code>NGA1140</code></td>
+<td>note</td>
+<td>the container was already set here</td>
+</tr>
+<tr id="nga1141">
+<td><code>NGA1141</code></td>
+<td>error</td>
+<td>this machine does not take a <code>{name}</code>; it takes {taken}</td>
+</tr>
+<tr id="nga1142">
+<td><code>NGA1142</code></td>
+<td>note</td>
+<td>the machine says what it takes here</td>
+</tr>
+<tr id="nga1143">
+<td><code>NGA1143</code></td>
+<td>error</td>
+<td><code>{name}</code> is not what a program is optimised for; the words are {known}</td>
+</tr>
+<tr id="nga1144">
+<td><code>NGA1144</code></td>
+<td>error</td>
+<td>what the program is optimised for is set more than once</td>
+</tr>
+<tr id="nga1145">
+<td><code>NGA1145</code></td>
+<td>note</td>
+<td>it was already set here</td>
+</tr>
+<tr id="nga1146">
+<td><code>NGA1146</code></td>
+<td>error</td>
+<td><code>{name}</code> names no processor; the words are {known}</td>
+</tr>
+<tr id="nga1147">
+<td><code>NGA1147</code></td>
+<td>error</td>
+<td>the entry of phase <code>{phase}</code> is set more than once</td>
+</tr>
+<tr id="nga1148">
+<td><code>NGA1148</code></td>
+<td>note</td>
+<td>it was set here</td>
+</tr>
+<tr id="nga1149">
+<td><code>NGA1149</code></td>
+<td>error</td>
+<td>the processor is set more than once</td>
+</tr>
+<tr id="nga1150">
+<td><code>NGA1150</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../project-file/#transform">transform</a></code> is followed by the transform's name, found <code>{token}</code></td>
+</tr>
+<tr id="nga1151">
+<td><code>NGA1151</code></td>
+<td>error</td>
+<td>a transform entry names a section as <code>module.section</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1152">
+<td><code>NGA1152</code></td>
+<td>note</td>
+<td>the processor was already set here</td>
+</tr>
+<tr id="nga1155">
+<td><code>NGA1155</code></td>
+<td>error</td>
+<td>a region's range is followed by <code>ram</code>, <code><a class="ref" href="../project-file/#register">register</a></code> or <code>reserved</code>, not by <code>{token}</code></td>
+</tr>
+<tr id="nga1156">
+<td><code>NGA1156</code></td>
+<td>error</td>
+<td><code>{word}</code> is not a region property; write <code>ram</code>, <code>rom</code>, <code><a class="ref" href="../project-file/#register">register</a></code> or <code>reserved</code></td>
+</tr>
+<tr id="nga1157">
+<td><code>NGA1157</code></td>
+<td>error</td>
+<td>a region runs from a lower address to a higher one inside the address space, and this one does not</td>
+</tr>
+<tr id="nga1158">
+<td><code>NGA1158</code></td>
+<td>error</td>
+<td>a region named <code>{name}</code> is already declared</td>
+</tr>
+<tr id="nga1159">
+<td><code>NGA1159</code></td>
+<td>note</td>
+<td><code>{name}</code> was declared here</td>
+</tr>
+<tr id="nga1160">
+<td><code>NGA1160</code></td>
+<td>error</td>
+<td>a register is an address, and {value:hex} is not one</td>
+</tr>
+<tr id="nga1161">
+<td><code>NGA1161</code></td>
+<td>error</td>
+<td>a register is one or two bytes, and {width} is neither</td>
+</tr>
+<tr id="nga1163">
+<td><code>NGA1163</code></td>
+<td>note</td>
+<td>the region <code>{region}</code> is declared here</td>
+</tr>
+<tr id="nga1164">
+<td><code>NGA1164</code></td>
+<td>error</td>
+<td>expected <code><a class="ref" href="../project-file/#units">units</a></code> or <code>size</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1165">
+<td><code>NGA1165</code></td>
+<td>error</td>
+<td>storage has units by count and no <code>size</code>, and a unit holds something</td>
+</tr>
+<tr id="nga1166">
+<td><code>NGA1166</code></td>
+<td>error</td>
+<td>the size of a unit is set more than once</td>
+</tr>
+<tr id="nga1167">
+<td><code>NGA1167</code></td>
+<td>note</td>
+<td>it was set here</td>
+</tr>
+<tr id="nga1168">
+<td><code>NGA1168</code></td>
+<td>error</td>
+<td>the units are declared more than once; <code><a class="ref" href="../project-file/#units">units</a></code> names a set of the target or counts them</td>
+</tr>
+<tr id="nga1169">
+<td><code>NGA1169</code></td>
+<td>note</td>
+<td>they were declared here</td>
+</tr>
+<tr id="nga1170">
+<td><code>NGA1170</code></td>
+<td>error</td>
+<td>{count} units, and a unit is named in a byte</td>
+</tr>
+<tr id="nga1171">
+<td><code>NGA1171</code></td>
+<td>error</td>
+<td>a unit holds between one byte and the address space, and {value:hex} is neither</td>
+</tr>
+<tr id="nga1172">
+<td><code>NGA1172</code></td>
+<td>error</td>
+<td><code>{name}</code> names a group and a module, and a name in a list has to mean one thing</td>
+</tr>
+<tr id="nga1173">
+<td><code>NGA1173</code></td>
+<td>note</td>
+<td>the module <code>{name}</code> is declared here</td>
+</tr>
+<tr id="nga1174">
+<td><code>NGA1174</code></td>
+<td>error</td>
+<td>group <code>{group}</code> reaches itself here, so listing it would never end</td>
+</tr>
+<tr id="nga1175">
+<td><code>NGA1175</code></td>
+<td>warning</td>
+<td>group <code>{group}</code> holds no module, so naming it adds nothing</td>
+</tr>
+<tr id="nga1176">
+<td><code>NGA1176</code></td>
+<td>error</td>
+<td><code>{name}</code> is a group, and one module is expected here</td>
+</tr>
+<tr id="nga1177">
+<td><code>NGA1177</code></td>
+<td>error</td>
+<td>a group entry names a module or a group, found <code>{token}</code></td>
+</tr>
+<tr id="nga1178">
+<td><code>NGA1178</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../project-file/#group">group</a></code> is followed by the group's name, found <code>{token}</code></td>
+</tr>
+<tr id="nga1179">
+<td><code>NGA1179</code></td>
+<td>error</td>
+<td>a window lists what it shows after <code>views</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1180">
+<td><code>NGA1180</code></td>
+<td>error</td>
+<td><code>{name}</code> already names a {kind} of the target</td>
+</tr>
+<tr id="nga1181">
+<td><code>NGA1181</code></td>
+<td>note</td>
+<td>it was declared here</td>
+</tr>
+<tr id="nga1182">
+<td><code>NGA1182</code></td>
+<td>error</td>
+<td>a window's range runs from a lower address to a higher one inside the address space, and this one does not</td>
+</tr>
+<tr id="nga1183">
+<td><code>NGA1183</code></td>
+<td>error</td>
+<td><code>{state}</code> is listed more than once among what <code>{window}</code> shows</td>
+</tr>
+<tr id="nga1184">
+<td><code>NGA1184</code></td>
+<td>error</td>
+<td><code>{base}</code> is not a named state of window <code>{window}</code>; a base is a named state, never a unit set</td>
+</tr>
+<tr id="nga1185">
+<td><code>NGA1185</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a unit set of the target</td>
+</tr>
+<tr id="nga1186">
+<td><code>NGA1186</code></td>
+<td>error</td>
+<td>no window shows <code>{name}</code>, so what one of its units holds is unknown</td>
+</tr>
+<tr id="nga1187">
+<td><code>NGA1187</code></td>
+<td>error</td>
+<td>windows <code>{window}</code> and <code>{other}</code> both show <code>{name}</code> and differ in size, so a unit has no one size</td>
+</tr>
+<tr id="nga1188">
+<td><code>NGA1188</code></td>
+<td>error</td>
+<td>storage names a unit set, and what a unit holds is its window's size</td>
+</tr>
+<tr id="nga1189">
+<td><code>NGA1189</code></td>
+<td>error</td>
+<td>a unit set holds at least one unit</td>
+</tr>
+<tr id="nga1190">
+<td><code>NGA1190</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../project-file/#panes">panes</a></code> is followed by <code>in</code> and a window, found <code>{token}</code></td>
+</tr>
+<tr id="nga1191">
+<td><code>NGA1191</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a window of the target</td>
+</tr>
+<tr id="nga1192">
+<td><code>NGA1192</code></td>
+<td>error</td>
+<td><code>{state}</code> is not a named state of window <code>{window}</code></td>
+</tr>
+<tr id="nga1193">
+<td><code>NGA1193</code></td>
+<td>error</td>
+<td>a family holds between 1 and 255 panes, and {count} is neither</td>
+</tr>
+<tr id="nga1194">
+<td><code>NGA1194</code></td>
+<td>error</td>
+<td>window <code>{window}</code> shows no unit set, so a pane in it is pinned to a named state: write <code>= STATE</code></td>
+</tr>
+<tr id="nga1195">
+<td><code>NGA1195</code></td>
+<td>error</td>
+<td>a family takes consecutive banks, and <code>{pane}</code> is pinned to one state</td>
+</tr>
+<tr id="nga1196">
+<td><code>NGA1196</code></td>
+<td>error</td>
+<td>expected a pane's name, found <code>{token}</code></td>
+</tr>
+<tr id="nga1197">
+<td><code>NGA1197</code></td>
+<td>error</td>
+<td><code>base</code> is written <code>base WINDOW = STATE</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1198">
+<td><code>NGA1198</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a window of the target</td>
+</tr>
+<tr id="nga1199">
+<td><code>NGA1199</code></td>
+<td>error</td>
+<td><code>{state}</code> is not a named state of window <code>{window}</code></td>
+</tr>
+<tr id="nga1200">
+<td><code>NGA1200</code></td>
+<td>error</td>
+<td>phase <code>{phase}</code> gives window <code>{window}</code> its base more than once</td>
+</tr>
+<tr id="nga1201">
+<td><code>NGA1201</code></td>
+<td>error</td>
+<td>the groups phase <code>{phase}</code> needs give window <code>{window}</code> different bases, <code>{state}</code> and <code>{other}</code></td>
+</tr>
+<tr id="nga1202">
+<td><code>NGA1202</code></td>
+<td>note</td>
+<td><code>{state}</code> is given here</td>
+</tr>
+<tr id="nga1203">
+<td><code>NGA1203</code></td>
+<td>error</td>
+<td><code>{name}</code> is no generator; <code>binary</code> reads a file</td>
+</tr>
+<tr id="nga1204">
+<td><code>NGA1204</code></td>
+<td>error</td>
+<td><code>{name}</code> is no argument of this generator</td>
+</tr>
+<tr id="nga1205">
+<td><code>NGA1205</code></td>
+<td>error</td>
+<td>this argument is given more than once</td>
+</tr>
+<tr id="nga1206">
+<td><code>NGA1206</code></td>
+<td>error</td>
+<td><code>{name}</code> takes {wanted}, and this is {given}</td>
+</tr>
+<tr id="nga1207">
+<td><code>NGA1207</code></td>
+<td>error</td>
+<td><code>{generator}</code> names the file it works from first, as a quoted path</td>
+</tr>
+<tr id="nga1208">
+<td><code>NGA1208</code></td>
+<td>error</td>
+<td>what <code>{generator}</code> produced cannot be emitted: {where}</td>
+</tr>
+<tr id="nga1209">
+<td><code>NGA1209</code></td>
+<td>error</td>
+<td>a generator's arguments are closed by <code>)</code>, found <code>{token}</code></td>
+</tr>
+<tr id="nga1210">
+<td><code>NGA1210</code></td>
+<td>error</td>
+<td><code>{path}</code> failed: {message}</td>
+</tr>
+<tr id="nga1211">
+<td><code>NGA1211</code></td>
+<td>error</td>
+<td><code>{path}</code> did not finish within the work a generator is given</td>
+</tr>
+<tr>
+<td><a href="#nga1212"><code>NGA1212</code></a></td>
+<td>error</td>
+<td>{module}: {message}</td>
+</tr>
+<tr id="nga1213">
+<td><code>NGA1213</code></td>
+<td>warning</td>
+<td>{module}: {message}</td>
+</tr>
+<tr id="nga1214">
+<td><code>NGA1214</code></td>
+<td>note</td>
+<td>the generator said so at {where}</td>
+</tr>
+<tr id="nga1215">
+<td><code>NGA1215</code></td>
+<td>error</td>
+<td><code>{name}</code> names no set of facts; the sets are {sets}</td>
+</tr>
+<tr id="nga1216">
+<td><code>NGA1216</code></td>
+<td>error</td>
+<td>a <code>{name}</code> is one thing and takes no format; only <code>car</code> names a board</td>
+</tr>
+<tr id="nga1217">
+<td><code>NGA1217</code></td>
+<td>error</td>
+<td>a <code>.car</code> is an image of one board and this says none; write <code>container car &quot;8k&quot;</code>, and the boards are {known}</td>
+</tr>
+<tr id="nga1218">
+<td><code>NGA1218</code></td>
+<td>error</td>
+<td><code>{name}</code> names no cartridge board; the boards are {known}</td>
+</tr>
+<tr id="nga1219">
+<td><code>NGA1219</code></td>
+<td>error</td>
+<td>a <code>{name}</code> cartridge is ROM at {range} and this machine has {found}</td>
+</tr>
+<tr id="nga1220">
+<td><code>NGA1220</code></td>
+<td>error</td>
+<td>a <code>{name}</code> cartridge switches banks into {range} and this machine declares no window of that one range</td>
+</tr>
+<tr id="nga1221">
+<td><code>NGA1221</code></td>
+<td>error</td>
+<td>a <code>{name}</code> cartridge has {units:n} banks of storage and window <code>{window}</code> shows a set of {found:n}</td>
+</tr>
+</tbody>
+</table>
+<h3 id="symbols-merge-duplicates-and-slots">Symbols, Merge, duplicates and Slots</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga2201">
+<td><code>NGA2201</code></td>
+<td>error</td>
+<td>symbol <code>{symbol}</code> is defined more than once in phase <code>{phase}</code></td>
+</tr>
+<tr id="nga2202">
+<td><code>NGA2202</code></td>
+<td>note</td>
+<td>previous definition of <code>{symbol}</code> is here</td>
+</tr>
+<tr id="nga2203">
+<td><code>NGA2203</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is already defined in this module</td>
+</tr>
+<tr id="nga2204">
+<td><code>NGA2204</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is exported but not defined in this module</td>
+</tr>
+<tr id="nga2205">
+<td><code>NGA2205</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is exported by more than one module</td>
+</tr>
+<tr id="nga2206">
+<td><code>NGA2206</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is not defined</td>
+</tr>
+<tr id="nga2207">
+<td><code>NGA2207</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is defined in terms of itself</td>
+</tr>
+<tr id="nga2210">
+<td><code>NGA2210</code></td>
+<td>error</td>
+<td>no definition of <code>@{name}</code> matches this reference</td>
+</tr>
+<tr id="nga2211">
+<td><code>NGA2211</code></td>
+<td>error</td>
+<td><code>@{name}</code> has more than one definition here; write <code>@+{name}</code> or <code>@-{name}</code></td>
+</tr>
+<tr id="nga2212">
+<td><code>NGA2212</code></td>
+<td>error</td>
+<td>an anonymous local label is reached with <code>@+</code> or <code>@-</code></td>
+</tr>
+<tr id="nga2213">
+<td><code>NGA2213</code></td>
+<td>error</td>
+<td><code>{name}</code> is already a label of this macro body</td>
+</tr>
+<tr id="nga2214">
+<td><code>NGA2214</code></td>
+<td>error</td>
+<td><code>{name}</code> is a parameter of this macro, and a label cannot take its name</td>
+</tr>
+<tr id="nga2215">
+<td><code>NGA2215</code></td>
+<td>error</td>
+<td>no definition of <code>@{name}</code> outside this branch matches, and one in another branch may not be there at all</td>
+</tr>
+<tr id="nga2220">
+<td><code>NGA2220</code></td>
+<td>error</td>
+<td>expected an integer here, and this is {type}</td>
+</tr>
+<tr id="nga2221">
+<td><code>NGA2221</code></td>
+<td>error</td>
+<td>two addresses cannot be added; <code>a - b</code> is the distance between them</td>
+</tr>
+<tr id="nga2222">
+<td><code>NGA2222</code></td>
+<td>error</td>
+<td>an address cannot be subtracted from a number</td>
+</tr>
+<tr id="nga2223">
+<td><code>NGA2223</code></td>
+<td>error</td>
+<td>these addresses are not in one section, so this is a property of the layout rather than of the program</td>
+</tr>
+<tr id="nga2224">
+<td><code>NGA2224</code></td>
+<td>error</td>
+<td>only a label reaches the attributes of its section, and this is {type}</td>
+</tr>
+<tr id="nga2225">
+<td><code>NGA2225</code></td>
+<td>error</td>
+<td><code>.{directive}</code> takes {allowed}, and this is {type}</td>
+</tr>
+<tr id="nga2226">
+<td><code>NGA2226</code></td>
+<td>error</td>
+<td>an operand is an address or a number, and this is {type}</td>
+</tr>
+<tr id="nga2227">
+<td><code>NGA2227</code></td>
+<td>error</td>
+<td><code>{name}</code> is not an attribute of a section</td>
+</tr>
+<tr id="nga2228">
+<td><code>NGA2228</code></td>
+<td>error</td>
+<td>a conditional chooses between two of one type, and these are {type} and {other}</td>
+</tr>
+<tr id="nga2229">
+<td><code>NGA2229</code></td>
+<td>error</td>
+<td>a conditional between addresses of two sections has no section of its own, and subtraction and width need one</td>
+</tr>
+<tr id="nga2230">
+<td><code>NGA2230</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is not a character set</td>
+</tr>
+<tr id="nga2231">
+<td><code>NGA2231</code></td>
+<td>error</td>
+<td><code>{charset}</code> does not map <code>{character}</code></td>
+</tr>
+<tr id="nga2232">
+<td><code>NGA2232</code></td>
+<td>error</td>
+<td>character set <code>{charset}</code> is derived from itself</td>
+</tr>
+<tr id="nga2233">
+<td><code>NGA2233</code></td>
+<td>error</td>
+<td><code>{character}</code> is already mapped by this character set</td>
+</tr>
+<tr id="nga2234">
+<td><code>NGA2234</code></td>
+<td>error</td>
+<td>a character set maps to bytes, and this run covers {start} to {end}</td>
+</tr>
+<tr id="nga2235">
+<td><code>NGA2235</code></td>
+<td>error</td>
+<td>a character set is resolved before any size or address exists, so this needs a value written in the source</td>
+</tr>
+<tr id="nga2236">
+<td><code>NGA2236</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is a character set, and a character set has no value</td>
+</tr>
+<tr>
+<td><a href="#nga2237"><code>NGA2237</code></a></td>
+<td>error</td>
+<td><code>{character}</code> is not ASCII and this literal names no character set</td>
+</tr>
+<tr id="nga2240">
+<td><code>NGA2240</code></td>
+<td>error</td>
+<td><code>{phase}</code> is not a phase of this project</td>
+</tr>
+<tr id="nga2241">
+<td><code>NGA2241</code></td>
+<td>error</td>
+<td>this transition to <code>{to}</code> stands in code present in phase <code>{from}</code>, which has no <code>then {to}</code></td>
+</tr>
+<tr id="nga2242">
+<td><code>NGA2242</code></td>
+<td>error</td>
+<td>the target numbers phases in a byte, and this project has {count:n}</td>
+</tr>
+<tr id="nga2243">
+<td><code>NGA2243</code></td>
+<td>error</td>
+<td>the transition from <code>{from}</code> to <code>{to}</code> loads {count:n} sections, and a frame counts them in a byte</td>
+</tr>
+<tr id="nga2244">
+<td><code>NGA2244</code></td>
+<td>error</td>
+<td><code>{transform}</code> is not a format the tool can encode</td>
+</tr>
+<tr id="nga2245">
+<td><code>NGA2245</code></td>
+<td>error</td>
+<td>module <code>{module}</code> has no label named <code>{section}</code>, and a section is named by one</td>
+</tr>
+<tr id="nga2246">
+<td><code>NGA2246</code></td>
+<td>warning</td>
+<td>phase <code>{from}</code> declares <code>then {to}</code>, and no <code>.transition {to}</code> is present in it, so the edge is taken by nothing</td>
+</tr>
+<tr id="nga2247">
+<td><code>NGA2247</code></td>
+<td>warning</td>
+<td><code>{module}.{section}</code> is never loaded by a transition, so nothing transforms it</td>
+</tr>
+<tr id="nga2248">
+<td><code>NGA2248</code></td>
+<td>error</td>
+<td><code>{section}</code> names the section <code>{previous}</code> already lists, and a section is transformed once</td>
+</tr>
+<tr id="nga2250">
+<td><code>NGA2250</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is not a slot</td>
+</tr>
+<tr id="nga2251">
+<td><code>NGA2251</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is not a label or a section of this module</td>
+</tr>
+<tr>
+<td><a href="#nga2252"><code>NGA2252</code></a></td>
+<td>error</td>
+<td><code>{slot}</code> has two implementations live in phase <code>{phase}</code>: <code>{symbol}</code> and <code>{other}</code></td>
+</tr>
+<tr id="nga2253">
+<td><code>NGA2253</code></td>
+<td>note</td>
+<td><code>{symbol}</code> implements it here</td>
+</tr>
+<tr id="nga2254">
+<td><code>NGA2254</code></td>
+<td>error</td>
+<td>a frame counts cell writes in a byte, so a program has at most 255 slots, and this one has {count:n}</td>
+</tr>
+<tr id="nga2255">
+<td><code>NGA2255</code></td>
+<td>error</td>
+<td><code>{symbol}</code> fills slot <code>{slot}</code> from pane <code>{pane}</code>, and the cell holds an address but not the state that shows it</td>
+</tr>
+<tr id="nga2260">
+<td><code>NGA2260</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a proc of this module, and <code>then</code> names one</td>
+</tr>
+<tr id="nga2261">
+<td><code>NGA2261</code></td>
+<td>error</td>
+<td><code>{name}</code> already follows <code>{previous}</code>, and can follow only one proc</td>
+</tr>
+<tr id="nga2262">
+<td><code>NGA2262</code></td>
+<td>error</td>
+<td><code>{name}</code> follows <code>{previous}</code>, and cannot also be pinned or aligned</td>
+</tr>
+<tr id="nga2263">
+<td><code>NGA2263</code></td>
+<td>error</td>
+<td><code>{name}</code> follows <code>{previous}</code>, so both are movable or neither is</td>
+</tr>
+<tr id="nga2264">
+<td><code>NGA2264</code></td>
+<td>error</td>
+<td><code>{name}</code> follows itself through <code>then</code></td>
+</tr>
+<tr id="nga2265">
+<td><code>NGA2265</code></td>
+<td>error</td>
+<td><code>{name}</code> follows <code>{previous}</code>, so both are in one pane or neither is</td>
+</tr>
+<tr id="nga2266">
+<td><code>NGA2266</code></td>
+<td>error</td>
+<td><code>{type}</code> is a {want}-byte type, and this reserves {got}</td>
+</tr>
+<tr id="nga2270">
+<td><code>NGA2270</code></td>
+<td>error</td>
+<td>a proc holds code, and a reservation is not code; a variable is a <code>.ztemp</code> or lives in a <code><a class="ref" href="../assembler/#section">.section</a></code></td>
+</tr>
+<tr id="nga2271">
+<td><code>NGA2271</code></td>
+<td>error</td>
+<td>a temporary section holds reservations only, and this is not one</td>
+</tr>
+<tr id="nga2272">
+<td><code>NGA2272</code></td>
+<td>error</td>
+<td><code>{symbol}</code> names a region, a unit set or a window of the target, and a module cannot define it</td>
+</tr>
+<tr id="nga2273">
+<td><code>NGA2273</code></td>
+<td>error</td>
+<td>this section holds no label, and a section is named by one</td>
+</tr>
+<tr id="nga2274">
+<td><code>NGA2274</code></td>
+<td>error</td>
+<td><code>{label}</code> is not defined in this module, and a decoder is one of its labels</td>
+</tr>
+<tr id="nga2275">
+<td><code>NGA2275</code></td>
+<td>error</td>
+<td><code>{label}</code> is a {kind}, and a decoder is entered at a label</td>
+</tr>
+<tr id="nga2276">
+<td><code>NGA2276</code></td>
+<td>error</td>
+<td><code>{format}</code> is not a format the tool can encode, so nothing produces what this decodes</td>
+</tr>
+<tr id="nga2277">
+<td><code>NGA2277</code></td>
+<td>error</td>
+<td><code>{format}</code> already has a decoder, and a format has one</td>
+</tr>
+<tr id="nga2278">
+<td><code>NGA2278</code></td>
+<td>note</td>
+<td>the decoder of <code>{format}</code> is declared here</td>
+</tr>
+<tr id="nga2279">
+<td><code>NGA2279</code></td>
+<td>error</td>
+<td>no module declares a decoder for <code>copy</code>, and every Transition copies; the storage driver declares one with <code>.transform copy</code></td>
+</tr>
+<tr id="nga2280">
+<td><code>NGA2280</code></td>
+<td>error</td>
+<td>no module declares a decoder for <code>{transform}</code></td>
+</tr>
+<tr id="nga2281">
+<td><code>NGA2281</code></td>
+<td>error</td>
+<td>a <code><a class="ref" href="../assembler/#transition">.transition</a></code> is taken and no module declares the storage driver; one module declares it with <code>.driver</code>, and a machine variant usually lists that module</td>
+</tr>
+<tr id="nga2282">
+<td><code>NGA2282</code></td>
+<td>error</td>
+<td>this module declares the storage driver, and <code>{module}</code> already does</td>
+</tr>
+<tr id="nga2283">
+<td><code>NGA2283</code></td>
+<td>note</td>
+<td>the driver is declared here</td>
+</tr>
+<tr id="nga2284">
+<td><code>NGA2284</code></td>
+<td>error</td>
+<td><code>{role}</code> is not a role of the driver; the roles are <code>open</code>, <code>read</code>, <code>stream</code>, <code>show</code> and <code>showAt</code></td>
+</tr>
+<tr id="nga2285">
+<td><code>NGA2285</code></td>
+<td>error</td>
+<td>the driver declares no <code>{role}</code>, and the routine calls it</td>
+</tr>
+<tr id="nga2286">
+<td><code>NGA2286</code></td>
+<td>error</td>
+<td><code>{label}</code> is not defined in this module, and a role is one of its labels</td>
+</tr>
+<tr id="nga2287">
+<td><code>NGA2287</code></td>
+<td>error</td>
+<td><code>as {name}</code> {reason}</td>
+</tr>
+<tr id="nga2288">
+<td><code>NGA2288</code></td>
+<td>error</td>
+<td><code>{proc}</code> is <code>as {type}</code>, so its arguments are <code>{type}</code>'s temporaries, and it declares {what} of its own</td>
+</tr>
+<tr id="nga2289">
+<td><code>NGA2289</code></td>
+<td>error</td>
+<td>the driver is present in some phases only, and every Transition calls it</td>
+</tr>
+<tr id="nga2290">
+<td><code>NGA2290</code></td>
+<td>error</td>
+<td>this decoder's module is present in some phases only, and any Transition may call it</td>
+</tr>
+<tr id="nga2291">
+<td><code>NGA2291</code></td>
+<td>error</td>
+<td><code>{role}</code> is declared more than once</td>
+</tr>
+<tr id="nga2293">
+<td><code>NGA2293</code></td>
+<td>error</td>
+<td><code>{role}</code> takes {count} names, and {given} are given</td>
+</tr>
+<tr id="nga2294">
+<td><code>NGA2294</code></td>
+<td>error</td>
+<td><code>{window}</code> is not a window of the target</td>
+</tr>
+<tr id="nga2295">
+<td><code>NGA2295</code></td>
+<td>error</td>
+<td>the driver declares no <code>{role}</code> for window <code>{window}</code>, and the target declares the window</td>
+</tr>
+<tr id="nga2296">
+<td><code>NGA2296</code></td>
+<td>error</td>
+<td>storage is the units of <code>{name}</code>, and the driver names no <code>stream</code> to read them through</td>
+</tr>
+<tr id="nga2297">
+<td><code>NGA2297</code></td>
+<td>error</td>
+<td>the stream reads through <code>{window}</code>, which does not show the units storage is</td>
+</tr>
+<tr id="nga2298">
+<td><code>NGA2298</code></td>
+<td>error</td>
+<td><code>nga.{role}</code> names a window first, and this does not</td>
+</tr>
+<tr id="nga2299">
+<td><code>NGA2299</code></td>
+<td>error</td>
+<td><code>{symbol}</code> names a window of the target, and a window is not a value</td>
+</tr>
+<tr id="nga2300">
+<td><code>NGA2300</code></td>
+<td>error</td>
+<td><code>{name}</code> is an instruction, and a macro cannot take its name</td>
+</tr>
+<tr id="nga2301">
+<td><code>NGA2301</code></td>
+<td>error</td>
+<td>parameter <code>{name}</code> is given twice</td>
+</tr>
+<tr id="nga2302">
+<td><code>NGA2302</code></td>
+<td>error</td>
+<td>parameter <code>{name}</code> has the name of a symbol this module defines</td>
+</tr>
+<tr id="nga2303">
+<td><code>NGA2303</code></td>
+<td>error</td>
+<td><code>{name}</code> is neither an instruction nor a macro in scope</td>
+</tr>
+<tr id="nga2304">
+<td><code>NGA2304</code></td>
+<td>error</td>
+<td><code>{name}</code> is an instruction and takes one operand; an index register is <code>x</code> or <code>y</code></td>
+</tr>
+<tr id="nga2305">
+<td><code>NGA2305</code></td>
+<td>error</td>
+<td>a macro's argument is an expression: no <code>#</code>, no <code>,x</code> or <code>,y</code>, and no parenthesis that indirects</td>
+</tr>
+<tr id="nga2306">
+<td><code>NGA2306</code></td>
+<td>error</td>
+<td><code>{name}</code> takes {expected} arguments and was given {given}</td>
+</tr>
+<tr id="nga2308">
+<td><code>NGA2308</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is a macro and stands where a value is expected</td>
+</tr>
+<tr id="nga2309">
+<td><code>NGA2309</code></td>
+<td>error</td>
+<td><code>{label}</code> is a {kind}, and a role is a macro the tool expands where it uses the role</td>
+</tr>
+<tr id="nga2310">
+<td><code>NGA2310</code></td>
+<td>error</td>
+<td><code>nga</code> is the tool's namespace, and no module defines it</td>
+</tr>
+<tr id="nga2311">
+<td><code>NGA2311</code></td>
+<td>error</td>
+<td><code>{space}</code> is not a namespace</td>
+</tr>
+<tr id="nga2312">
+<td><code>NGA2312</code></td>
+<td>error</td>
+<td><code>nga.{name}</code> names nothing the tool defines</td>
+</tr>
+<tr id="nga2313">
+<td><code>NGA2313</code></td>
+<td>error</td>
+<td><code>nga.{name}</code> is used, and no module declares a driver</td>
+</tr>
+<tr id="nga2314">
+<td><code>NGA2314</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is a name the tool defines, and a module may not define it</td>
+</tr>
+<tr id="nga2315">
+<td><code>NGA2315</code></td>
+<td>note</td>
+<td>the tool defines <code>{symbol}</code> here</td>
+</tr>
+<tr id="nga2316">
+<td><code>NGA2316</code></td>
+<td>error</td>
+<td><code>{name}</code> is a namespace and stands where a value is expected</td>
+</tr>
+<tr id="nga2317">
+<td><code>NGA2317</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is also a namespace, and one name cannot be both</td>
+</tr>
+<tr id="nga2319">
+<td><code>NGA2319</code></td>
+<td>error</td>
+<td><code>{name}</code> is an attribute of a section, and a name in a proc cannot take it</td>
+</tr>
+<tr id="nga2320">
+<td><code>NGA2320</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is inside proc <code>{proc}</code>, and nothing outside the proc can reach it</td>
+</tr>
+<tr id="nga2321">
+<td><code>NGA2321</code></td>
+<td>error</td>
+<td>a condition decides how many bytes there are, so it is a declared value: nothing naming a position or a size may stand in it</td>
+</tr>
+<tr id="nga2322">
+<td><code>NGA2322</code></td>
+<td>error</td>
+<td>this expansion is {depth} uses deep at <code>{name}</code> and shows no sign of ending</td>
+</tr>
+<tr id="nga2323">
+<td><code>NGA2323</code></td>
+<td>note</td>
+<td>the expansion began at this use</td>
+</tr>
+<tr id="nga2324">
+<td><code>NGA2324</code></td>
+<td>error</td>
+<td><code>{name}</code> is a {kind}, and stands where an instruction or a macro is expected</td>
+</tr>
+<tr id="nga2325">
+<td><code>NGA2325</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a pack, and only a pack spreads</td>
+</tr>
+<tr id="nga2326">
+<td><code>NGA2326</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a pack, and <code>.match</code> counts a pack's elements</td>
+</tr>
+<tr id="nga2327">
+<td><code>NGA2327</code></td>
+<td>error</td>
+<td><code>{name}</code> is already bound around this <code>.case</code>, and a case hides nothing</td>
+</tr>
+<tr id="nga2328">
+<td><code>NGA2328</code></td>
+<td>error</td>
+<td><code>{name}</code> was given {count} elements, and no <code>.case</code> of <code>.match {name}</code> fits that</td>
+</tr>
+<tr id="nga2329">
+<td><code>NGA2329</code></td>
+<td>note</td>
+<td>the <code>.match</code> is here</td>
+</tr>
+<tr id="nga2330">
+<td><code>NGA2330</code></td>
+<td>warning</td>
+<td>a <code>.case</code> above this one fits everything this one does, so it is never taken</td>
+</tr>
+<tr id="nga2331">
+<td><code>NGA2331</code></td>
+<td>error</td>
+<td><code>{name}</code> takes at least {expected} arguments and was given {given}</td>
+</tr>
+<tr id="nga2332">
+<td><code>NGA2332</code></td>
+<td>error</td>
+<td>this expansion has produced {count:n} statements, more than the target has bytes to put them in</td>
+</tr>
+<tr id="nga2333">
+<td><code>NGA2333</code></td>
+<td>error</td>
+<td>with its arguments in place this expression nests {depth} deep, more than {limit}</td>
+</tr>
+<tr id="nga2334">
+<td><code>NGA2334</code></td>
+<td>error</td>
+<td><code>{place}</code> keeps {want} of its bytes here, and this reserves {got}</td>
+</tr>
+<tr>
+<td><a href="#nga2412"><code>NGA2412</code></a></td>
+<td>error</td>
+<td><code>{symbol}</code> is in pane <code>{pane}</code>, and this code does not run with that pane shown: put the statement under a <code><a class="ref" href="../assembler/#with">.with</a></code>, or the code in a Proc declared <code>under</code> it</td>
+</tr>
+<tr id="nga2413">
+<td><code>NGA2413</code></td>
+<td>note</td>
+<td><code>{fromView}</code> and <code>{toView}</code> share window {windowStart:hex}-{windowEnd:hex} and are never visible together</td>
+</tr>
+<tr>
+<td><a href="#nga2414"><code>NGA2414</code></a></td>
+<td>error</td>
+<td>reference to <code>{symbol}</code>, which is not in memory in phase <code>{phase}</code> while <code>{section}</code> is</td>
+</tr>
+<tr id="nga2415">
+<td><code>NGA2415</code></td>
+<td>error</td>
+<td>reference to <code>{slot}</code>, which has no implementation in phase <code>{phase}</code> while <code>{section}</code> is</td>
+</tr>
+<tr id="nga2416">
+<td><code>NGA2416</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is inside proc <code>{proc}</code>, which is reached only through its name</td>
+</tr>
+<tr id="nga2417">
+<td><code>NGA2417</code></td>
+<td>error</td>
+<td>a branch to <code>{symbol}</code> in <code>{section}</code>: a branch reaches its own proc or one chained to it by <code>then</code>; use <code>jmp</code></td>
+</tr>
+<tr id="nga2418">
+<td><code>NGA2418</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a pane the Project declares</td>
+</tr>
+<tr id="nga2419">
+<td><code>NGA2419</code></td>
+<td>error</td>
+<td><code>{section}</code> is in pane <code>{pane}</code>, and a pane's section stands in one bank at one address; it cannot be movable</td>
+</tr>
+<tr id="nga2420">
+<td><code>NGA2420</code></td>
+<td>error</td>
+<td><code>{section}</code> is in pane <code>{pane}</code>, and a window covers no zero page</td>
+</tr>
+<tr id="nga2421">
+<td><code>NGA2421</code></td>
+<td>error</td>
+<td>a pane's value is the state the solver chose, and this is arithmetic on it; a pane stands as an immediate, a data item or a role's argument</td>
+</tr>
+<tr id="nga2422">
+<td><code>NGA2422</code></td>
+<td>error</td>
+<td><code>{name}</code> has {count} members, and {index} is not one of them</td>
+</tr>
+<tr id="nga2423">
+<td><code>NGA2423</code></td>
+<td>error</td>
+<td>a pane is a state of a window and not an address, and this operand is one</td>
+</tr>
+<tr id="nga2424">
+<td><code>NGA2424</code></td>
+<td>error</td>
+<td>a dispatch to <code>{symbol}</code>, which is not a position of <code>{section}</code>: a dispatch goes where it stands, and <code>.own</code> is how a table reaches other sections</td>
+</tr>
+<tr id="nga2425">
+<td><code>NGA2425</code></td>
+<td>error</td>
+<td>a dispatch of {count} targets, and an index reaches {most}</td>
+</tr>
+</tbody>
+</table>
+<h3 id="context-requirements-and-interrupt-handlers">Context, Requirements and interrupt handlers</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga3001">
+<td><code>NGA3001</code></td>
+<td>error</td>
+<td><code><a class="ref" href="../assembler/#with">.with</a></code> applies to the instruction or macro use on the line below, and this is not one</td>
+</tr>
+<tr id="nga3002">
+<td><code>NGA3002</code></td>
+<td>error</td>
+<td><code>{name}</code> is a {kind}, and <code><a class="ref" href="../assembler/#with">.with</a></code> takes a pane, a family with <code>, x</code>, a window with <code>, x</code> or a window <code>= STATE</code></td>
+</tr>
+<tr>
+<td><a href="#nga3003"><code>NGA3003</code></a></td>
+<td>error</td>
+<td><code>{state}</code> is not a named state of window <code>{window}</code></td>
+</tr>
+<tr id="nga3005">
+<td><code>NGA3005</code></td>
+<td>warning</td>
+<td><code>{window}</code> shows this state already, so this <code><a class="ref" href="../assembler/#with">.with</a></code> changes nothing</td>
+</tr>
+<tr id="nga3006">
+<td><code>NGA3006</code></td>
+<td>error</td>
+<td><code>{window}</code> is shown by a <code><a class="ref" href="../assembler/#with">.with</a></code> on this statement already, and a window shows one state at a time</td>
+</tr>
+<tr>
+<td><a href="#nga3007"><code>NGA3007</code></a></td>
+<td>error</td>
+<td>a statement under <code><a class="ref" href="../assembler/#with">.with</a></code> may not <code>{mnemonic}</code>: it would leave the window as shown</td>
+</tr>
+<tr>
+<td><a href="#nga3008"><code>NGA3008</code></a></td>
+<td>error</td>
+<td>what this statement reaches names <code>{symbol}</code>, in pane <code>{pane}</code>, which this <code><a class="ref" href="../assembler/#with">.with</a></code> does not show</td>
+</tr>
+<tr id="nga3009">
+<td><code>NGA3009</code></td>
+<td>note</td>
+<td><code>{symbol}</code> is named here</td>
+</tr>
+<tr id="nga3010">
+<td><code>NGA3010</code></td>
+<td>error</td>
+<td>the phases this code is in give window <code>{window}</code> different bases, <code>{state}</code> in <code>{phase}</code> and <code>{other}</code> in <code>{otherPhase}</code>, so <code><a class="ref" href="../assembler/#with">.with</a></code> cannot show one base again; split the module</td>
+</tr>
+<tr id="nga3011">
+<td><code>NGA3011</code></td>
+<td>error</td>
+<td><code>{symbol}</code> is in state <code>{state}</code> of window <code>{window}</code>, which phase <code>{phase}</code> does not show here</td>
+</tr>
+<tr id="nga3012">
+<td><code>NGA3012</code></td>
+<td>error</td>
+<td><code>{directive}</code> applies to the instruction or data on the line below, and this is not one</td>
+</tr>
+<tr id="nga3013">
+<td><code>NGA3013</code></td>
+<td>error</td>
+<td><code>.own</code> and <code>.root</code> on one statement: an address is followed by this section or by the hardware, not both</td>
+</tr>
+<tr id="nga3014">
+<td><code>NGA3014</code></td>
+<td>error</td>
+<td><code>.root</code> hands the address to the hardware, and names nobody</td>
+</tr>
+<tr id="nga3015">
+<td><code>NGA3015</code></td>
+<td>error</td>
+<td>this section is in pane <code>{pane}</code> of window <code>{window}</code>, and code in a pane cannot switch its own window: the switch would take the code with it; a proc in fixed, <code>.proc NAME, under {pane}</code>, does it</td>
+</tr>
+<tr id="nga3016">
+<td><code>NGA3016</code></td>
+<td>error</td>
+<td><code>under {name}</code> {reason}</td>
+</tr>
+<tr id="nga3017">
+<td><code>NGA3017</code></td>
+<td>error</td>
+<td><code>{symbol}</code> runs under pane <code>{pane}</code>, which must be shown where it is called, and here it is not</td>
+</tr>
+</tbody>
+</table>
+<h3 id="prune-and-trace">Prune and Trace</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#nga4501"><code>NGA4501</code></a></td>
+<td>warning</td>
+<td>phase <code>{phase}</code> is not reachable from the entry phase</td>
+</tr>
+<tr id="nga4505">
+<td><code>NGA4505</code></td>
+<td>warning</td>
+<td><code>{section}</code> is pinned at {address:hex} and nothing reaches it, so it is dropped; mark it <code><a class="ref" href="../assembler/#root">root</a></code> if the hardware reads it</td>
+</tr>
+<tr id="nga4601">
+<td><code>NGA4601</code></td>
+<td>error</td>
+<td>the address of <code>{section}</code> is taken, and a temporary has none to give: its bytes are another's while it is not active</td>
+</tr>
+<tr id="nga4602">
+<td><code>NGA4602</code></td>
+<td>error</td>
+<td><code>{section}</code> is temporary while <code>{owner}</code> runs, and <code>{owner}</code> can be entered again before it returns</td>
+</tr>
+<tr id="nga4603">
+<td><code>NGA4603</code></td>
+<td>warning</td>
+<td>nothing this statement names is code or a temporary, so <code>.own</code> changes nothing</td>
+</tr>
+<tr>
+<td><a href="#nga4606"><code>NGA4606</code></a></td>
+<td>error</td>
+<td>the address of <code>{section}</code> is taken and nothing says who follows it: <code>.own</code> if this section does, <code>.own NAME</code> if another does, <code>.root</code> if the hardware does</td>
+</tr>
+<tr>
+<td><a href="#nga4607"><code>NGA4607</code></a></td>
+<td>error</td>
+<td><code>{section}</code> jumps through a pointer and owns no address of code, so nothing says where the jump goes</td>
+</tr>
+<tr id="nga4608">
+<td><code>NGA4608</code></td>
+<td>warning</td>
+<td>nothing this statement names is a section, so <code>.root</code> marks nothing</td>
+</tr>
+<tr id="nga4609">
+<td><code>NGA4609</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a section, a proc or a label, and <code>.own</code> names who follows the address</td>
+</tr>
+<tr id="nga4611">
+<td><code>NGA4611</code></td>
+<td>error</td>
+<td><code>{section}</code> is handed to <code>{follower}</code>, which is present in phase <code>{phase}</code> where <code>{section}</code> is not: a jump from there would land in nothing</td>
+</tr>
+</tbody>
+</table>
+<h3 id="size-and-place">Size and Place</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga5102">
+<td><code>NGA5102</code></td>
+<td>error</td>
+<td><code>{mnemonic}</code> has no {mode} form</td>
+</tr>
+<tr id="nga5103">
+<td><code>NGA5103</code></td>
+<td>error</td>
+<td>the placement class of this operand cannot be determined, so its width cannot be either</td>
+</tr>
+<tr id="nga5104">
+<td><code>NGA5104</code></td>
+<td>error</td>
+<td>this size depends on itself</td>
+</tr>
+<tr id="nga5105">
+<td><code>NGA5105</code></td>
+<td>error</td>
+<td>a reservation of {size:n} bytes is not a reservation</td>
+</tr>
+<tr id="nga5106">
+<td><code>NGA5106</code></td>
+<td>error</td>
+<td>{value:hex} is not an address</td>
+</tr>
+<tr>
+<td><a href="#nga5107"><code>NGA5107</code></a></td>
+<td>error</td>
+<td><code>{mnemonic}</code> is a <code>{needs}</code> instruction, and this target is a <code>{cpu}</code></td>
+</tr>
+<tr id="nga5201">
+<td><code>NGA5201</code></td>
+<td>error</td>
+<td><code>{section}</code> overlaps <code>{other}</code> at {address:hex}</td>
+</tr>
+<tr id="nga5202">
+<td><code>NGA5202</code></td>
+<td>error</td>
+<td>there is no room for <code>{section}</code>, which needs {size:n} bytes</td>
+</tr>
+<tr id="nga5203">
+<td><code>NGA5203</code></td>
+<td>error</td>
+<td>a section cannot be pinned at {address:hex}</td>
+</tr>
+<tr id="nga5204">
+<td><code>NGA5204</code></td>
+<td>error</td>
+<td><code>{section}</code> is zero page and does not fit below $100</td>
+</tr>
+<tr>
+<td><a href="#nga5205"><code>NGA5205</code></a></td>
+<td>error</td>
+<td><code>{section}</code> is loaded from storage, and cannot live where the stream reads through, at {address:hex}</td>
+</tr>
+<tr id="nga5206">
+<td><code>NGA5206</code></td>
+<td>error</td>
+<td>no layout satisfies every constraint at once</td>
+</tr>
+<tr id="nga5207">
+<td><code>NGA5207</code></td>
+<td>error</td>
+<td><code>{section}</code> and <code>{other}</code> cannot be kept apart: no layout holds both without one lying over the other</td>
+</tr>
+<tr id="nga5208">
+<td><code>NGA5208</code></td>
+<td>note</td>
+<td><code>{section}</code> is declared here</td>
+</tr>
+<tr id="nga5209">
+<td><code>NGA5209</code></td>
+<td>warning</td>
+<td>the search stopped before it could show that fewer pairs would do; the ones named suffice</td>
+</tr>
+<tr id="nga5210">
+<td><code>NGA5210</code></td>
+<td>error</td>
+<td>this assertion does not hold</td>
+</tr>
+<tr id="nga5211">
+<td><code>NGA5211</code></td>
+<td>error</td>
+<td>this assertion cannot be decided</td>
+</tr>
+<tr id="nga5212">
+<td><code>NGA5212</code></td>
+<td>error</td>
+<td>a section cannot be aligned to {alignment}</td>
+</tr>
+<tr id="nga5213">
+<td><code>NGA5213</code></td>
+<td>error</td>
+<td>a section cannot be kept within a boundary of {boundary}</td>
+</tr>
+<tr id="nga5214">
+<td><code>NGA5214</code></td>
+<td>error</td>
+<td><code>{section}</code> is {size:n} bytes, and cannot lie within a boundary of {boundary:n}</td>
+</tr>
+<tr id="nga5215">
+<td><code>NGA5215</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex}, which is not aligned to {alignment:n}</td>
+</tr>
+<tr id="nga5216">
+<td><code>NGA5216</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex}, and reaches {last:hex} across a boundary of {boundary:n}</td>
+</tr>
+<tr id="nga5217">
+<td><code>NGA5217</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex}, in the register region <code>{region}</code>, where nothing can be placed</td>
+</tr>
+<tr>
+<td><a href="#nga5218"><code>NGA5218</code></a></td>
+<td>warning</td>
+<td><code>{section}</code> is pinned at {address:hex}, in the reserved region <code>{region}</code></td>
+</tr>
+<tr id="nga5222">
+<td><code>NGA5222</code></td>
+<td>error</td>
+<td>there is no storage for <code>{section}</code>, which needs {size:n} bytes</td>
+</tr>
+<tr id="nga5223">
+<td><code>NGA5223</code></td>
+<td>note</td>
+<td>the target has no storage; a <code><a class="ref" href="../project-file/#storage">storage</a></code> block is where its units are named</td>
+</tr>
+<tr id="nga5224">
+<td><code>NGA5224</code></td>
+<td>warning</td>
+<td><code>{section}</code> is <code><a class="ref" href="../assembler/#root">root</a></code> and holds no bytes to restore, and is evicted in phase <code>{gap}</code> between <code>{before}</code> and <code>{after}</code>, which both need it</td>
+</tr>
+<tr id="nga5225">
+<td><code>NGA5225</code></td>
+<td>error</td>
+<td>pane <code>{pane}</code> takes {size:n} bytes in phase <code>{phase}</code>, and a bank of <code>{set}</code> holds {available:n}</td>
+</tr>
+<tr id="nga5226">
+<td><code>NGA5226</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex}, outside the window of pane <code>{pane}</code></td>
+</tr>
+<tr id="nga5227">
+<td><code>NGA5227</code></td>
+<td>error</td>
+<td><code>{section}</code> has bytes and is in pane <code>{pane}</code>, which is pinned to a named state: no Container fills one, so a pane pinned to a state holds only sections that reserve</td>
+</tr>
+<tr id="nga5228">
+<td><code>NGA5228</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex}, inside window <code>{window}</code>, which code reached under a <code><a class="ref" href="../assembler/#with">.with</a></code> on it would not see</td>
+</tr>
+<tr id="nga5229">
+<td><code>NGA5229</code></td>
+<td>error</td>
+<td>family <code>{pane}</code> needs {count} banks in a row, and <code>{set}</code> has {banks}</td>
+</tr>
+<tr id="nga5230">
+<td><code>NGA5230</code></td>
+<td>error</td>
+<td><code>{section}</code> says <code>readonly</code> and this writes it</td>
+</tr>
+<tr id="nga5231">
+<td><code>NGA5231</code></td>
+<td>note</td>
+<td><code>readonly</code> is declared here</td>
+</tr>
+<tr id="nga5232">
+<td><code>NGA5232</code></td>
+<td>warning</td>
+<td><code>{section}</code> reserves space and emits no bytes, so <code>readonly</code> says nothing about it</td>
+</tr>
+<tr id="nga5233">
+<td><code>NGA5233</code></td>
+<td>error</td>
+<td><code>{section}</code> is pinned at {address:hex} in <code>{region}</code>, which is ROM, and something writes it</td>
+</tr>
+<tr id="nga5234">
+<td><code>NGA5234</code></td>
+<td>error</td>
+<td>the sections nothing writes come to {required:n} bytes and this machine has {available:n} of ROM</td>
+</tr>
+<tr id="nga5250">
+<td><code>NGA5250</code></td>
+<td>error</td>
+<td>the layout gives <code>{section}</code> an address, and nothing reaches it</td>
+</tr>
+<tr id="nga5251">
+<td><code>NGA5251</code></td>
+<td>error</td>
+<td>the layout ends <code>{section}</code> at {address:hex} in phase <code>{phase}</code>, and <code>{next}</code>, which follows it, starts at {other:hex}</td>
+</tr>
+<tr id="nga5252">
+<td><code>NGA5252</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}, inside window <code>{window}</code>, which it runs under a <code><a class="ref" href="../assembler/#with">.with</a></code> on</td>
+</tr>
+<tr id="nga5631">
+<td><code>NGA5631</code></td>
+<td>error</td>
+<td>phase <code>{phase}</code> does not fit in view <code>{view}</code>: requires {required:n} bytes, {available:n} available</td>
+</tr>
+<tr id="nga5632">
+<td><code>NGA5632</code></td>
+<td>error</td>
+<td>phase <code>{phase}</code> needs {required:n} bytes of zero page, and {available:n} are available</td>
+</tr>
+<tr id="nga5633">
+<td><code>NGA5633</code></td>
+<td>note</td>
+<td><code>{section}</code> accounts for {size:n} bytes</td>
+</tr>
+</tbody>
+</table>
+<h3 id="layout-verification">Layout verification</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga5240">
+<td><code>NGA5240</code></td>
+<td>error</td>
+<td>the layout has <code>{section}</code> and <code>{other}</code> sharing {address:hex}, and phase <code>{phase}</code> holds both</td>
+</tr>
+<tr id="nga5241">
+<td><code>NGA5241</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}, and it is pinned at {pinned:hex}</td>
+</tr>
+<tr id="nga5242">
+<td><code>NGA5242</code></td>
+<td>error</td>
+<td>the layout puts zero page <code>{section}</code> at {address:hex}, and it reaches {last:hex}</td>
+</tr>
+<tr id="nga5243">
+<td><code>NGA5243</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}..{last:hex}, reaching into the window it waits behind</td>
+</tr>
+<tr id="nga5244">
+<td><code>NGA5244</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}..{last:hex}, outside the pool it was allocated from</td>
+</tr>
+<tr id="nga5245">
+<td><code>NGA5245</code></td>
+<td>error</td>
+<td>the layout gives <code>{section}</code> no address</td>
+</tr>
+<tr id="nga5246">
+<td><code>NGA5246</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}, and it reaches past the end of memory</td>
+</tr>
+<tr id="nga5247">
+<td><code>NGA5247</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}, which is not aligned to {alignment:n}</td>
+</tr>
+<tr id="nga5248">
+<td><code>NGA5248</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex}..{last:hex}, across a boundary of {boundary:n}</td>
+</tr>
+<tr id="nga5249">
+<td><code>NGA5249</code></td>
+<td>error</td>
+<td>the layout puts <code>{section}</code> at {address:hex} in phase <code>{phase}</code> and at {other:hex} in phase <code>{otherPhase}</code>, and a reference holds it to one address across both</td>
+</tr>
+</tbody>
+</table>
+<h3 id="patch-emit-compression-and-the-container">Patch, Emit, compression and the Container</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga6101">
+<td><code>NGA6101</code></td>
+<td>error</td>
+<td>{value} does not fit in the {width:n} bytes written here</td>
+</tr>
+<tr>
+<td><a href="#nga6102"><code>NGA6102</code></a></td>
+<td>error</td>
+<td><code>{mnemonic}</code> reaches -128 to 127 and this is {distance:n} bytes away; write <code>{jcc}</code>, which is five bytes where two do not reach</td>
+</tr>
+<tr id="nga6201">
+<td><code>NGA6201</code></td>
+<td>error</td>
+<td><code>{section}</code> and <code>{other}</code> share {address:hex}, and a raw image cannot hold both</td>
+</tr>
+<tr id="nga6204">
+<td><code>NGA6204</code></td>
+<td>error</td>
+<td>the .xex fills storage through the driver's <code>showAt</code>, and no module declares a driver</td>
+</tr>
+<tr id="nga6205">
+<td><code>NGA6205</code></td>
+<td>error</td>
+<td>the .xex fills a unit by writing into the window the stream reads through, and this driver names none</td>
+</tr>
+<tr id="nga6206">
+<td><code>NGA6206</code></td>
+<td>error</td>
+<td>a unit holds {unit:n} bytes and window <code>{name}</code> {window:n}, and the .xex fills a unit through the window</td>
+</tr>
+<tr id="nga6211">
+<td><code>NGA6211</code></td>
+<td>error</td>
+<td>phase <code>{phase}</code> has no entry: no label <code>{name}</code> is defined in the modules it needs</td>
+</tr>
+<tr id="nga6212">
+<td><code>NGA6212</code></td>
+<td>error</td>
+<td><code>{name}</code> is defined in more than one module that phase <code>{phase}</code> needs, so it does not say where the phase starts</td>
+</tr>
+<tr id="nga6213">
+<td><code>NGA6213</code></td>
+<td>error</td>
+<td><code>{name}</code> is a {kind}, and an entry is a label</td>
+</tr>
+<tr id="nga6214">
+<td><code>NGA6214</code></td>
+<td>error</td>
+<td>the .xex fills a unit through one range, and window <code>{name}</code> has {count}</td>
+</tr>
+<tr id="nga6221">
+<td><code>NGA6221</code></td>
+<td>error</td>
+<td>an .atr reads storage a sector at a time and shows no Window, and this storage is the unit set                        <code>{name}</code></td>
+</tr>
+<tr id="nga6222">
+<td><code>NGA6222</code></td>
+<td>error</td>
+<td>a unit of storage on a diskette is the {size:n} bytes 256 sectors of {sector:n} hold, and {unit:n} is not that</td>
+</tr>
+<tr id="nga6223">
+<td><code>NGA6223</code></td>
+<td>error</td>
+<td>the boot record of an .atr shows no Window, and this driver streams through <code>{name}</code></td>
+</tr>
+<tr id="nga6224">
+<td><code>NGA6224</code></td>
+<td>error</td>
+<td>a sector is numbered in two bytes, so an image holds {available:n} of them, and this program needs {required:n}</td>
+</tr>
+<tr id="nga6225">
+<td><code>NGA6225</code></td>
+<td>error</td>
+<td><code>{section}</code> stands at {address:hex}, inside the boot record the .atr loads over {begin:hex} to {end:hex}, which is still loading the program when those bytes are written</td>
+</tr>
+<tr id="nga6226">
+<td><code>NGA6226</code></td>
+<td>error</td>
+<td>an .atr is booted by its first sectors, and none were made</td>
+</tr>
+<tr id="nga6227">
+<td><code>NGA6227</code></td>
+<td>error</td>
+<td>the boot record holds {available:n} bytes and its loader came to {required:n}</td>
+</tr>
+<tr id="nga6231">
+<td><code>NGA6231</code></td>
+<td>error</td>
+<td>storage comes to {required:n} bytes and a <code>{name}</code> cartridge holds {available:n}</td>
+</tr>
+<tr id="nga6232">
+<td><code>NGA6232</code></td>
+<td>error</td>
+<td><code>{section}</code> holds bytes at {address:hex}, and a <code>{name}</code> cartridge is ROM at {range} and nothing else, so nothing would ever put them there</td>
+</tr>
+<tr id="nga6233">
+<td><code>NGA6233</code></td>
+<td>error</td>
+<td>a cartridge is started through the six bytes at its top, and none were made</td>
+</tr>
+</tbody>
+</table>
+<h3 id="lexing-a-ngc-module">Lexing a <code>.ngc</code> Module</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga7001">
+<td><code>NGA7001</code></td>
+<td>error</td>
+<td>unexpected character <code>{character}</code></td>
+</tr>
+<tr id="nga7002">
+<td><code>NGA7002</code></td>
+<td>error</td>
+<td>control character {code:hex} in source</td>
+</tr>
+<tr id="nga7003">
+<td><code>NGA7003</code></td>
+<td>error</td>
+<td>invalid UTF-8 encoding</td>
+</tr>
+<tr id="nga7004">
+<td><code>NGA7004</code></td>
+<td>error</td>
+<td><code>/*</code> is not closed before the end of the file</td>
+</tr>
+<tr id="nga7005">
+<td><code>NGA7005</code></td>
+<td>error</td>
+<td>a backslash at the end of a line does not carry a <code>//</code> comment onto the next</td>
+</tr>
+<tr id="nga7006">
+<td><code>NGA7006</code></td>
+<td>error</td>
+<td>a leading zero does not make <code>{constant}</code> octal; write it in decimal, <code>0x</code> or <code>0b</code></td>
+</tr>
+<tr id="nga7007">
+<td><code>NGA7007</code></td>
+<td>error</td>
+<td><code>{suffix}</code>: an integer constant takes no suffix</td>
+</tr>
+<tr id="nga7008">
+<td><code>NGA7008</code></td>
+<td>error</td>
+<td>there are no floating-point constants</td>
+</tr>
+<tr id="nga7009">
+<td><code>NGA7009</code></td>
+<td>error</td>
+<td><code>{character}</code> is not valid in a {base} constant</td>
+</tr>
+<tr id="nga7010">
+<td><code>NGA7010</code></td>
+<td>error</td>
+<td><code>{prefix}</code> is not followed by any digits</td>
+</tr>
+<tr id="nga7011">
+<td><code>NGA7011</code></td>
+<td>error</td>
+<td><code>'</code> in an integer constant must stand between digits</td>
+</tr>
+<tr id="nga7012">
+<td><code>NGA7012</code></td>
+<td>error</td>
+<td>this constant is too large to be represented</td>
+</tr>
+<tr id="nga7013">
+<td><code>NGA7013</code></td>
+<td>error</td>
+<td><code>{name}</code> is reserved: C keeps a name that begins with <code>__</code>, or with <code>_</code> and a capital, for the compiler</td>
+</tr>
+<tr id="nga7014">
+<td><code>NGA7014</code></td>
+<td>error</td>
+<td>this {what} is not closed before the end of its line</td>
+</tr>
+<tr id="nga7015">
+<td><code>NGA7015</code></td>
+<td>error</td>
+<td><code>{escape}</code> is no escape: the six are <code>\\</code>, <code>\&quot;</code>, <code>\'</code>, <code>\n</code>, <code>\t</code> and <code>\0</code></td>
+</tr>
+<tr id="nga7016">
+<td><code>NGA7016</code></td>
+<td>error</td>
+<td><code>{character}</code> is not ASCII, and this literal names no character set</td>
+</tr>
+<tr id="nga7017">
+<td><code>NGA7017</code></td>
+<td>error</td>
+<td>a character constant holds one character, and this holds {what}</td>
+</tr>
+</tbody>
+</table>
+<h3 id="parsing-a-ngc-module">Parsing a <code>.ngc</code> Module</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga7100">
+<td><code>NGA7100</code></td>
+<td>error</td>
+<td>expected {expected}, found {found}</td>
+</tr>
+<tr id="nga7101">
+<td><code>NGA7101</code></td>
+<td>error</td>
+<td>{what} nest more than {limit} deep</td>
+</tr>
+<tr id="nga7102">
+<td><code>NGA7102</code></td>
+<td>error</td>
+<td>the subset spells <code>{found}</code> as <code>{spelling}</code></td>
+</tr>
+<tr id="nga7103">
+<td><code>NGA7103</code></td>
+<td>error</td>
+<td>a literal of {second} is not joined to one of {first}</td>
+</tr>
+</tbody>
+</table>
+<h3 id="compiling-a-ngc-module">Compiling a <code>.ngc</code> Module</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Severity</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr id="nga7200">
+<td><code>NGA7200</code></td>
+<td>error</td>
+<td>the compiler does not compile {construct} yet</td>
+</tr>
+<tr id="nga7201">
+<td><code>NGA7201</code></td>
+<td>error</td>
+<td><code>{name}</code> is not declared</td>
+</tr>
+<tr id="nga7202">
+<td><code>NGA7202</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a function, and only a function or a <code><a class="ref" href="../assembler/#proc">.proc</a></code> can be called</td>
+</tr>
+<tr id="nga7203">
+<td><code>NGA7203</code></td>
+<td>error</td>
+<td><code>{name}</code> is a function, and a function cannot be assigned</td>
+</tr>
+<tr id="nga7204">
+<td><code>NGA7204</code></td>
+<td>error</td>
+<td><code>{name}</code> is already defined in this file</td>
+</tr>
+<tr id="nga7205">
+<td><code>NGA7205</code></td>
+<td>note</td>
+<td>the previous definition of <code>{name}</code> is here</td>
+</tr>
+<tr id="nga7206">
+<td><code>NGA7206</code></td>
+<td>error</td>
+<td>{value} does not fit in a <code>{type}</code></td>
+</tr>
+<tr id="nga7207">
+<td><code>NGA7207</code></td>
+<td>error</td>
+<td><code>{left}</code> and <code>{right}</code> differ in signedness, and only a cast mixes them</td>
+</tr>
+<tr id="nga7208">
+<td><code>NGA7208</code></td>
+<td>error</td>
+<td>a <code>{from}</code> does not fit in the <code>{to}</code> it is assigned to without a cast</td>
+</tr>
+<tr id="nga7209">
+<td><code>NGA7209</code></td>
+<td>error</td>
+<td>a <code>bool</code> holds <code>true</code>, <code>false</code> or a comparison, and is neither an operand nor an integer</td>
+</tr>
+<tr id="nga7210">
+<td><code>NGA7210</code></td>
+<td>warning</td>
+<td>{value} is outside what a <code>{type}</code> holds, so this comparison is always {outcome}</td>
+</tr>
+<tr id="nga7211">
+<td><code>NGA7211</code></td>
+<td>error</td>
+<td>a <code>{type}</code> shifted by {count}: the count is from 0 to {largest}</td>
+</tr>
+<tr id="nga7212">
+<td><code>NGA7212</code></td>
+<td>error</td>
+<td>a condition is a <code>bool</code>, and this is {what}</td>
+</tr>
+<tr id="nga7213">
+<td><code>NGA7213</code></td>
+<td>error</td>
+<td><code>{keyword}</code> stands in no loop</td>
+</tr>
+<tr id="nga7214">
+<td><code>NGA7214</code></td>
+<td>error</td>
+<td><code>{name}</code> is not a type</td>
+</tr>
+<tr id="nga7215">
+<td><code>NGA7215</code></td>
+<td>error</td>
+<td><code>{name}</code> is not an <code>enum struct</code></td>
+</tr>
+<tr id="nga7216">
+<td><code>NGA7216</code></td>
+<td>error</td>
+<td><code>{type}</code> has no enumerator <code>{name}</code></td>
+</tr>
+<tr id="nga7217">
+<td><code>NGA7217</code></td>
+<td>error</td>
+<td><code>{type}</code> is an <code>enum struct</code>, whose values are compared and never computed</td>
+</tr>
+<tr id="nga7218">
+<td><code>NGA7218</code></td>
+<td>error</td>
+<td>{left} and {right} are different types</td>
+</tr>
+<tr id="nga7219">
+<td><code>NGA7219</code></td>
+<td>error</td>
+<td>a <code>switch</code> takes a value of an <code>enum</code> or an integer, and this is {what}</td>
+</tr>
+<tr id="nga7220">
+<td><code>NGA7220</code></td>
+<td>error</td>
+<td><code>{label}</code> is not an enumerator of <code>{type}</code></td>
+</tr>
+<tr id="nga7221">
+<td><code>NGA7221</code></td>
+<td>error</td>
+<td><code>{label}</code> is a label of this <code>switch</code> already</td>
+</tr>
+<tr id="nga7222">
+<td><code>NGA7222</code></td>
+<td>warning</td>
+<td>no case names {names} of <code>{type}</code>, and the <code>switch</code> has no <code>default</code></td>
+</tr>
+<tr id="nga7223">
+<td><code>NGA7223</code></td>
+<td>error</td>
+<td><code>{name}</code> has {count} enumerators, and an <code>enum struct</code> holds 256 at most</td>
+</tr>
+<tr id="nga7224">
+<td><code>NGA7224</code></td>
+<td>error</td>
+<td><code>{name}</code> takes an argument for each of its {count} parameters, and this call gives {given}</td>
+</tr>
+<tr id="nga7225">
+<td><code>NGA7225</code></td>
+<td>error</td>
+<td><code>{name}</code> returns nothing, and this reads what it returns</td>
+</tr>
+<tr id="nga7226">
+<td><code>NGA7226</code></td>
+<td>error</td>
+<td><code>{name}</code> returns {type}, and this <code>return</code> gives no value</td>
+</tr>
+<tr id="nga7227">
+<td><code>NGA7227</code></td>
+<td>error</td>
+<td><code>{name}</code> returns nothing, and this <code>return</code> gives a value</td>
+</tr>
+<tr id="nga7228">
+<td><code>NGA7228</code></td>
+<td>error</td>
+<td><code>{name}</code> returns {type}, and the end of its body is reached with no <code>return</code></td>
+</tr>
+<tr id="nga7229">
+<td><code>NGA7229</code></td>
+<td>error</td>
+<td>this call closes a cycle of calls, {cycle}, and a function never reaches itself</td>
+</tr>
+<tr id="nga7230">
+<td><code>NGA7230</code></td>
+<td>error</td>
+<td>{what} is not cast to a <code>{type}</code></td>
+</tr>
+<tr id="nga7231">
+<td><code>NGA7231</code></td>
+<td>error</td>
+<td>{what} is given a constant, and this is not one</td>
+</tr>
+<tr id="nga7232">
+<td><code>NGA7232</code></td>
+<td>error</td>
+<td><code>{name}</code> is <code>const</code>, and is given no value where it is declared</td>
+</tr>
+<tr id="nga7233">
+<td><code>NGA7233</code></td>
+<td>error</td>
+<td>a constant is defined through itself, {cycle}</td>
+</tr>
+<tr id="nga7234">
+<td><code>NGA7234</code></td>
+<td>error</td>
+<td><code>{name}</code> is <code>const</code>, and is not assigned</td>
+</tr>
+<tr id="nga7235">
+<td><code>NGA7235</code></td>
+<td>error</td>
+<td><code>{name}</code> is read in the value it is given, before it holds one</td>
+</tr>
+<tr id="nga7236">
+<td><code>NGA7236</code></td>
+<td>error</td>
+<td>{index} is outside <code>{name}</code>, whose {count} elements are indexed from 0</td>
+</tr>
+<tr id="nga7237">
+<td><code>NGA7237</code></td>
+<td>error</td>
+<td>an index is {allowed}, and this is {what}</td>
+</tr>
+<tr id="nga7238">
+<td><code>NGA7238</code></td>
+<td>error</td>
+<td><code>{name}</code> is an array, and is not assigned but for its elements</td>
+</tr>
+<tr id="nga7239">
+<td><code>NGA7239</code></td>
+<td>error</td>
+<td><code>{name}</code> is neither an array nor a pointer, and nothing else is indexed</td>
+</tr>
+<tr id="nga7240">
+<td><code>NGA7240</code></td>
+<td>error</td>
+<td>this divides by zero</td>
+</tr>
+<tr id="nga7241">
+<td><code>NGA7241</code></td>
+<td>error</td>
+<td><code>{name}</code> has {count} elements, and is given {given}</td>
+</tr>
+<tr id="nga7242">
+<td><code>NGA7242</code></td>
+<td>error</td>
+<td><code>{name}</code> is {what}, and is given {given}</td>
+</tr>
+<tr id="nga7243">
+<td><code>NGA7243</code></td>
+<td>error</td>
+<td>the size of <code>{name}</code> is a constant from 1 to {largest}</td>
+</tr>
+<tr id="nga7244">
+<td><code>NGA7244</code></td>
+<td>error</td>
+<td><code>{name}</code> is {what}, and a declaration declares pointers or none</td>
+</tr>
+<tr id="nga7245">
+<td><code>NGA7245</code></td>
+<td>error</td>
+<td><code>{name}</code> is a parameter, whose address is not taken; copy it to a local</td>
+</tr>
+<tr id="nga7246">
+<td><code>NGA7246</code></td>
+<td>error</td>
+<td>{left} and {right} do not meet</td>
+</tr>
+<tr id="nga7247">
+<td><code>NGA7247</code></td>
+<td>error</td>
+<td>what is written here is <code>const</code>, reached through a pointer to <code>const</code></td>
+</tr>
+<tr id="nga7248">
+<td><code>NGA7248</code></td>
+<td>error</td>
+<td>{what} is no pointer, and only a pointer is dereferenced</td>
+</tr>
+<tr id="nga7249">
+<td><code>NGA7249</code></td>
+<td>error</td>
+<td><code>{name}</code> is a pointer, and C would ignore the size written for it</td>
+</tr>
+<tr id="nga7250">
+<td><code>NGA7250</code></td>
+<td>error</td>
+<td><code>{name}</code> has no members, and C gives such a type no size</td>
+</tr>
+<tr id="nga7251">
+<td><code>NGA7251</code></td>
+<td>error</td>
+<td>a type holds itself by value and has no size, {cycle}</td>
+</tr>
+<tr id="nga7252">
+<td><code>NGA7252</code></td>
+<td>error</td>
+<td><code>{name}</code> is a member, which is given no value and is not <code>const</code></td>
+</tr>
+<tr id="nga7253">
+<td><code>NGA7253</code></td>
+<td>error</td>
+<td><code>{type}</code> has no member <code>{name}</code></td>
+</tr>
+<tr id="nga7254">
+<td><code>NGA7254</code></td>
+<td>error</td>
+<td><code>{name}</code> is a member of <code>{type}</code> already</td>
+</tr>
+<tr id="nga7255">
+<td><code>NGA7255</code></td>
+<td>error</td>
+<td>{what} is no <code>struct</code> or <code>union</code>, and only one has members</td>
+</tr>
+<tr id="nga7256">
+<td><code>NGA7256</code></td>
+<td>error</td>
+<td>{what} is given {given}</td>
+</tr>
+<tr id="nga7257">
+<td><code>NGA7257</code></td>
+<td>error</td>
+<td>{what} is a <code>struct</code> or a <code>union</code>, which no operator takes</td>
+</tr>
+<tr id="nga7258">
+<td><code>NGA7258</code></td>
+<td>error</td>
+<td><code>{name}</code> is no attribute of the subset</td>
+</tr>
+<tr id="nga7259">
+<td><code>NGA7259</code></td>
+<td>error</td>
+<td><code>[[{attribute}]]</code> applies to {applies}, and <code>{name}</code> is none</td>
+</tr>
+<tr id="nga7260">
+<td><code>NGA7260</code></td>
+<td>error</td>
+<td><code>{name}</code> is an array of {what}, which lies in no stripes</td>
+</tr>
+<tr id="nga7261">
+<td><code>NGA7261</code></td>
+<td>error</td>
+<td><code>{name}</code> has {count} elements, and a striped array holds 256 at most</td>
+</tr>
+<tr id="nga7262">
+<td><code>NGA7262</code></td>
+<td>error</td>
+<td><code>{name}</code> lies in stripes, and has no address of its own</td>
+</tr>
+<tr id="nga7263">
+<td><code>NGA7263</code></td>
+<td>error</td>
+<td><code>{name}</code> is a Label of the assembler with no shape in C: {reason}</td>
+</tr>
+<tr id="nga7264">
+<td><code>NGA7264</code></td>
+<td>error</td>
+<td><code>{name}</code> is {reason} of the assembler, which C does not read</td>
+</tr>
+<tr id="nga7265">
+<td><code>NGA7265</code></td>
+<td>error</td>
+<td><code>{name}</code> is a <code>reserved</code> Region, which C does not reach</td>
+</tr>
+<tr id="nga7266">
+<td><code>NGA7266</code></td>
+<td>error</td>
+<td><code>{name}</code> holds a string, so the compiler does not know how many elements it has</td>
+</tr>
+<tr id="nga7267">
+<td><code>NGA7267</code></td>
+<td>note</td>
+<td><code>{name}</code> is defined here</td>
+</tr>
+<tr id="nga7268">
+<td><code>NGA7268</code></td>
+<td>error</td>
+<td><code>{name}</code> takes or returns <code>u8[N]</code>, bytes that a call from C does not hand over</td>
+</tr>
+<tr id="nga7269">
+<td><code>NGA7269</code></td>
+<td>error</td>
+<td><code>{name}</code> is defined in C, and <code>extern</code> declares only what the assembler exports</td>
+</tr>
+<tr id="nga7270">
+<td><code>NGA7270</code></td>
+<td>error</td>
+<td><code>{name}</code> is declared <code>extern</code>, and nothing the assembler exports is named so</td>
+</tr>
+<tr id="nga7271">
+<td><code>NGA7271</code></td>
+<td>error</td>
+<td><code>{name}</code> is declared <code>extern</code> already, and a name is declared once in the program</td>
+</tr>
+<tr id="nga7272">
+<td><code>NGA7272</code></td>
+<td>error</td>
+<td><code>{name}</code> is declared <code>extern</code>, and {what}</td>
+</tr>
+<tr id="nga7273">
+<td><code>NGA7273</code></td>
+<td>error</td>
+<td><code>{name}</code> {what}</td>
+</tr>
+<tr id="nga7274">
+<td><code>NGA7274</code></td>
+<td>error</td>
+<td><code>{name}</code> reads past what the assembler wrote as data: {reason}</td>
+</tr>
+<tr id="nga7275">
+<td><code>NGA7275</code></td>
+<td>error</td>
+<td><code>{path}</code>, at offset {offset}, splits an item the assembler wrote</td>
+</tr>
+<tr id="nga7276">
+<td><code>NGA7276</code></td>
+<td>error</td>
+<td>{what} holds {value}, which is no <code>{type}</code></td>
+</tr>
+<tr id="nga7277">
+<td><code>NGA7277</code></td>
+<td>error</td>
+<td><code>{name}</code> {what}</td>
+</tr>
+<tr id="nga7278">
+<td><code>NGA7278</code></td>
+<td>error</td>
+<td><code>{name}</code> is no character set, and a literal's prefix names one</td>
+</tr>
+<tr id="nga7279">
+<td><code>NGA7279</code></td>
+<td>error</td>
+<td><code>{name}</code> is {what}, and <code>{form}</code> takes {takes}</td>
+</tr>
+<tr id="nga7280">
+<td><code>NGA7280</code></td>
+<td>error</td>
+<td><code>{name}</code> is in family <code>{family}</code>, whose member is known at run time alone: call it in a <code>with({family}, i)</code> block</td>
+</tr>
+<tr id="nga7281">
+<td><code>NGA7281</code></td>
+<td>error</td>
+<td><code>{name}</code> is in pane <code>{pane}</code> of window <code>{window}</code>, which this block shows in another state: the exit of the call's <code><a class="ref" href="../assembler/#with">.with</a></code> would put back what the function's own code shows, not the block's</td>
+</tr>
+<tr id="nga7282">
+<td><code>NGA7282</code></td>
+<td>error</td>
+<td>window <code>{window}</code> is shown by the block this one stands in, and a window shows one state at a time</td>
+</tr>
+<tr id="nga7283">
+<td><code>NGA7283</code></td>
+<td>error</td>
+<td><code>{keyword}</code> leaves the <code>with</code> block, which would leave the window as the block shows it</td>
+</tr>
+<tr id="nga7284">
+<td><code>NGA7284</code></td>
+<td>error</td>
+<td>the address of <code>{name}</code>, in what this block shows, is kept only in a local of the block or handed to a call in it: here it {escapes}</td>
+</tr>
+<tr id="nga7286">
+<td><code>NGA7286</code></td>
+<td>error</td>
+<td>the index of <code>with({name}, i)</code> is {what}, and <code>X</code> takes a <code>u8</code> or a constant</td>
+</tr>
+<tr id="nga7287">
+<td><code>NGA7287</code></td>
+<td>error</td>
+<td><code>[[{attribute}]]</code> takes {takes}</td>
+</tr>
+<tr id="nga7288">
+<td><code>NGA7288</code></td>
+<td>error</td>
+<td><code>{name}</code> is <code>[[in]]</code> a pane and <code>[[under]]</code> one, and code under a pane is in none</td>
+</tr>
+<tr id="nga7289">
+<td><code>NGA7289</code></td>
+<td>error</td>
+<td>this block shows another state of window <code>{window}</code> from code in pane <code>{pane}</code>, which cannot switch its own window: write <code>[[with(...), trampoline]]</code>, and pay a Proc in fixed and a <code>jsr</code></td>
+</tr>
+<tr id="nga7290">
+<td><code>NGA7290</code></td>
+<td>error</td>
+<td><code>trampoline</code> on a block that needs none: {where}, and the block is a macro under <code><a class="ref" href="../assembler/#with">.with</a></code></td>
+</tr>
+<tr id="nga7291">
+<td><code>NGA7291</code></td>
+<td>error</td>
+<td>this block shows <code>{pane}</code>, and the code is in <code>{pane}</code> already</td>
+</tr>
+<tr id="nga7292">
+<td><code>NGA7292</code></td>
+<td>error</td>
+<td><code>{name}</code> is in pane <code>{pane}</code> of window <code>{window}</code>, and this code is in pane <code>{own}</code> of it, which cannot switch its own window: call it in a <code>[[with({pane}), trampoline]]</code> block or an <code>[[under({own})]]</code> function</td>
+</tr>
+<tr id="nga7293">
+<td><code>NGA7293</code></td>
+<td>error</td>
+<td><code>{name}</code> runs under pane <code>{pane}</code>, called from code in the pane, from another function under it, or in a block that shows it, and this is none</td>
+</tr>
+<tr id="nga7294">
+<td><code>NGA7294</code></td>
+<td>error</td>
+<td>a transition enters a phase and never comes back, so it stands on a bare <code>return</code> in a <code>void</code> function, and {what}</td>
+</tr>
+<tr id="nga7295">
+<td><code>NGA7295</code></td>
+<td>error</td>
+<td><code>{name}</code> is a slot, and its binding is its type's: a <code>void(void)</code> binds a vector and a <code>T* const</code> a pointer, and {what}</td>
+</tr>
+<tr id="nga7296">
+<td><code>NGA7296</code></td>
+<td>error</td>
+<td><code>{name}</code> fills slot <code>{slot}</code>, whose cell holds an address the program reads as {wanted}, and {what}</td>
+</tr>
+<tr id="nga7297">
+<td><code>NGA7297</code></td>
+<td>error</td>
+<td><code>{name}</code> is no <code>{type}</code>: {what}</td>
+</tr>
+<tr id="nga7298">
+<td><code>NGA7298</code></td>
+<td>error</td>
+<td><code>{name}</code> is taken as <code>{type}</code> here and as <code>{other}</code> elsewhere, and a function reads its arguments from one place</td>
+</tr>
+<tr id="nga7299">
+<td><code>NGA7299</code></td>
+<td>error</td>
+<td><code>{name}</code> names a function type, which is a type only as a pointer: <code>{name}*</code></td>
+</tr>
+<tr id="nga7300">
+<td><code>NGA7300</code></td>
+<td>error</td>
+<td>this call is of the function type its caller is a member of, which would write the temporaries the caller reads; a member dispatches through another type, or through a name</td>
+</tr>
+<tr id="nga7301">
+<td><code>NGA7301</code></td>
+<td>error</td>
+<td><code>{name}</code> is written <code><a class="ref" href="../c-dialect/#auto">auto</a></code> and given {what}, which takes its type from where it is used and so has none to give</td>
+</tr>
+<tr id="nga7302">
+<td><code>NGA7302</code></td>
+<td>error</td>
+<td><code>{name}</code> is written <code>inline</code> and {what}, so the call stays a call</td>
+</tr>
+<tr id="nga7303">
+<td><code>NGA7303</code></td>
+<td>error</td>
+<td><code>inline</code> is written on {what}, which has no body to wrap into a caller</td>
+</tr>
+<tr id="nga7304">
+<td><code>NGA7304</code></td>
+<td>error</td>
+<td><code>{name}</code> is assigned by <code>{operator}</code> where it is used as a value, and reached again in the same expression, which is an order the subset does not fix</td>
+</tr>
+<tr id="nga7305">
+<td><code>NGA7305</code></td>
+<td>error</td>
+<td><code>{name}</code> is a pointer, which <code>(zp),y</code> reads through, so it lies in the zero page whatever is asked</td>
+</tr>
+<tr id="nga7306">
+<td><code>NGA7306</code></td>
+<td>error</td>
+<td><code>{name}</code> lies in stripes, whose place its layout settles, so <code>[[placement]]</code> is a second answer</td>
+</tr>
+<tr id="nga7307">
+<td><code>NGA7307</code></td>
+<td>warning</td>
+<td><code>{name}</code> is <code>{class}</code> already, so this says nothing</td>
+</tr>
+<tr id="nga7308">
+<td><code>NGA7308</code></td>
+<td>error</td>
+<td><code>{name}</code> is read here before anything writes it, and a <code>static</code> local holds what was there; give it a value where it is declared</td>
+</tr>
+</tbody>
+</table>
+<h2 id="notes">Notes</h2>
+<p>What a finding means beyond what it says, where there is more to say.</p>
+<h3 id="nga0113">NGA0113</h3>
+<p>A label in column one that is spelled like an instruction is almost always an
+instruction that lost its indentation. The tool cannot tell the two apart,
+because a label is marked by position and nothing else.</p>
+<p>Turn the warning off where a program means it.</p>
+<h3 id="nga0138">NGA0138</h3>
+<p>A directive that produces bytes needs somewhere to put them. <code><a class="ref" href="../assembler/#section">.section</a></code> and
+<code><a class="ref" href="../assembler/#proc">.proc</a></code> are the two places that have an address.</p>
+<h3 id="nga0141">NGA0141</h3>
+<p>The processor has <code>(zp,x)</code> and <code>(zp),y</code> and no other indirect mode. So
+<code>(table),x</code> is not indirect, and the parentheses group an expression instead.
+The operand that comes out is an ordinary address, and the instruction is three
+bytes where the indirect form is two.</p>
+<p>The warning is there because the two spellings are one character apart.</p>
+<h3 id="nga0158">NGA0158</h3>
+<p>A macro body holds instructions and data. It does not hold declarations. A
+macro is instantiated where it is used, so a declaration inside one would
+declare the same name again at every use.</p>
+<h3 id="nga0169">NGA0169</h3>
+<p>A conditional branch holds instructions and data, for the same reason a macro
+body does.</p>
+<h3 id="nga1212">NGA1212</h3>
+<p>The text after the colon comes from the generator, not from the tool. A script
+that is given something it cannot use says so itself, and this is how it
+reaches the reader.</p>
+<h3 id="nga2237">NGA2237</h3>
+<p>A literal without a prefix must be ASCII. Nothing says what a byte above 127
+would mean, because the machine's own character set is not Unicode and not
+ASCII either. Name a Charset and the question has an answer.</p>
+<h3 id="nga2252">NGA2252</h3>
+<p>A Slot has one live implementation in each Phase. Two Modules that implement it
+in the same Phase leave the tool nothing to write into the Cell.</p>
+<h3 id="nga2412">NGA2412</h3>
+<p>Code that reaches a Symbol in a Pane must run while that Pane is shown. Put the
+statement under a <code><a class="ref" href="../assembler/#with">.with</a></code>, or put the code in a Proc declared <code>under</code> that
+Pane.</p>
+<h3 id="nga2414">NGA2414</h3>
+<p>A Section is in memory in the Phases it is declared in and in no others. A
+reference across that boundary would read whatever the other Phase left there.</p>
+<p>This is the refusal that makes Phases safe. The answer is usually a Slot.</p>
+<h3 id="nga3003">NGA3003</h3>
+<p>A Window shows one of the states it declares. A name it does not declare names
+nothing, and so does the name of the unit set behind it.</p>
+<h3 id="nga3007">NGA3007</h3>
+<p>A statement under <code><a class="ref" href="../assembler/#with">.with</a></code> runs while the Window shows what the <code><a class="ref" href="../assembler/#with">.with</a></code> asked
+for. An instruction that changes the Window would end that, and the rest of the
+statement would run against a different memory.</p>
+<h3 id="nga3008">NGA3008</h3>
+<p>The <code><a class="ref" href="../assembler/#with">.with</a></code> shows one Pane. A statement under it that reaches into another one
+is reaching into memory that is not there.</p>
+<h3 id="nga4501">NGA4501</h3>
+<p>A Phase nothing enters is built, placed and carried in the Container, and never
+runs. It is usually a <code>then</code> that was renamed or removed.</p>
+<p>Raise it to an error in a Project where that must not happen.</p>
+<h3 id="nga4606">NGA4606</h3>
+<p>Taking the address of a Section tells the tool nothing about who will follow
+it. Say who does. <code>.own</code> means this Section does, <code>.own NAME</code> means another
+one does, and <code>.root</code> means the hardware does.</p>
+<p>Without that, Trace cannot tell what the program still reaches, and a Section
+nothing reaches is dropped.</p>
+<h3 id="nga4607">NGA4607</h3>
+<p>A jump through a pointer goes wherever the pointer holds. The tool follows what
+the program owns, so a Section that jumps that way has to own the code it can
+reach.</p>
+<h3 id="nga5107">NGA5107</h3>
+<p>The Target says which processor the program is for. An instruction the
+processor does not have cannot be assembled, whatever the machine in front of
+you happens to be.</p>
+<h3 id="nga5205">NGA5205</h3>
+<p>A Window is where storage arrives. A Section that waits in storage cannot also
+live at the address it arrives through, because the arrival would overwrite it
+while it is being read.</p>
+<h3 id="nga5218">NGA5218</h3>
+<p>A reserved Region belongs to something else, usually the machine or its DOS. A
+pin puts a Section there anyway, which the tool allows and reports. Read it as
+a question: is this Region really reserved, or is this pin really wanted.</p>
+<h3 id="nga6102">NGA6102</h3>
+<p>A branch reaches 128 bytes back and 127 forward. The tool says how far the
+target actually is, and names the conditional jump that reaches anywhere. It is
+five bytes where a branch is two.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

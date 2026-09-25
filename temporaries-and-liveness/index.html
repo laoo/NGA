@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temporaries and Liveness — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li class="here"><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+<ul class="programs"><li><a href="../temporaries-and-liveness/in-c/">in-c</a></li><li><a href="../temporaries-and-liveness/one-pass/">one-pass</a></li><li><a href="../temporaries-and-liveness/three-procs/">three-procs</a></li><li><a href="../temporaries-and-liveness/two-passes/">two-passes</a></li></ul>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="temporaries-and-liveness">Temporaries and Liveness</h1>
+<h2 id="a-section-says-where-it-goes">A section says where it goes</h2>
+<p><code><a class="ref" href="../assembler/#section">.section</a></code> takes attributes, and the first of them is the placement class.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">input</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-number">3</span><span class="t-punctuation">,</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">4</span><span class="t-punctuation">,</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">5</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span>
+<span class="t-label">largest</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span>
+<span class="t-label">above</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre><p class="from"><a href="../temporaries-and-liveness/two-passes/">the whole of two-passes</a></p>
+<p><code>absolute</code> is the default. <code>zeropage</code> puts the section below <code>$0100</code>, where an instruction reaches it in two bytes instead of three.</p>
+<p>The class is declared and never worked out from the address. So programmer declares the placement class and the solver picks the address within it.</p>
+<p>A section may take that decision back with <code>at</code>, which pins it to an address.
+The pin is a constraint the solver satisfies and places everything else
+around, not a cursor the source moves.</p>
+<p><code>largest</code> and <code>above</code> keep their values. Nothing else may have their bytes.</p>
+<h2 id="a-variable-that-need-not-survive">A variable that need not survive</h2>
+<p>Besides placement class the section can be declated as a temporary. Only resevrations are allowed in such section. A section is temporary when its value is not needed while nothing that names it is running, counting a procedure as running until the call it made has returned.</p>
+<p>Temporary section can be spelled as:</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">zeropage</span><span class="t-punctuation">,</span> <span class="t-name"><a class="ref" href="../assembler/#temporary">temporary</a></span>
+<span class="t-label">variable</span> <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre>
+<p>or using a shorthand:</p>
+<pre><code class="language-asm"><span class="t-label">variable</span> <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+</code></pre>
+<p>Temporary variable outside of a zeropage can be declated as <code>.temp 1</code> which is the same as <code>.ztemp 1</code> but without a <code>zeropage</code> attribute in its long form.</p>
+<p>A section can also be written inside a <code><a class="ref" href="../assembler/#proc">.proc</a></code>. It does not become part of the
+code, which holds instructions and nothing else, and is placed beside it. What
+it gains is the procedure's name: inside <code><a class="ref" href="../project-file/#entry">entry</a></code> it is <code>best</code>, and anywhere
+else it is <code>entry.best</code>, which is how the map lists it.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name"><a class="ref" href="../project-file/#entry">entry</a></span>
+<span class="t-label">best</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">tally</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+<span class="t-label">@pick</span>   <span class="t-mnemonic">lda</span> <span class="t-name">input</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@kept</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">best</span>
+<span class="t-label">@kept</span>   <span class="t-mnemonic">dex</span>
+        <span class="t-mnemonic">bpl</span> <span class="t-name">@pick</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">largest</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">tally</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+<span class="t-label">@count</span>  <span class="t-mnemonic">lda</span> <span class="t-name">input</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@next</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">tally</span>
+<span class="t-label">@next</span>   <span class="t-mnemonic">dex</span>
+        <span class="t-mnemonic">bpl</span> <span class="t-name">@count</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">tally</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">above</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../temporaries-and-liveness/two-passes/">the whole of two-passes</a></p>
+<p><code>best</code> holds the largest byte seen so far, because the accumulator is busy
+holding the candidate. <code>tally</code> counts, for the same reason. Each is written
+with <code>.ztemp</code></p>
+<h2 id="what-that-buys">What that buys</h2>
+<pre><code>NGA memory map
+
+phase phase0 (0)
+  zero page: 3 of 16 bytes
+  memory:    50 of 32768 bytes
+  $0080-$0080  scan.largest     section            phase0
+  $0081-$0081  scan.above       section            phase0
+  $0082-$0082  scan.entry.best  temporary          phase0  shares with entry.tally
+  $0082-$0082  scan.entry.tally temporary          phase0  shares with entry.best
+  $2000-$2004  scan.input       section            phase0
+  $2005-$2031  scan.entry       proc               phase0
+</code></pre><p class="from"><a href="../temporaries-and-liveness/two-passes/">the whole of two-passes</a></p>
+<p><code>largest</code> and <code>above</code> have a byte each. <code>best</code> and <code>tally</code> have one byte
+between them, and the map names the partner in the last column.</p>
+<p>Nothing declared that. The two are finished with at different times — the
+largest is found and stored before the counting starts — so they are never
+both holding a value at once, and one byte does for both.</p>
+<h2 id="the-same-work-in-one-pass">The same work in one pass</h2>
+<p>Both loops read the same five bytes, so an obvious improvement is to do both
+jobs in one pass over them.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name"><a class="ref" href="../project-file/#entry">entry</a></span>
+<span class="t-label">best</span>    <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+<span class="t-label">tally</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">tally</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+<span class="t-label">@scan</span>   <span class="t-mnemonic">lda</span> <span class="t-name">input</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@kept</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">best</span>
+<span class="t-label">@kept</span>   <span class="t-mnemonic">lda</span> <span class="t-name">input</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@next</span>
+        <span class="t-mnemonic">inc</span> <span class="t-name">tally</span>
+<span class="t-label">@next</span>   <span class="t-mnemonic">dex</span>
+        <span class="t-mnemonic">bpl</span> <span class="t-name">@scan</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">best</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">largest</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">tally</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">above</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../temporaries-and-liveness/one-pass/">the whole of one-pass</a></p>
+<pre><code>NGA memory map
+
+phase phase0 (0)
+  zero page: 4 of 16 bytes
+  memory:    43 of 32768 bytes
+  $0080-$0080  scan.entry.tally temporary          phase0
+  $0081-$0081  scan.entry.best  temporary          phase0
+  $0082-$0082  scan.above       section            phase0
+  $0083-$0083  scan.largest     section            phase0
+  $2000-$2004  scan.input       section            phase0
+  $2005-$202A  scan.entry       proc               phase0
+</code></pre><p class="from"><a href="../temporaries-and-liveness/one-pass/">the whole of one-pass</a></p>
+<p>They no longer share. Now <code>best</code> is holding a value while <code>tally</code> is being
+counted up, and neither can have the other's byte.</p>
+<p>That is the trade, and the map is where it is stated: one pass is 38 bytes of
+code against 45, and costs one more byte of the zero page. Neither number was
+asked for. You wrote a faster loop, and the tool told you what it cost
+somewhere else.</p>
+<h2 id="between-procedures">Between procedures</h2>
+<p>Inside one procedure it is enough to ask which lines hold a value. Between
+procedures the question is which of them can be running at the same time, and
+the answer is a stack: a <code>jsr</code> pushes, an <code>rts</code> pops, and a procedure is
+<em>active</em> from the call into it until the return out of it.</p>
+<p>Two procedures that are never on that stack together can share everything.
+<code>findLargest</code> and <code>countAbove</code> are called one after the other and neither
+calls the other, so their scratch bytes are the same byte.</p>
+<p>One procedure in this program is different:</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">report</span>
+<span class="t-label">least</span>   <span class="t-directive">.</span><span class="t-directive">ztemp</span> <span class="t-number">1</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">$FF</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">least</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+<span class="t-label">@pick</span>   <span class="t-mnemonic">lda</span> <span class="t-name">input</span><span class="t-punctuation">,</span><span class="t-name">x</span>
+        <span class="t-mnemonic">cmp</span> <span class="t-name">least</span>
+        <span class="t-mnemonic">jcs</span> <span class="t-name">@kept</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">least</span>
+<span class="t-label">@kept</span>   <span class="t-mnemonic">dex</span>
+        <span class="t-mnemonic">bpl</span> <span class="t-name">@pick</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">findLargest</span>
+        <span class="t-mnemonic">lda</span> <span class="t-name">largest</span>
+        <span class="t-mnemonic">sec</span>
+        <span class="t-mnemonic">sbc</span> <span class="t-name">least</span>
+        <span class="t-mnemonic">sta</span> <span class="t-name">spread</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../temporaries-and-liveness/three-procs/">the whole of three-procs</a></p>
+<p><code>least</code> is still needed after <code>jsr findLargest</code>, so for the length of that call
+two procedures are on the stack and both of them are holding a value.</p>
+<pre><code>NGA memory map
+
+phase phase0 (0)
+  zero page: 5 of 16 bytes
+  memory:    90 of 32768 bytes
+  $0080-$0080  scan.largest          section            phase0
+  $0081-$0081  scan.above            section            phase0
+  $0082-$0082  scan.spread           section            phase0
+  $0083-$0083  scan.countAbove.tally temporary          phase0  shares with findLargest.best
+  $0083-$0083  scan.findLargest.best temporary          phase0  shares with countAbove.tally
+  $0084-$0084  scan.report.least     temporary          phase0
+  $2000-$2004  scan.input            section            phase0
+  $2005-$200E  scan.entry            proc               phase0
+  $200F-$2025  scan.findLargest      proc               phase0
+  $2026-$203C  scan.countAbove       proc               phase0
+  $203D-$2059  scan.report           proc               phase0
+</code></pre><p class="from"><a href="../temporaries-and-liveness/three-procs/">the whole of three-procs</a></p>
+<p><code>findLargest</code> and <code>countAbove</code> share <code>$0083</code>. <code>report</code> has <code>$0084</code> to itself,
+because its byte is live across a call and the callee's is live inside it.</p>
+<h2 id="where-the-tool-gets-this-from">Where the tool gets this from</h2>
+<p>It reads the program. Every use of a name is a reference the tool can see, and
+a byte cannot be reached any other way: taking a temporary's address is refused
+unless the source says what follows it. So the lifetime of every byte is
+something the tool works out rather than something you assert, and adding a
+line that reads a variable later can only make its life longer, never shorter.</p>
+<p>What it cannot see is what is not in the program. <code><a class="ref" href="../assembler/#temporary">temporary</a></code> is still your
+word, and the chapter on phases is where that matters.</p>
+<h2 id="in-c-you-write-none-of-it">In C you write none of it</h2>
+<p>Every local variable of a C function is a temporary of its procedure. There is
+no declaration to write and no attribute to remember.</p>
+<pre><code class="language-c"><span class="t-keyword">static</span> <span class="t-keyword">const</span> <span class="t-keyword">u8</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-punctuation">]</span> <span class="t-punctuation">=</span> <span class="t-punctuation">{</span> <span class="t-number">3</span><span class="t-punctuation">,</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">4</span><span class="t-punctuation">,</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">5</span> <span class="t-punctuation">}</span><span class="t-punctuation">;</span>
+
+<span class="t-keyword">static</span> <span class="t-keyword">u8</span> <span class="t-name">largest</span><span class="t-punctuation">;</span>
+<span class="t-keyword">static</span> <span class="t-keyword">u8</span> <span class="t-name">above</span><span class="t-punctuation">;</span>
+<span class="t-keyword">static</span> <span class="t-keyword">u8</span> <span class="t-name">spread</span><span class="t-punctuation">;</span>
+
+<span class="t-keyword">static</span> <span class="t-keyword">void</span> <span class="t-name">findLargest</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-keyword">u8</span> <span class="t-name">best</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span>
+  <span class="t-keyword">for</span> <span class="t-punctuation">(</span> <span class="t-keyword">u8</span> <span class="t-name">i</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span> <span class="t-name">i</span> <span class="t-punctuation">&lt;</span> <span class="t-number">5</span><span class="t-punctuation">;</span> <span class="t-punctuation">++</span><span class="t-name">i</span> <span class="t-punctuation">)</span>
+    <span class="t-keyword">if</span> <span class="t-punctuation">(</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-name">i</span><span class="t-punctuation">]</span> <span class="t-punctuation">&gt;</span> <span class="t-name">best</span> <span class="t-punctuation">)</span>
+      <span class="t-name">best</span> <span class="t-punctuation">=</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-name">i</span><span class="t-punctuation">]</span><span class="t-punctuation">;</span>
+  <span class="t-name">largest</span> <span class="t-punctuation">=</span> <span class="t-name">best</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-keyword">static</span> <span class="t-keyword">void</span> <span class="t-name">countAbove</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-keyword">u8</span> <span class="t-name">tally</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span>
+  <span class="t-keyword">for</span> <span class="t-punctuation">(</span> <span class="t-keyword">u8</span> <span class="t-name">i</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span> <span class="t-name">i</span> <span class="t-punctuation">&lt;</span> <span class="t-number">5</span><span class="t-punctuation">;</span> <span class="t-punctuation">++</span><span class="t-name">i</span> <span class="t-punctuation">)</span>
+    <span class="t-keyword">if</span> <span class="t-punctuation">(</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-name">i</span><span class="t-punctuation">]</span> <span class="t-punctuation">&gt;=</span> <span class="t-number">3</span> <span class="t-punctuation">)</span>
+      <span class="t-name">tally</span> <span class="t-punctuation">+=</span> <span class="t-number">1</span><span class="t-punctuation">;</span>
+  <span class="t-name">above</span> <span class="t-punctuation">=</span> <span class="t-name">tally</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-keyword">static</span> <span class="t-keyword">void</span> <span class="t-name">report</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-keyword">u8</span> <span class="t-name">least</span> <span class="t-punctuation">=</span> <span class="t-number">255</span><span class="t-punctuation">;</span>
+  <span class="t-keyword">for</span> <span class="t-punctuation">(</span> <span class="t-keyword">u8</span> <span class="t-name">i</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span> <span class="t-name">i</span> <span class="t-punctuation">&lt;</span> <span class="t-number">5</span><span class="t-punctuation">;</span> <span class="t-punctuation">++</span><span class="t-name">i</span> <span class="t-punctuation">)</span>
+    <span class="t-keyword">if</span> <span class="t-punctuation">(</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-name">i</span><span class="t-punctuation">]</span> <span class="t-punctuation">&lt;</span> <span class="t-name">least</span> <span class="t-punctuation">)</span>
+      <span class="t-name">least</span> <span class="t-punctuation">=</span> <span class="t-name">input</span><span class="t-punctuation">[</span><span class="t-name">i</span><span class="t-punctuation">]</span><span class="t-punctuation">;</span>
+  <span class="t-name">findLargest</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-name">spread</span> <span class="t-punctuation">=</span> <span class="t-name">largest</span> <span class="t-punctuation">-</span> <span class="t-name">least</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-keyword">void</span> <span class="t-name"><a class="ref" href="../project-file/#entry">entry</a></span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-name">findLargest</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-name">countAbove</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-name">report</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+
+  <span class="t-name">countAbove</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-name">report</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../temporaries-and-liveness/in-c/">the whole of in-c</a></p>
+<pre><code>NGA memory map
+
+phase phase0 (0)
+  zero page: 1 of 16 bytes
+  memory:    102 of 32768 bytes
+  $0080-$0080  scan.countAbove.__0tally temporary          phase0  shares with report.__0least
+  $0080-$0080  scan.report.__0least     temporary          phase0  shares with countAbove.__0tally
+  $2000-$2004  scan.input               section            phase0
+  $2005-$2005  scan.largest             section            phase0
+  $2006-$2006  scan.above               section            phase0
+  $2007-$2007  scan.spread              section            phase0
+  $2008-$201B  scan.findLargest         proc               phase0
+  $201C-$2034  scan.countAbove          proc               phase0
+  $2035-$2055  scan.report              proc               phase0
+  $2056-$2065  scan.entry               proc               phase0
+</code></pre><p class="from"><a href="../temporaries-and-liveness/in-c/">the whole of in-c</a></p>
+<p>Two things in that map are worth reading twice.</p>
+<p><code>countAbove</code> and <code>report</code> have one byte between them, exactly as the assembler
+versions did, and for the same reason. The compiler declared nothing and merged
+nothing: it gave each local a byte of its own and left the packing to the same
+step that packs a hand-written <code>.ztemp</code>.</p>
+<p>And <code>findLargest</code> is not there at all. Its local never reached memory, because
+the loop can keep the largest byte so far in the accumulator and compare
+against the array directly. A local costs a byte when it needs one, which is
+not the same as whenever you write <code>u8</code>.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

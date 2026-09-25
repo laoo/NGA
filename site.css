@@ -1,0 +1,569 @@
+/* The site's one stylesheet. Nothing is fetched from anywhere: the fonts are
+   whatever the reader's machine calls a text font and a monospace one, and both
+   themes come from the system rather than from a switch nobody would find.
+   See docs/decisions/0214-the-tutorial-is-published-as-a-site.md. */
+
+:root
+{
+  --page: #fbfaf8;
+  --panel: #f2efe9;
+  --ink: #1d1c1a;
+  --faint: #6a665f;
+  --rule: #ddd8cf;
+  --link: #8a4b1e;
+  --code: #f6f3ed;
+  --here: #fff;
+  --t-comment: #7d7a72;
+  --t-label: #1d6b52;
+  --t-directive: #8a4b1e;
+  --t-mnemonic: #2a4b8d;
+  --t-macro: #6b3fa0;
+  --t-keyword: #8a4b1e;
+  --t-literal: #96591c;
+  --t-name: #2f2d29;
+  --t-punct: #7d7a72;
+  --t-unknown: #b3261e;
+  --measure: 40rem;
+  --rail: 17rem;
+  --gutter: 2rem;
+}
+
+@media ( prefers-color-scheme: dark )
+{
+  :root
+  {
+    --page: #16171a;
+    --panel: #1c1e22;
+    --ink: #e4e2dd;
+    --faint: #9a968f;
+    --rule: #2c2f34;
+    --link: #d99a63;
+    --code: #1f2227;
+    --here: #262a30;
+    --t-comment: #7f8894;
+    --t-label: #7bc49a;
+    --t-directive: #d99a63;
+    --t-mnemonic: #82a8e0;
+    --t-macro: #c5a3e8;
+    --t-keyword: #d99a63;
+    --t-literal: #d6b97b;
+    --t-name: #ddd9d2;
+    --t-punct: #8b8f96;
+    --t-unknown: #f08a7c;
+  }
+}
+
+*
+{
+  box-sizing: border-box;
+}
+
+body
+{
+  margin: 0;
+  background: var( --page );
+  color: var( --ink );
+  font: 1rem/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  display: grid;
+  grid-template-columns: var( --rail ) 1fr;
+}
+
+/* Navigation ------------------------------------------------------------- */
+
+nav.chapters
+{
+  background: var( --panel );
+  border-right: 1px solid var( --rule );
+  padding: 1.6rem 1.2rem 3rem;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  font-size: 0.92rem;
+}
+
+.find
+{
+  padding: 0 1.2rem;
+  background: var( --panel );
+}
+
+.find input
+{
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: var( --page );
+  color: var( --ink );
+  border: 1px solid var( --rule );
+  border-radius: 3px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.find ul
+{
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.find li
+{
+  margin: 0.2rem 0;
+}
+
+.find a
+{
+  color: var( --link );
+  text-decoration: none;
+}
+
+.find a:hover
+{
+  text-decoration: underline;
+}
+
+nav.chapters a.home
+{
+  display: block;
+  font-weight: 600;
+  font-size: 1.02rem;
+  margin-bottom: 1rem;
+  color: var( --ink );
+  text-decoration: none;
+}
+
+nav.chapters ol
+{
+  margin: 0 0 0.6rem;
+  padding-left: 1.5rem;
+}
+
+nav.chapters li
+{
+  margin: 0.32rem 0;
+}
+
+nav.chapters li.here
+{
+  background: var( --here );
+  border-radius: 3px;
+  margin-left: -0.5rem;
+  padding-left: 0.5rem;
+}
+
+nav.chapters li.here > a
+{
+  color: var( --ink );
+  font-weight: 600;
+}
+
+nav.chapters a
+{
+  color: var( --link );
+  text-decoration: none;
+}
+
+nav.chapters a:hover
+{
+  text-decoration: underline;
+}
+
+nav.chapters p.aside
+{
+  color: var( --faint );
+  font-size: 0.84rem;
+  margin: 1rem 0 0.4rem;
+}
+
+/* The checkbox is how the navigation folds away on a narrow screen without a
+   line of script. It is invisible where the screen is wide. */
+.menu,
+#nav
+{
+  display: none;
+}
+
+/* Text ------------------------------------------------------------------- */
+
+main
+{
+  padding: 2.4rem var( --gutter ) 6rem;
+  max-width: calc( var( --measure ) + 6rem );
+}
+
+h1
+{
+  font-size: 1.75rem;
+  line-height: 1.25;
+  margin: 0 0 1.4rem;
+}
+
+h2
+{
+  font-size: 1.3rem;
+  margin: 2.4rem 0 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var( --rule );
+}
+
+h3
+{
+  font-size: 1.08rem;
+  margin: 1.8rem 0 0.6rem;
+}
+
+p,
+ul,
+ol,
+blockquote,
+table
+{
+  max-width: var( --measure );
+}
+
+a
+{
+  color: var( --link );
+}
+
+blockquote
+{
+  margin: 1.2rem 0;
+  padding: 0.2rem 0 0.2rem 1rem;
+  border-left: 3px solid var( --rule );
+  color: var( --faint );
+}
+
+code
+{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: var( --code );
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+pre
+{
+  background: var( --code );
+  border: 1px solid var( --rule );
+  border-radius: 4px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+
+pre code
+{
+  background: none;
+  padding: 0;
+  font-size: 0.86rem;
+}
+
+table
+{
+  border-collapse: collapse;
+  font-size: 0.94rem;
+}
+
+th,
+td
+{
+  border: 1px solid var( --rule );
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th
+{
+  background: var( --panel );
+}
+
+footer
+{
+  margin-top: 4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var( --rule );
+  color: var( --faint );
+  font-size: 0.84rem;
+}
+
+/* Narrow screens --------------------------------------------------------- */
+
+@media ( max-width: 52rem )
+{
+  :root
+  {
+    --rail: 0rem;
+    --gutter: 1rem;
+  }
+
+  body
+  {
+    grid-template-columns: 1fr;
+  }
+
+  .menu
+  {
+    display: block;
+    padding: 0.8rem 1rem;
+    background: var( --panel );
+    border-bottom: 1px solid var( --rule );
+    color: var( --link );
+    cursor: pointer;
+    user-select: none;
+  }
+
+  nav.chapters
+  {
+    display: none;
+    height: auto;
+    position: static;
+  }
+
+  #nav:checked ~ nav.chapters
+  {
+    display: block;
+  }
+
+  main
+  {
+    padding: 1.4rem var( --gutter ) 4rem;
+  }
+}
+
+/* Code, coloured by the tool's own lexer ---------------------------------- */
+
+.t-comment
+{
+  color: var( --t-comment );
+  font-style: italic;
+}
+
+.t-label
+{
+  color: var( --t-label );
+  font-weight: 600;
+}
+
+.t-directive
+{
+  color: var( --t-directive );
+}
+
+.t-mnemonic
+{
+  color: var( --t-mnemonic );
+}
+
+.t-macro
+{
+  color: var( --t-macro );
+}
+
+.t-keyword
+{
+  color: var( --t-keyword );
+  font-weight: 600;
+}
+
+.t-number,
+.t-string,
+.t-character
+{
+  color: var( --t-literal );
+}
+
+.t-name
+{
+  color: var( --t-name );
+}
+
+.t-punctuation
+{
+  color: var( --t-punct );
+}
+
+.t-unknown
+{
+  color: var( --t-unknown );
+  text-decoration: underline wavy;
+}
+
+/* A reference link is quiet: inside a block of code there are many, and a page
+   of underlined tokens would read worse than a page of none. */
+
+a.ref
+{
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted var( --rule );
+}
+
+a.ref:hover
+{
+  border-bottom-color: currentColor;
+}
+
+code a.ref
+{
+  border-bottom-color: transparent;
+}
+
+code a.ref:hover
+{
+  border-bottom-color: currentColor;
+}
+
+/* A program's page ------------------------------------------------------- */
+
+h2.file
+{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  border-top: none;
+  margin-top: 2rem;
+}
+
+details.aside-file > summary,
+details.seg > summary
+{
+  cursor: pointer;
+  padding: 0.3rem 0;
+  color: var( --faint );
+  font-size: 0.9rem;
+}
+
+details.aside-file > summary
+{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+details.seg > summary
+{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var( --ink );
+}
+
+details summary span
+{
+  color: var( --faint );
+  font-weight: normal;
+}
+
+p.from
+{
+  margin: 0.3rem 0 1.4rem;
+  font-size: 0.85rem;
+}
+
+/* A definition is where a name is answered, and stands out a little. */
+.def
+{
+  border-bottom: 1px solid var( --rule );
+}
+
+a.use
+{
+  text-decoration: none;
+}
+
+a.use:hover span
+{
+  text-decoration: underline;
+}
+
+.def:target
+{
+  background: var( --here );
+  outline: 2px solid var( --link );
+  border-radius: 2px;
+}
+
+/* A warehouse's table is read across a row, and a cell that wraps is a cell
+   read twice. These are let out of the text's measure as far as the window
+   reaches, and scroll sideways where even that is not enough, rather than
+   folding an address or a placement into four lines. */
+.wide
+{
+  width: max-content;
+  max-width: calc( 100vw - var( --rail ) - 2 * var( --gutter ) );
+  overflow-x: auto;
+}
+
+table.map,
+table.runs
+{
+  font-size: 0.85rem;
+  max-width: none;
+  width: max-content;
+}
+
+table.map th,
+table.runs th,
+table.map td,
+table.runs td
+{
+  white-space: nowrap;
+}
+
+table.map td,
+table.runs td
+{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 0.15rem 0.5rem;
+}
+
+ol.pools
+{
+  list-style: none;
+  padding: 0;
+  color: var( --faint );
+  font-size: 0.9rem;
+}
+
+ol.pools span
+{
+  color: var( --ink );
+  margin-left: 0.6rem;
+}
+
+.findings
+{
+  border-left: 3px solid var( --link );
+  padding: 0.2rem 0 0.2rem 1rem;
+  margin: 1.2rem 0;
+}
+
+.findings p.label
+{
+  font-weight: 600;
+  margin-top: 0;
+}
+
+.findings p.f-error b
+{
+  color: var( --t-unknown );
+}
+
+.findings .at
+{
+  color: var( --faint );
+  font-size: 0.85em;
+}
+
+nav.chapters ul.programs
+{
+  list-style: none;
+  padding-left: 0.8rem;
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.88rem;
+}
+
+nav.chapters ul.programs a
+{
+  color: var( --faint );
+}

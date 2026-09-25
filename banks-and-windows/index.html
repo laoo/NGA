@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banks and Windows — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li class="here"><a href="../banks-and-windows/">Banks and Windows</a>
+<ul class="programs"><li><a href="../banks-and-windows/banked/">banked</a></li><li><a href="../banks-and-windows/in-window/">in-window</a></li></ul>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="banks-and-windows">Banks and Windows</h1>
+<p>A diskette keeps storage out of the address space: a unit is a sector, and
+nothing of it is anywhere until the driver reads it. A machine with banked
+memory puts storage <em>in</em> the address space, a piece at a time, at an address
+the rest of the program cannot use while it is there. The mechanism is the one
+chapter four built. What changes is what it costs.</p>
+<h2 id="the-same-program-another-machine">The same program, another machine</h2>
+<p>Chapter four's program, unchanged. <code>print.asm</code>, <code>intro.asm</code> and <code>level.asm</code>
+are the same files; so are the Phases, the <code><a class="ref" href="../project-file/#resident">resident</a></code> line and the
+<code><a class="ref" href="../assembler/#transition">.transition</a></code>. Two lines of the Project differ:</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#include">include</a></span> <span class="t-string">&quot;atari/130xe.ngp&quot;</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#modules">modules</a></span> <span class="t-punctuation">{</span> <span class="t-string">&quot;print.asm&quot;</span> <span class="t-string">&quot;intro.asm&quot;</span> <span class="t-string">&quot;level.asm&quot;</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#resident">resident</a></span> <span class="t-punctuation">{</span> <span class="t-name">print</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#phase">phase</a></span> <span class="t-name">intro</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">intro</span>  <span class="t-keyword">then</span> <span class="t-name">level</span>  <span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">introStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#phase">phase</a></span> <span class="t-name">level</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">level</span>             <span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">levelStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">intro</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#container">container</a></span> <span class="t-name">xex</span>
+</code></pre><p class="from"><a href="../banks-and-windows/banked/">the whole of banked</a></p>
+<p><code><a class="ref" href="../project-file/#include">include</a></code> names an Atari 130XE rather than an 800XL with a drive, and the
+Container is a <code>.xex</code> rather than a diskette. The second is not a free choice:
+a machine says what it takes, and this one takes no <code>.atr</code> — it has no drive in
+its description, and its storage is not something a Container could write
+sectors of.</p>
+<h2 id="the-machine">The machine</h2>
+<p>The variant is worth reading in full, since every <code><a class="ref" href="../project-file/#include">include</a></code> so far has stood
+for one.</p>
+<pre><code class="language-ngp"><span class="t-comment">; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings</span>
+<span class="t-comment">; one of them into, the Window over the OS ROM, every Region of the address</span>
+<span class="t-comment">; space, and the Modules a program on this machine needs. What PORTB takes to</span>
+<span class="t-comment">; show a state is the driver&#x27;s and not here, and the OS is a Module rather than</span>
+<span class="t-comment">; a Region because it occupies memory for a while rather than being a truth</span>
+<span class="t-comment">; about addresses.</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#cpu">cpu</a></span> <span class="t-string">&quot;6502&quot;</span>
+
+  <span class="t-comment">; DOS loads a `.xex`, and a Project naming any other Container is refused</span>
+  <span class="t-comment">; here rather than at the writer.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#containers">containers</a></span> <span class="t-name">xex</span>
+
+  <span class="t-keyword"><a class="ref" href="../project-file/#units">units</a></span>  <span class="t-name">extension</span> <span class="t-number">4</span>
+  <span class="t-name"><a class="ref" href="../project-file/#window">window</a></span> <span class="t-name">ext</span>  <span class="t-number">$4000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-keyword">views</span> <span class="t-name">main</span><span class="t-punctuation">,</span> <span class="t-name">extension</span>  <span class="t-keyword">base</span> <span class="t-name">main</span>
+  <span class="t-name"><a class="ref" href="../project-file/#window">window</a></span> <span class="t-name">os</span>   <span class="t-number">$C000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span><span class="t-punctuation">,</span> <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-keyword">views</span> <span class="t-name">rom</span><span class="t-punctuation">,</span> <span class="t-name">ram</span>  <span class="t-keyword">base</span> <span class="t-name">rom</span>
+<span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#storage">storage</a></span> <span class="t-punctuation">{</span> <span class="t-keyword"><a class="ref" href="../project-file/#units">units</a></span> <span class="t-name">extension</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$CFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span>        <span class="t-number">$D800</span> <span class="t-punctuation">..</span> <span class="t-number">$FFFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span>
+
+  <span class="t-comment">; This machine takes a `.xex` and nothing else, and a `.xex` is loaded by a</span>
+  <span class="t-comment">; DOS, which stays where a DOS of the 2.x family stays. A Project whose DOS</span>
+  <span class="t-comment">; takes more says so with a `reserved` Region of its own, which narrows this</span>
+  <span class="t-comment">; one further.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">dos</span>    <span class="t-number">$0700</span> <span class="t-punctuation">..</span> <span class="t-number">$1FFF</span>  <span class="t-keyword">reserved</span>
+
+  <span class="t-comment">; What the driver writes. A Project that wants more of the hardware by name</span>
+  <span class="t-comment">; declares it, as it declares the memory its DOS holds.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span> <span class="t-name">PORTB</span>  <span class="t-number">$D301</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The OS, the driver for this storage and the decoders the tool ships, listed</span>
+<span class="t-comment">; as a file of the Project&#x27;s own would be. Every Transition calls the driver</span>
+<span class="t-comment">; and the decoders, so they are resident; a decoder nothing uses is dropped.</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#modules">modules</a></span> <span class="t-punctuation">{</span> <span class="t-string">&quot;atari/os.asm&quot;</span>  <span class="t-string">&quot;atari/charsets.asm&quot;</span>  <span class="t-string">&quot;atari/portb.asm&quot;</span>  <span class="t-string">&quot;stream/zx0.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#resident">resident</a></span> <span class="t-punctuation">{</span> <span class="t-name">os</span><span class="t-punctuation">,</span> <span class="t-name">charsets</span><span class="t-punctuation">,</span> <span class="t-name">portb</span><span class="t-punctuation">,</span> <span class="t-name">zx0</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>One of its Regions is not the machine's doing. A <code>.xex</code> is loaded by a DOS, and
+a DOS of the 2.x family stays below <code>$2000</code> for as long as the program runs, so
+<code>region dos $0700 .. $1FFF reserved</code> keeps the solver out of it — the
+<code>reserved</code> of chapter three, used for the first time. The variant may say it
+because it takes no other Container; a Project whose DOS takes more narrows it
+further with a <code>reserved</code> Region of its own.</p>
+<p><code>units extension 4</code> declares a <strong>unit set</strong>: four units the hardware has, known
+by number and by nothing else. <code>storage { units extension }</code> says those units
+are the storage, so a unit is a <strong>Bank</strong> — which is what a Bank is, and why the
+map calls it that here and called it a unit on the diskette.</p>
+<p><code>window ext $4000 .. $7FFF views main, extension base main</code> declares a
+<strong>Window</strong>: a set of address ranges the hardware switches as one, and the
+states it can show. <code>main</code> is base RAM, <code>extension</code> is the four Banks, one
+state each, and <code>base main</code> says which state is held when nothing has switched.
+The Window names no register. What it takes to show a state is the driver's,
+and <code>atari/portb.asm</code> is the driver that knows.</p>
+<h2 id="what-the-tool-did-differently">What the tool did differently</h2>
+<pre><code>storage
+  bank 0: 431 of 16384 bytes
+    $0000-$0011  frame intro -&gt; level          live intro
+    $0012-$0185  level.levelMap               copy (372 bytes)  live intro
+    $0186-$01AE  level.levelStart             copy (41 bytes)  live intro
+  bank 1: 0 of 16384 bytes
+  bank 2: 0 of 16384 bytes
+  bank 3: 0 of 16384 bytes
+</code></pre><p class="from"><a href="../banks-and-windows/banked/">the whole of banked</a></p>
+<p>Four Banks of sixteen kilobytes, where the diskette had units of sixty-four and
+three of them. The Frame is eighteen bytes and was sixteen: an edge carries the
+state every Window is to show in the Phase entered, and this machine has two
+Windows where the diskette had none.</p>
+<pre><code>phase level (1)
+  zero page: 143 of 256 bytes
+  memory:    16545 of 56576 bytes
+  ...
+  $0080-$0082  portb.portbPtr               section            intro..level
+  ...
+  $0083-$0084  portb.portbDst               temporary          intro..level  shares with ngaDst ngaPtr levelStart.at
+  ...
+  $0085-$0086  portb.portbSize              temporary          intro..level  shares with ngaOffset ngaValue levelStart.left
+  ...
+  $0087-$0087  portb.portbRun               temporary          intro..level  shares with ngaUnit
+  ...
+  $2000-$2004  portb.portbValues            section            intro..level
+  $2005-$2010  portb.portbSelect            proc               intro..level
+  $2011-$202C  portb.portbOpenStream        proc               intro..level
+  $202D-$2042  portb.portbReadByte          proc               intro..level
+  $2043-$2053  portb.portbNextUnit          proc               intro..level
+  $2054-$20C5  portb.portbCopy              proc               intro..level
+  ...
+  $2367-$2380  nga.transforms.ngaShowBases  proc               intro..level
+  $2381-$2390  nga.transforms.ngaRestore    proc root          intro..level
+  $2391-$2391  nga.transforms.ngaLoadUnit   section root       intro..level
+  $2392-$2398  nga.transforms.ngaLoadMap    proc root          intro..level
+  $2399-$23A0  nga.transforms.ngaTransform  proc               intro..level
+  ...
+</code></pre><p class="from"><a href="../banks-and-windows/banked/">the whole of banked</a></p>
+<p>Where the map held <code>disk.*</code> it now holds <code>portb.*</code>: the same roles, a table of
+register values in place of a sector buffer, and no call into the OS at all.
+Its scratch shares bytes with the routine's and with <code>levelStart</code>'s. Nothing
+declared that; it is chapter two's rule applied to Modules written separately.</p>
+<p>What is new are three Procs the tool generated for this Container and not for
+the other. A <code>.xex</code> is loaded into memory by a DOS, and a Bank <em>is</em> memory — so
+the file fills the Banks by switching each in through the driver and writing to
+the Window, then puts base RAM back before the program starts. <code>ngaLoadUnit</code>
+and <code>ngaLoadMap</code> are what the loader calls to switch, <code>ngaRestore</code> is what puts
+the base back, and <code>ngaShowBases</code> — one byte of <code>rts</code> on the diskette — is a
+real Proc here, because after every Transition there is a base to show again.</p>
+<h2 id="what-may-not-live-in-the-window">What may not live in the window</h2>
+<p>While the stream is open, <code>$4000-$7FFF</code> holds a Bank. A Section whose Payload
+is read through it therefore cannot also live there: the routine would be
+writing over the bytes it is reading.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$4000</span>
+<span class="t-label">levelMap</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#####################################&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......########.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......#......#.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......#......#.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#......########.....................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#...................................#&quot;</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;#####################################&quot;</span>
+<span class="t-label">levelMapEnd</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre><p class="from"><a href="../banks-and-windows/in-window/">the whole of in-window</a></p>
+<pre><code>error[<a class="ref" href="../diagnostics/#nga5205">NGA5205</a>]: `levelMap` is loaded from storage, and cannot live where the stream reads through, at $4000
+ --&gt; level.asm:8:1
+  |
+8 | .section absolute at $4000
+  | ^^^^^^^^
+</code></pre><p class="from"><a href="../banks-and-windows/in-window/">the whole of in-window</a></p>
+<p>The solver never puts a Section with a Payload in the Window, so only a pin
+reaches this. It is the same shape as chapter four's refusal — the tool holds
+the program to something the program did not have to state.</p>
+<p>Which is the shape of a Bank in this chapter: somewhere to <strong>keep</strong> things.
+The program reads storage through the Window and copies it out, and between
+Transitions the Window holds base RAM and nothing of the program is in a Bank
+at all. A Bank as somewhere for code and data to <strong>stay</strong>, run in, and be
+switched to when they are wanted is the next chapter, and it is where the other
+half of chapter four's rule comes in — two Sections may share an address not
+only when their Phases never meet, but when what shows them never does.</p>
+<p>Nothing here is written in C, because nothing here is written in the program.
+The Modules did not change, and neither would a <code>.ngc</code>.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

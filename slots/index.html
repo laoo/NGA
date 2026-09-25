@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slots — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li class="here"><a href="../slots/">Slots</a>
+<ul class="programs"><li><a href="../slots/in-c/">in-c</a></li><li><a href="../slots/per-phase/">per-phase</a></li><li><a href="../slots/two-draws/">two-draws</a></li></ul>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="slots">Slots</h1>
+<p>Chapter four refused a reference from one Phase to a Section of another, and
+the answer was to stop writing it. Resident code has the same problem the other
+way round, and there the answer will not do: a routine that is in memory in
+every Phase has to reach what differs between them. That is what a <strong>Slot</strong> is.</p>
+<h2 id="the-shape-of-a-screen-and-what-fills-it">The shape of a screen, and what fills it</h2>
+<p>Every screen here is a title and then something under it. A Module of its own
+knows that much and nothing else.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">showScreen</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@count</span>  <span class="t-mnemonic">lda</span> <span class="t-punctuation">(</span><span class="t-name">title</span><span class="t-punctuation">)</span><span class="t-punctuation">,</span><span class="t-name">y</span>           <span class="t-comment">; the Phase&#x27;s title, as long as it turns out</span>
+        <span class="t-mnemonic">beq</span> <span class="t-name">@print</span>
+        <span class="t-mnemonic">iny</span>
+        <span class="t-mnemonic">bne</span> <span class="t-name">@count</span>
+<span class="t-label">@print</span>
+        <span class="t-mnemonic">tya</span>
+        <span class="t-mnemonic">ldx</span> <span class="t-name">title</span>
+        <span class="t-mnemonic">ldy</span> <span class="t-name">title</span><span class="t-punctuation">+</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">printLine</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">draw</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../slots/per-phase/">the whole of per-phase</a></p>
+<p>Neither the title nor what goes under it is in this Module, and both come from
+whichever Phase is running, which it never learns. They are declared above it:</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">export</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">showScreen</span>
+
+<span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">pointer</span><span class="t-punctuation">,</span> <span class="t-name">zeropage</span>
+<span class="t-directive">.</span><span class="t-directive">slot</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">vector</span>
+</code></pre><p class="from"><a href="../slots/per-phase/">the whole of per-phase</a></p>
+<p><code>.slot NAME, binding</code> declares a Symbol with at most one live definition per
+Phase. The Binding is required and is not guessed, because it decides what a
+use compiles to and what the Cell behind it holds. <code>vector</code> is a <code>jmp</code> and an
+address, so <code>jsr draw</code> is a call into the Cell. <code>pointer</code> is an address alone,
+which is why <code>lda (title),y</code> reads through it and <code>ldx title</code> reads the low
+byte of the address itself — and why a pointer Slot takes a placement, since
+<code>(),y</code> wants the zero page.</p>
+<p>Both names on the <code><a class="ref" href="../assembler/#export">.export</a></code> line are there because another Module needs them,
+and for different reasons. <code>showScreen</code> is exported because the Phases call it.
+<code>draw</code> is exported because the Phases <strong>fill</strong> it: a Slot is declared once and
+implemented elsewhere, so every Module that says <code>.implements draw</code> has to see
+the name, and without the export the tool says <code>draw</code> is not defined at the
+<code>.implements</code> rather than at any use.</p>
+<p>A Module says that it fills them wherever it is present. What fills a <code>vector</code>
+is a Proc; what fills a <code>pointer</code> is anything with an address.</p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">levelTitle</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">levelDraw</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label">levelTitle</span>
+        <span class="t-directive">.</span><span class="t-directive">byte</span> <span class="t-string">&quot;LEVEL ONE&quot;</span><span class="t-punctuation">,</span> <span class="t-number">0</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name">levelDraw</span>
+        <span class="t-directive">.</span><span class="t-directive">with</span> <span class="t-name">level</span>
+        <span class="t-mnemonic">jsr</span> <span class="t-name">drawMap</span>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../slots/per-phase/">the whole of per-phase</a></p>
+<p><code>intro.asm</code> does the same with a title of its own and a Proc that prints a
+line. Neither Phase names the other, and <code>run.asm</code> names neither.</p>
+<h2 id="what-the-tool-made-of-it">What the tool made of it</h2>
+<pre><code>phase level (1)
+  zero page: 145 of 256 bytes
+  memory:    16661 of 56576 bytes
+  ...
+  $0083-$0084  level.drawMap.at             temporary          level  shares with ngaDst ngaPtr portbDst
+  ...
+  $0085-$0085  level.drawMap.left           temporary          level  shares with ngaOffset ngaValue portbSize
+  ...
+  $008F-$0090  nga.slots.title              section            intro..level
+  ...
+  $20DF-$20F3  run.showScreen               proc               intro..level
+  $20F4-$2118  level.drawMap                proc               level  waits in bank 0 at $0026 (copy, 39 bytes)
+  $2119-$2122  level.levelTitle             section            level  waits in bank 0 at $004D (copy, 12 bytes)
+  $2123-$2130  level.levelDraw              proc               level  waits in bank 0 at $0059 (copy, 16 bytes)
+  $2131-$2136  level.levelStart             proc               level  waits in bank 0 at $0069 (copy, 8 bytes)
+  ...
+  $2226-$2228  nga.slots.draw               section            intro..level
+  ...
+  $4000-$4171  level.levelMap               section            level  in pane level (state 4)
+  ...
+</code></pre><p class="from"><a href="../slots/per-phase/">the whole of per-phase</a></p>
+<p>Two Cells, and their Bindings are what they look like. <code>nga.slots.draw</code> is
+three bytes of ordinary memory — <code>jmp</code> and an address, which <code>jsr draw</code> calls
+into. <code>nga.slots.title</code> is two bytes of the zero page, an address and nothing
+else, because that is what <code>lda (title),y</code> needs. Both stand in every Phase,
+since resident code uses them; the tool added the Module the moment the program
+declared a Slot.</p>
+<pre><code>storage
+  bank 0: 113 of 16384 bytes
+    $0000-$0025  frame intro -&gt; level          live intro
+    $0026-$004C  level.drawMap                copy (39 bytes)  live intro
+    $004D-$0058  level.levelTitle             copy (12 bytes)  live intro
+    $0059-$0068  level.levelDraw              copy (16 bytes)  live intro
+    $0069-$0070  level.levelStart             copy (8 bytes)  live intro
+  bank 1: 0 of 16384 bytes
+  bank 2: 0 of 16384 bytes
+  bank 3: 0 of 16384 bytes
+</code></pre><p class="from"><a href="../slots/per-phase/">the whole of per-phase</a></p>
+<p>The Frame is thirty-eight bytes where chapter six's was eighteen. Twelve of the
+twenty are two more Sections to load, <code>levelTitle</code> and <code>levelDraw</code> being
+Sections of <code>level</code> like any other. The remaining eight are the two <strong>Cell
+writes</strong>, four bytes each: where the Cell is, and what this edge is to put in
+it. The Transition routine performs them on its way, after the Sections and
+before it jumps to the entered Phase's entry, and nothing else resident is
+touched.</p>
+<p>On the screen the two titles and the two bodies alternate, and the same two
+instructions printed and called both times.</p>
+<h2 id="what-it-refuses">What it refuses</h2>
+<p>At most one Implementation may be live in a Phase. A Module that is resident
+implements the Slot in every Phase, so it may not implement what a Phase also
+implements:</p>
+<pre><code class="language-asm"><span class="t-comment">; A default, for a Phase that has nothing of its own to draw. This Module is</span>
+<span class="t-comment">; resident, so it is live in every Phase.</span>
+<span class="t-directive">.</span><span class="t-directive">implements</span> <span class="t-name">draw</span><span class="t-punctuation">,</span> <span class="t-name">runNothing</span>
+</code></pre><p class="from"><a href="../slots/two-draws/">the whole of two-draws</a></p>
+<pre><code>error[<a class="ref" href="../diagnostics/#nga2252">NGA2252</a>]: `draw` has two implementations live in phase `intro`: `introDraw` and `runNothing`
+ --&gt; intro.asm:3:1
+  |
+3 | .implements draw, introDraw
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: `runNothing` implements it here
+  --&gt; run.asm:15:1
+   |
+15 | .implements draw, runNothing
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[<a class="ref" href="../diagnostics/#nga2252">NGA2252</a>]: `draw` has two implementations live in phase `level`: `levelDraw` and `runNothing`
+  --&gt; level.asm:56:1
+   |
+56 | .implements draw, levelDraw
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: `runNothing` implements it here
+  --&gt; run.asm:15:1
+   |
+15 | .implements draw, runNothing
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+</code></pre><p class="from"><a href="../slots/two-draws/">the whole of two-draws</a></p>
+<p>There is no order of precedence and no default: which of two is meant is not
+something a tool should decide, and a Phase that has nothing to draw says so
+by drawing nothing.</p>
+<h2 id="in-c">In C</h2>
+<p>The Slot is an <code>extern</code> that names nothing of the assembler's, and its Binding
+is its type.</p>
+<pre><code class="language-c"><span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">slot</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">extern</span> <span class="t-keyword">u8</span><span class="t-punctuation">*</span> <span class="t-keyword">const</span> <span class="t-name">title</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">slot</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">extern</span> <span class="t-keyword">void</span> <span class="t-name">draw</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+
+<span class="t-keyword">void</span> <span class="t-name">showScreen</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-keyword">u8</span> <span class="t-name">left</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span>
+  <span class="t-keyword">while</span> <span class="t-punctuation">(</span> <span class="t-name">title</span><span class="t-punctuation">[</span><span class="t-name">left</span><span class="t-punctuation">]</span> <span class="t-punctuation">!=</span> <span class="t-number">0</span> <span class="t-punctuation">)</span>
+    <span class="t-name">left</span> <span class="t-punctuation">+=</span> <span class="t-number">1</span><span class="t-punctuation">;</span>
+  <span class="t-name">printLine</span><span class="t-punctuation">(</span> <span class="t-punctuation">(</span><span class="t-keyword">u16</span><span class="t-punctuation">)</span><span class="t-name">title</span><span class="t-punctuation">,</span> <span class="t-name">left</span> <span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-name">draw</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../slots/in-c/">the whole of in-c</a></p>
+<p>Both Bindings come off the type, and neither is written down. <code>void draw()</code> is
+a function, so the Slot is a <code>vector</code> and a call is the <code>jsr</code> into the Cell;
+<code>u8* const title</code> is a pointer, so it is a <code>pointer</code> on the zero page and
+<code>title[left]</code> is <code>lda (title),y</code>. The pointer is <code>const</code> because the Cell is
+the Transition routine's to write and not the program's — and it is the one
+<code>extern</code> in the subset that names nothing of the assembler's.</p>
+<pre><code class="language-c"><span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">implements</span><span class="t-punctuation">(</span><span class="t-name">title</span><span class="t-punctuation">)</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">static</span> <span class="t-keyword">const</span> <span class="t-keyword">u8</span> <span class="t-name">introTitle</span><span class="t-punctuation">[</span><span class="t-punctuation">]</span> <span class="t-punctuation">=</span> <span class="t-string">&quot;INTRO&quot;</span><span class="t-punctuation">;</span>
+
+<span class="t-keyword">static</span> <span class="t-keyword">const</span> <span class="t-keyword">u8</span> <span class="t-name">introText</span><span class="t-punctuation">[</span><span class="t-punctuation">]</span> <span class="t-punctuation">=</span> <span class="t-string">&quot;THE FIRST SCREEN&quot;</span><span class="t-punctuation">;</span>
+
+<span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">implements</span><span class="t-punctuation">(</span><span class="t-name">draw</span><span class="t-punctuation">)</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">void</span> <span class="t-name">introDraw</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-name">printLine</span><span class="t-punctuation">(</span> <span class="t-punctuation">(</span><span class="t-keyword">u16</span><span class="t-punctuation">)</span><span class="t-name">introText</span><span class="t-punctuation">,</span> <span class="t-keyword">sizeof</span><span class="t-punctuation">(</span> <span class="t-name">introText</span> <span class="t-punctuation">)</span> <span class="t-punctuation">-</span> <span class="t-number">1</span> <span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-keyword">void</span> <span class="t-name">introStart</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-name">showScreen</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+  <span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">transition</span><span class="t-punctuation">(</span><span class="t-name">level</span><span class="t-punctuation">)</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">return</span><span class="t-punctuation">;</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../slots/in-c/">the whole of in-c</a></p>
+<p><code>[[implements(...)]]</code> is <code>.implements</code>, and it stands on a function or on an
+object at file scope according to what the Slot is. The Phase's own entry calls
+the resident <code>showScreen</code>, which reads and calls back into the Phase, and no
+name crosses between the two Phases in either direction.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

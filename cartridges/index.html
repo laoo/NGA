@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartridges — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li class="here"><a href="../cartridges/">Cartridges</a>
+<ul class="programs"><li><a href="../cartridges/cartridge/">cartridge</a></li></ul>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="cartridges">Cartridges</h1>
+<p>Every Container so far has been something a machine <strong>loads</strong>: a DOS reads a
+<code>.xex</code> into memory, a boot record reads sectors off a diskette. A cartridge is
+not loaded at all. Its ROM is decoded onto the bus by the board, the CPU reads
+it where it lies, and the only thing software can do is choose which part of a
+large ROM stands in a window.</p>
+<p>That changes what a Container is for. There is no loader to write and no order
+to load things in; there is an image whose offsets are the hardware's, and the
+board does the rest.</p>
+<h2 id="the-same-program-another-machine">The same program, another machine</h2>
+<p>Chapter six's program, unchanged. <code>print.asm</code>, <code>shared.asm</code>, <code>intro.asm</code> and
+<code>level.asm</code> are the same files, the Phases are the same, the Pane is the same
+and so is the Trampoline that draws the map. Three lines of the Project differ:</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#include">include</a></span> <span class="t-string">&quot;atari/xegs128.ngp&quot;</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#modules">modules</a></span> <span class="t-punctuation">{</span> <span class="t-string">&quot;print.asm&quot;</span> <span class="t-string">&quot;shared.asm&quot;</span> <span class="t-string">&quot;intro.asm&quot;</span> <span class="t-string">&quot;level.asm&quot;</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#panes">panes</a></span> <span class="t-keyword">in</span> <span class="t-name">switched</span> <span class="t-punctuation">{</span> <span class="t-name">level</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#resident">resident</a></span> <span class="t-punctuation">{</span> <span class="t-name">print</span><span class="t-punctuation">,</span> <span class="t-name">shared</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#phase">phase</a></span> <span class="t-name">intro</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">intro</span>  <span class="t-keyword">then</span> <span class="t-name">level</span>  <span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">introStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#phase">phase</a></span> <span class="t-name">level</span> <span class="t-punctuation">{</span> <span class="t-keyword">needs</span> <span class="t-name">level</span>             <span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">levelStart</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#entry">entry</a></span> <span class="t-name">intro</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#container">container</a></span> <span class="t-name">car</span> <span class="t-string">&quot;xegs128&quot;</span>
+</code></pre><p class="from"><a href="../cartridges/cartridge/">the whole of cartridge</a></p>
+<p><code><a class="ref" href="../project-file/#include">include</a></code> names a machine holding a 128 KB cartridge; the Pane's Window is
+called <code>switched</code> on this board rather than <code>ext</code>; and the Container is a
+<code>.car</code>, which <strong>names the board it is an image of</strong>:</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#container">container</a></span> <span class="t-name">car</span> <span class="t-string">&quot;xegs128&quot;</span>
+</code></pre>
+<p>The board is quoted for the reason a processor is — <code>8k</code> begins with a digit,
+and no identifier of this language may — and it is not decoration. A board
+decides how large the image is, where in it each bank stands, and what number a
+reader has to find in the header to know which of the hundred-odd cartridge
+mappers this one is. Eight boards are written: <code>&quot;8k&quot;</code> and <code>&quot;16k&quot;</code>, which have no
+banks at all, and the six of the XEGS family from <code>&quot;xegs32&quot;</code> to <code>&quot;xegs1024&quot;</code>.</p>
+<h2 id="the-machine">The machine</h2>
+<pre><code class="language-ngp"><span class="t-comment">; An Atari 800XL holding a 128 KB XEGS cartridge: sixteen banks of eight</span>
+<span class="t-comment">; kilobytes, of which the last is the fixed part the CPU always sees at</span>
+<span class="t-comment">; $A000-$BFFF and the other fifteen are storage, brought into $8000-$9FFF one at</span>
+<span class="t-comment">; a time by the byte written to $D5FF. A cartridge is ROM the CPU reads where it</span>
+<span class="t-comment">; lies, so nothing is loaded and there is no DOS: the machine&#x27;s whole RAM below</span>
+<span class="t-comment">; the cartridge is the program&#x27;s, $0700 included.</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#cpu">cpu</a></span> <span class="t-string">&quot;6502&quot;</span>
+
+  <span class="t-comment">; The one Container a machine holding a cartridge takes. A `.xex` needs a DOS</span>
+  <span class="t-comment">; to load it, and this machine has none.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#containers">containers</a></span> <span class="t-name">car</span>
+
+  <span class="t-comment">; Fifteen and not sixteen: the sixteenth bank is the fixed part under another</span>
+  <span class="t-comment">; name, and one set of bytes with two names is one too many.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#units">units</a></span>  <span class="t-name">banks</span> <span class="t-number">15</span>
+  <span class="t-name"><a class="ref" href="../project-file/#window">window</a></span> <span class="t-name">switched</span> <span class="t-number">$8000</span> <span class="t-punctuation">..</span> <span class="t-number">$9FFF</span>  <span class="t-keyword">views</span> <span class="t-name">banks</span>
+<span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#storage">storage</a></span> <span class="t-punctuation">{</span> <span class="t-keyword"><a class="ref" href="../project-file/#units">units</a></span> <span class="t-name">banks</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">ram</span>    <span class="t-number">$0000</span> <span class="t-punctuation">..</span> <span class="t-number">$7FFF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">stack</span>  <span class="t-number">$0100</span> <span class="t-punctuation">..</span> <span class="t-number">$01FF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">io</span>     <span class="t-number">$D000</span> <span class="t-punctuation">..</span> <span class="t-number">$D7FF</span>  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span>
+
+  <span class="t-comment">; The part of the cartridge no switch takes away, which is where the solver</span>
+  <span class="t-comment">; puts everything nothing writes. $8000-$9FFF is in no Region at all: it is</span>
+  <span class="t-comment">; the window, it shows one Bank at a time, and only a Pane or storage stands</span>
+  <span class="t-comment">; there — as the boot record&#x27;s page is in no Region of the diskette&#x27;s variant.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">cart</span>   <span class="t-number">$A000</span> <span class="t-punctuation">..</span> <span class="t-number">$BFFF</span>  <span class="t-name">rom</span>
+
+  <span class="t-comment">; What the driver writes. Any address of $D500-$D5FF is the same register.</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span> <span class="t-name">CARTSEL</span> <span class="t-number">$D5FF</span>
+<span class="t-punctuation">}</span>
+
+<span class="t-comment">; The OS, the driver for this storage and the decoders the tool ships. Every</span>
+<span class="t-comment">; Transition calls the driver and the decoders, so they are resident; a decoder</span>
+<span class="t-comment">; nothing uses is dropped.</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#modules">modules</a></span> <span class="t-punctuation">{</span> <span class="t-string">&quot;atari/os.asm&quot;</span>  <span class="t-string">&quot;atari/charsets.asm&quot;</span>  <span class="t-string">&quot;atari/cart.asm&quot;</span>  <span class="t-string">&quot;stream/zx0.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword"><a class="ref" href="../project-file/#resident">resident</a></span> <span class="t-punctuation">{</span> <span class="t-name">os</span><span class="t-punctuation">,</span> <span class="t-name">charsets</span><span class="t-punctuation">,</span> <span class="t-name">cart</span><span class="t-punctuation">,</span> <span class="t-name">zx0</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>Three things in it are worth stopping on.</p>
+<p><strong>The fixed part is a <code>rom</code> Region.</strong> That is a fourth thing a Region can be,
+beside <code>ram</code>, <code>reserved</code> and <code><a class="ref" href="../project-file/#register">register</a></code>: memory the solver places in and no code
+writes. Everything the program never writes goes there — every Proc, every table
+of constants — and the solver puts it there without being told, because it can
+see which Sections nothing writes. Where it cannot see, the source says
+<code>readonly</code>; that is the whole of chapter thirteen's problem seen from the other
+side, and the next section shows it.</p>
+<p><strong><code>$8000-$9FFF</code> is in no Region at all.</strong> It is the window, it shows one bank at
+a time, and the only things that stand there are a Pane's Sections and storage.
+A range in no Region is in no pool, so the solver never allocates there — the
+same trick a diskette's variant uses to keep the boot record's page to itself.</p>
+<p><strong>The window has no <code>base</code>.</strong> On a 130XE the Window has one: base RAM is under
+it, and it is memory the program uses, so a <code><a class="ref" href="../assembler/#with">.with</a></code> shows a Bank and puts the
+RAM back afterwards. Under a cartridge's window there is no memory, only the
+next bank. So nothing is put back:</p>
+<blockquote>
+<p>A <code><a class="ref" href="../assembler/#with">.with</a></code> on a Window with no base switches the bank and <strong>leaves it
+switched</strong>. What the window shows outside a <code><a class="ref" href="../assembler/#with">.with</a></code> is undefined, and the tool
+refuses every way of reading it.</p>
+</blockquote>
+<p>Which is how one thinks about banks anyway: not <em>what is in the window by
+default</em> but <em>the thing I want is in bank n</em>. It costs half of what a <code><a class="ref" href="../assembler/#with">.with</a></code>
+costs on the 130XE — two instructions and no exit — and it is what makes a Pane
+on a cartridge reachable at all.</p>
+<h2 id="what-it-costs-and-what-it-gives-back">What it costs, and what it gives back</h2>
+<p>The map, in one Phase:</p>
+<pre><code>phase level (1)
+  zero page: 153 of 256 bytes
+  memory:    16051 of 32256 bytes
+  ...
+  $0088-$0089  level.drawMap.at             temporary          level  shares with ngaPtr
+  ...
+  $008A-$008A  level.drawMap.left           temporary          level
+  ...
+  $8000-$8171  level.levelMap               section            level  in pane level (state 14)
+  ...
+  $A0B3-$A0CB  print.printLine              proc               intro..level
+  $A0DE-$A102  level.drawMap                proc               level
+  $A103-$A10D  level.levelStart             proc               level
+  ...
+</code></pre><p class="from"><a href="../cartridges/cartridge/">the whole of cartridge</a></p>
+<p><strong><code>$8000-$BFFF</code> is gone for good.</strong> A plain XEGS cartridge cannot be switched
+off, so 16 KB of the address space is the board's for the whole run — of which
+8 KB is the window and 8 KB the fixed part. That is the rent.</p>
+<p><strong>The RAM a DOS would have held is the program's.</strong> There is no DOS: the machine
+boots the cartridge, so <code>$0700</code> upwards is free, and the variant's <code>region ram</code>
+runs from zero. Chapter four's program had to leave <code>$0700-$1FFF</code> to a DOS of
+the 2.x family.</p>
+<p><strong>The ROM is as large as the board.</strong> 128 KB of it here: eight for the fixed
+part and fifteen banks of eight for storage and for Panes. A <code>.xex</code> this program
+would fit in twice over.</p>
+<h2 id="the-cold-start">The cold start</h2>
+<p>One thing a cartridge cannot do is put a byte in RAM. <code>intro.asm</code> holds a
+string, <code>introText</code>, that the program prints — and a string is bytes the program
+was given, standing at an address in RAM. On a <code>.xex</code> the DOS puts it there. Here
+nobody does.</p>
+<p>So the tool does it the way it does everything else about a Phase's memory: the
+<strong>cold start</strong> is an edge into the entry Phase from nowhere. The string waits in
+a bank as any Payload does, the run vector points at a stub, and the stub hands
+the Frame of that edge to the Transition routine, which copies the blocks,
+writes the Cell, and jumps to the entry Label — exactly what it does when a
+<code><a class="ref" href="../assembler/#transition">.transition</a></code> is taken. Storage says so:</p>
+<pre><code>storage
+  bank 0: 30 of 8192 bytes
+    $0000-$000F  frame into intro              live intro..level
+    $0010-$0013  frame intro -&gt; level          live intro
+    $0014-$001A  intro.introText              copy (7 bytes)  live intro
+    $001B-$001D  nga.cell.ngaCurrentPhase     copy (3 bytes)  live intro
+  bank 1: 0 of 8192 bytes
+  bank 2: 0 of 8192 bytes
+  bank 3: 0 of 8192 bytes
+  bank 4: 0 of 8192 bytes
+  bank 5: 0 of 8192 bytes
+  bank 6: 0 of 8192 bytes
+  bank 7: 0 of 8192 bytes
+  bank 8: 0 of 8192 bytes
+  bank 9: 0 of 8192 bytes
+  bank 10: 0 of 8192 bytes
+  bank 11: 0 of 8192 bytes
+  bank 12: 0 of 8192 bytes
+  bank 13: 0 of 8192 bytes
+  bank 14: 0 of 8192 bytes
+</code></pre><p class="from"><a href="../cartridges/cartridge/">the whole of cartridge</a></p>
+<p><code>frame into intro</code> is the cold start's; <code>frame intro -&gt; level</code> is the edge the
+program takes itself. Both are read by the same routine, and the second Phase's
+map is not there at all — a Pane's Sections are written into their Bank by the
+Container and no edge copies them, which is chapter six's rule and does not
+change here.</p>
+<p>The price is the routine: some four hundred bytes of the fixed part, in every
+program on a banked board, whether or not it takes a <code><a class="ref" href="../assembler/#transition">.transition</a></code> of its own.
+The alternative was a copier of its own for the cold start, and it was refused
+because a Payload belongs to a Section and a Frame to an edge: a program with an
+edge back into its entry Phase would have carried the same bytes twice, and
+nothing would have related the two.</p>
+<h2 id="how-it-starts">How it starts</h2>
+<p>Six bytes at the top of the image are the tool's, and they are what the OS reads
+before it runs anything of a cartridge:</p>
+<table>
+<thead>
+<tr>
+<th>Address</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$BFFA</code></td>
+<td>the program's start — the cold start's stub, or the entry Label where there is none</td>
+</tr>
+<tr>
+<td><code>$BFFC</code></td>
+<td>zero, which is what says a cartridge is there</td>
+</tr>
+<tr>
+<td><code>$BFFD</code></td>
+<td><code>$04</code>: started through <code>$BFFA</code>, no disk boot, not the diagnostic cartridge</td>
+</tr>
+<tr>
+<td><code>$BFFE</code></td>
+<td>the init vector, pointing at an <code>rts</code></td>
+</tr>
+</tbody>
+</table>
+<p>The init vector does nothing on purpose. The OS calls it in the middle of its
+own cold start, before <code>E:</code> exists, so anything run there would run in a machine
+half set up. The jump through <code>$BFFA</code> comes at the very end, <strong>after <code>E:</code> is
+open on channel 0</strong> — which is why <code>print.asm</code> works on a cartridge exactly as
+it works on a diskette.</p>
+<p>All of it runs again on <code>RESET</code>, so a cartridge program restarts rather than
+resuming.</p>
+<h2 id="running-it">Running it</h2>
+<p>A cartridge is the one Container besides the <code>.xex</code> that the suite can put in a
+machine and run: an image is memory, and the register that switches its banks is
+one store. But the boot protocol above is the OS's, not the suite's, so this
+chapter's program was booted on an emulated Atari with the machine's own ROM,
+the way the tutorial's programs are:</p>
+<pre><code>$ scripts/run-on-atari.py tut.car --frames 200
+tut.car on 130XE, Atari XL/XE OS ver.2, 200 frames after boot
+screen memory at $7C40
+  |   INTRO
+  |   #####################################
+  |   #...................................#
+  |   #...................................#
+  |   #......########.....................#
+  |   #......#......#.....................#
+  |   #......#......#.....................#
+  |   #......########.....................#
+  |   #...................................#
+  |   #...................................#
+  |   #####################################
+</code></pre>
+<p><code>INTRO</code> came out of a string the cold start copied from bank 0; the map was
+drawn out of bank 14 without being copied anywhere at all.</p>
+<h2 id="what-is-not-written">What is not written</h2>
+<p>Of the cartridge mappers that exist, this tool writes eight. The reason is one
+line of hardware: a program of this tool has code that must be reachable <em>while</em>
+a bank is switched — the Transition routine, the driver, the decoders — so it
+needs a part of the ROM that no switch takes away. MegaCart, AtariMax, Williams
+and SIC! switch the whole of the cartridge's address space, so on those the
+resident code would have to be replicated in every bank or copied into RAM
+before any switch happened. Switchable XEGS, whose bit 7 reveals the RAM beneath
+the whole cartridge, is the one that would come first: it has a state to name,
+so its window would have a base, and everything in this chapter about leaving a
+bank switched would have to be read again.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

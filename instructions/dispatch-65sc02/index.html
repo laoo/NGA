@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dispatch-65sc02 — Instructions</title>
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../../assembler/#charset"},{"n":".declare","u":"../../assembler/#declare"},{"n":".dispatch","u":"../../assembler/#dispatch"},{"n":".endp then NAME","u":"../../assembler/#endp-then-name"},{"n":".export","u":"../../assembler/#export"},{"n":".macro","u":"../../assembler/#macro"},{"n":".off","u":"../../assembler/#off"},{"n":".proc","u":"../../assembler/#proc"},{"n":".section","u":"../../assembler/#section"},{"n":".source","u":"../../assembler/#source"},{"n":".transition","u":"../../assembler/#transition"},{"n":".with","u":"../../assembler/#with"},{"n":"WINDOW = STATE","u":"../../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../../c-dialect/#placement"},{"n":"[[striped]]","u":"../../c-dialect/#striped"},{"n":"auto","u":"../../c-dialect/#auto"},{"n":"constants","u":"../../project-file/#constants"},{"n":"container","u":"../../project-file/#container"},{"n":"containers","u":"../../project-file/#containers"},{"n":"cpu","u":"../../project-file/#cpu"},{"n":"diagnostics","u":"../../project-file/#diagnostics"},{"n":"entry","u":"../../project-file/#entry"},{"n":"group","u":"../../project-file/#group"},{"n":"in NAME","u":"../../assembler/#in-name"},{"n":"include","u":"../../project-file/#include"},{"n":"modules","u":"../../project-file/#modules"},{"n":"movable","u":"../../assembler/#movable"},{"n":"optimize","u":"../../project-file/#optimize"},{"n":"panes","u":"../../project-file/#panes"},{"n":"phase","u":"../../project-file/#phase"},{"n":"region","u":"../../project-file/#region"},{"n":"register","u":"../../project-file/#register"},{"n":"resident","u":"../../project-file/#resident"},{"n":"root","u":"../../assembler/#root"},{"n":"storage","u":"../../project-file/#storage"},{"n":"target","u":"../../project-file/#target"},{"n":"temporary","u":"../../assembler/#temporary"},{"n":"transform","u":"../../project-file/#transform"},{"n":"units","u":"../../project-file/#units"},{"n":"window","u":"../../project-file/#window"},{"n":"The Project and Modules","u":"../../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../../temporaries-and-liveness/"},{"n":"Targets","u":"../../targets/"},{"n":"Phases","u":"../../phases/"},{"n":"Banks and Windows","u":"../../banks-and-windows/"},{"n":"Panes","u":"../../panes/"},{"n":"Slots","u":"../../slots/"},{"n":"Generators","u":"../../generators/"},{"n":"Macros","u":"../../macros/"},{"n":"Conditionals and packs","u":"../../conditionals/"},{"n":"Character sets","u":"../../character-sets/"},{"n":"Instructions","u":"../../instructions/"},{"n":"Roots","u":"../../roots/"},{"n":"Cartridges","u":"../../cartridges/"},{"n":"The Project file","u":"../../project-file/"},{"n":"The assembler","u":"../../assembler/"},{"n":"The C dialect","u":"../../c-dialect/"},{"n":"Diagnostics","u":"../../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../../targets/">Targets</a>
+</li>
+<li><a href="../../phases/">Phases</a>
+</li>
+<li><a href="../../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../../panes/">Panes</a>
+</li>
+<li><a href="../../slots/">Slots</a>
+</li>
+<li><a href="../../generators/">Generators</a>
+</li>
+<li><a href="../../macros/">Macros</a>
+</li>
+<li><a href="../../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../../character-sets/">Character sets</a>
+</li>
+<li class="here"><a href="../../instructions/">Instructions</a>
+<ul class="programs"><li><a href="../../instructions/certain/">certain</a></li><li><a href="../../instructions/certain-6502/">certain-6502</a></li><li><a href="../../instructions/dispatch/">dispatch</a></li><li><a href="../../instructions/dispatch-65sc02/">dispatch-65sc02</a></li><li><a href="../../instructions/does-not-reach/">does-not-reach</a></li><li><a href="../../instructions/parentheses/">parentheses</a></li><li><a href="../../instructions/processor/">processor</a></li><li><a href="../../instructions/two-or-five/">two-or-five</a></li></ul>
+</li>
+<li><a href="../../roots/">Roots</a>
+</li>
+<li><a href="../../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../../project-file/">The Project file</a>
+</li>
+<li><a href="../../assembler/">The assembler</a>
+</li>
+<li><a href="../../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1>dispatch-65sc02</h1>
+<p class="aside">A program of <a href="../../instructions/">Instructions</a>.</p>
+<h2 class="file">main.ngp</h2>
+<pre><code class="language-project"><span class="t-comment">; tag cpu</span>
+<span class="t-keyword">target</span> <span class="t-punctuation">{</span>
+  <span class="t-keyword">cpu</span> <span class="t-string">&quot;65sc02&quot;</span>
+  <span class="t-keyword">region</span> <span class="t-number">$0080</span> <span class="t-punctuation">..</span> <span class="t-number">$00FF</span> <span class="t-name">ram</span>
+  <span class="t-keyword">region</span> <span class="t-number">$2000</span> <span class="t-punctuation">..</span> <span class="t-number">$BFFF</span> <span class="t-name">ram</span>
+<span class="t-punctuation">}</span>
+<span class="t-comment">; end cpu</span>
+<span class="t-keyword">modules</span> <span class="t-punctuation">{</span> <span class="t-string">&quot;../dispatch/state.asm&quot;</span> <span class="t-punctuation">}</span>
+<span class="t-keyword">container</span> <span class="t-name">raw</span>
+</code></pre>
+<details class="aside-file"><summary>state.asm<span> state</span></summary><pre><code class="language-assembler"><span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label def" id="sym-state-state">state</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-directive">.</span><span class="t-directive">section</span>
+<span class="t-label def" id="sym-state-speed">speed</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+
+<span class="t-comment">; tag step</span>
+<span class="t-comment">; Four positions of this Proc, chosen by what is in `A`. The clamp is the</span>
+<span class="t-comment">; writer&#x27;s: the statement indexes a table and does not check, exactly as any</span>
+<span class="t-comment">; other index does not.</span>
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name def" id="sym-state-step">step</span>
+        <span class="t-mnemonic">lda</span> <a class="use" href="#sym-state-state"><span class="t-name">state</span></a>
+        <span class="t-mnemonic">cmp</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@ok</span>
+        <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">3</span>
+<span class="t-label">@ok</span>     <span class="t-directive">.</span><span class="t-directive">dispatch</span> <span class="t-name">@idle</span><span class="t-punctuation">,</span> <span class="t-name">@walk</span><span class="t-punctuation">,</span> <span class="t-name">@run</span><span class="t-punctuation">,</span> <span class="t-name">@stop</span>
+<span class="t-label">@idle</span>   <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@set</span>
+<span class="t-label">@walk</span>   <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">1</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@set</span>
+<span class="t-label">@run</span>    <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">4</span>
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@set</span>
+<span class="t-label">@stop</span>   <span class="t-mnemonic">lda</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@set</span>    <span class="t-mnemonic">sta</span> <a class="use" href="#sym-state-speed"><span class="t-name">speed</span></a>
+        <span class="t-mnemonic">rts</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+<span class="t-comment">; end step</span>
+</code></pre></details>
+<h2>Memory map</h2>
+<ol class="pools"><li>phase0<span>0 zero page, 45 bytes</span></li></ol>
+<div class="wide"><table class="map">
+<tr><th>Address</th><th>Bytes</th><th>Section</th><th>Module</th><th>Kind</th><th>Phases</th><th>Waits</th></tr>
+<tr><td>$2000–$2000</td><td>1</td><td>state</td><td>state</td><td>section</td><td>0</td><td></td></tr>
+<tr><td>$2001–$2001</td><td>1</td><td>speed</td><td>state</td><td>section</td><td>0</td><td></td></tr>
+<tr><td>$2002–$202C</td><td>43</td><td>step</td><td>state</td><td>proc</td><td>0</td><td></td></tr>
+</table></div>
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

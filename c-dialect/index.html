@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The C dialect — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="../targets/">Targets</a>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li class="here"><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="reference-the-c-dialect">Reference: the C dialect</h1>
+<p>A <code>.ngc</code> Module is C. This chapter lists where it differs from C. It assumes you
+know the language and does not repeat what is unchanged.</p>
+<p>Name a <code>.ngc</code> file in the Project's <code><a class="ref" href="../project-file/#modules">modules</a></code> block and the tool compiles it
+before it assembles it. The text it produces is an ordinary <code>.asm</code> Module.</p>
+<h2 id="what-is-not-there">What is not there</h2>
+<p><strong>No preprocessor.</strong> There is no <code>#include</code>, no <code>#define</code> and no conditional
+compilation. <code>#</code> and <code>##</code> are tokens that no grammar accepts. A Project constant
+reaches C through <code>extern const</code>, and a program built two ways is two Project
+files over a common one.</p>
+<p><strong>No declarations before use.</strong> Every name is visible to the whole program. The
+compiler reads what every <code>.ngc</code> defines and what every other Module exports
+before it checks any body. A prototype is therefore a parse error: write <code>void f(void) { ... }</code> and call <code>f</code> from any file.</p>
+<p><strong>No <code>int</code>, <code>char</code>, <code>long</code>, <code>short</code>, <code>signed</code>, <code>unsigned</code>.</strong> The integer types
+are <code>u8</code>, <code>i8</code>, <code>u16</code> and <code>i16</code>. Writing <code>int</code> or <code>char</code> is an error that names
+the spelling to use instead.</p>
+<p><strong>No floating point.</strong> There are no <code>float</code> and <code>double</code> types and no floating
+constants.</p>
+<p><strong>No <code>goto</code> and no labels.</strong> <code>break</code>, <code>continue</code> and <code>return</code> are the only
+jumps.</p>
+<p><strong>No <code>typedef</code></strong> except the one form that names a function type. See <a href="#function-types">Function
+types</a>.</p>
+<p>Also gone: variadic functions, an array of pointers, a pointer to a pointer, <code>&amp;</code>
+of a whole array, and the comma operator.</p>
+<p>Plain assignment is a statement and not a value, so <code>a = b = 0</code> is an error. A
+compound assignment is a value.</p>
+<p>C reserves every keyword of C23 whether or not the subset has the construct, so
+a later construct takes no name from your program. A name C reserves for the
+implementation, with a leading <code>__</code>, or a leading <code>_</code> and a capital, is an
+error.</p>
+<h2 id="lexical-differences">Lexical differences</h2>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>42</code></td>
+<td>decimal</td>
+</tr>
+<tr>
+<td><code>0x2A</code></td>
+<td>hexadecimal</td>
+</tr>
+<tr>
+<td><code>0b101010</code></td>
+<td>binary</td>
+</tr>
+<tr>
+<td><code>010</code></td>
+<td>error. C reads a leading zero as octal.</td>
+</tr>
+<tr>
+<td><code>10u</code>, <code>1ull</code></td>
+<td>error. There are no suffixes.</td>
+</tr>
+<tr>
+<td><code>1.5</code>, <code>1e5</code></td>
+<td>error. There is no floating point.</td>
+</tr>
+</tbody>
+</table>
+<p><code>'</code> separates digits and must stand between two of them: <code>0xFF'FF</code> and <code>1'000</code>.</p>
+<p>A string literal or a character constant may carry a character set name glued to
+the opening quote: <code>screen&quot;HELLO&quot;</code>, <code>screen'a'</code>. See
+<a href="../character-sets/">Character sets</a>. A literal with no prefix must be ASCII.</p>
+<p>An array given a string literal is given its characters <strong>and its terminating
+<code>\0</code></strong>. So the Charset must map <code>\0</code> as well, or the tool reports that it does
+not map a character of the literal.</p>
+<p>The escapes are the assembler's six: <code>\\</code>, <code>\&quot;</code>, <code>\'</code>, <code>\n</code>, <code>\t</code> and <code>\0</code>.
+There is no <code>\xNN</code>.</p>
+<p>Adjacent string literals join only where they carry one prefix, and no prefix
+counts as one.</p>
+<p>Comments are C's. <code>/*</code> does not nest. A <code>//</code> comment ending in a backslash is an
+error, because C would carry it onto the next line.</p>
+<p>Source is UTF-8. A comment may hold any character, and invalid UTF-8 there is an
+error. Outside a comment, a character beyond ASCII stands only in a literal that
+names a Charset.</p>
+<h2 id="types">Types</h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Bytes</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>u8</code></td>
+<td>1</td>
+<td>0 to 255</td>
+</tr>
+<tr>
+<td><code>i8</code></td>
+<td>1</td>
+<td>-128 to 127</td>
+</tr>
+<tr>
+<td><code>u16</code></td>
+<td>2, low first</td>
+<td>0 to 65535</td>
+</tr>
+<tr>
+<td><code>i16</code></td>
+<td>2, low first</td>
+<td>-32768 to 32767</td>
+</tr>
+<tr>
+<td><code>bool</code></td>
+<td>1</td>
+<td>0 or 1</td>
+</tr>
+<tr>
+<td>an <code>enum</code> or an <code>enum struct</code></td>
+<td>1</td>
+<td>its enumerators, numbered from 0</td>
+</tr>
+</tbody>
+</table>
+<p>An enumeration is written <code>enum struct NAME { A, B, C };</code> or
+<code>enum NAME { A, B, C };</code>. The two types behave alike in every way but the
+spelling of their enumerators.</p>
+<table>
+<thead>
+<tr>
+<th>Written</th>
+<th>Enumerator reached as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enum struct NAME { A };</code></td>
+<td><code>NAME::A</code> only</td>
+</tr>
+<tr>
+<td><code>enum NAME { A };</code></td>
+<td><code>A</code> or <code>NAME::A</code></td>
+</tr>
+</tbody>
+</table>
+<p>An enumerator of a plain <code>enum</code> is a name of the file, so one that meets a
+global, a function, a type or an enumerator of another <code>enum</code> is an error. An
+<code>.asm</code> Module reads such an enumerator as a Constant of the Module. An
+enumerator of an <code>enum struct</code> stands in a Namespace of the type's name.</p>
+<p>A value of either type is assigned and compared only with a value of the same
+type, by its enumerator's order, and is never computed. A pointer may point at
+one, and a <code>switch</code> may test one. A <code>switch</code> over a plain <code>enum</code> takes its
+labels either way.</p>
+<p>A value on an enumerator is a parse error, and so is a type written after the
+name.</p>
+<p>Nothing but a <code>bool</code> casts to a <code>bool</code>, and nothing casts to an <code>enum struct</code>.</p>
+<p>A <code>struct</code> or a <code>union</code> at file scope is a type of its own. Members lie one
+after another with no padding, and a union's all start at offset zero.</p>
+<p><code>sizeof</code> takes a type, an object, an element, or what a pointer points at.</p>
+<h3 id="auto"><code>auto</code></h3>
+<p>A local written <code>auto</code> takes the type of the value it is given. The value must
+carry its own type. <code>auto a = 5;</code> is an error, and <code>auto a = (u8)5;</code> says it.
+<code>auto</code> declares one name with one value, and is no pointer and no array.</p>
+<h2 id="what-static-inline-and-volatile-mean-here">What <code>static</code>, <code>inline</code> and <code>volatile</code> mean here</h2>
+<p><strong><code>static</code> at file scope is Module privacy.</strong> A name that is not <code>static</code> is
+exported and every file sees it. A <code>static</code> name is visible in its own file and
+nowhere else.</p>
+<p><strong><code>static</code> storage is not zeroed.</strong> <code>u8 x;</code> at file scope and a <code>static</code> local
+are a reservation, and nothing writes it. Such an object holds whatever was in
+that byte. After a Transition that is what the Section that lived there left.
+Write <code>u8 x = 0;</code> for a zero.</p>
+<p>C zeroes static storage. This dialect does not, because on this machine the
+zeros cost either bytes or time. Zeros in the image cost one byte of file per
+byte of object, so a 4 KB buffer costs 4 KB.</p>
+<p>Zeros from a loop before <code><a class="ref" href="../project-file/#entry">entry</a></code> cost more than the loop. The solver places each
+Section on its own, so the objects are not one range. A loop therefore needs a
+table of their extents. That table travels in the image, and the loop runs again
+after every Transition that loads a Section over another Phase's bytes.</p>
+<p><strong>The tool checks a <code>static</code> local.</strong> It reports a read that some path from the
+function's entry reaches without writing it first:</p>
+<pre><code class="language-c"><span class="t-keyword">static</span> <span class="t-keyword">u8</span> <span class="t-name">count</span><span class="t-punctuation">;</span>
+<span class="t-name">count</span> <span class="t-punctuation">=</span> <span class="t-name">count</span> <span class="t-punctuation">+</span> <span class="t-number">1</span><span class="t-punctuation">;</span>      <span class="t-comment">// error: read before anything writes it</span>
+</code></pre>
+<p>The first call reads a byte nobody wrote. Nothing outside the function writes
+that byte, so one function's control flow answers the question. Write
+<code>static u8 count = 0;</code>.</p>
+<p>Three cases go unchecked, because the tool cannot see the write: an array, an
+object whose address you take, and an object you gave a value.</p>
+<p><strong><code>volatile</code> is exact.</strong> Every read in the source is one read in the output and
+every store one store, in order. None is held in a register, none leaves its
+loop, a store is not forwarded to a later read, and no byte is changed in place
+with <code>inc</code> or <code>asl</code>.</p>
+<p>A byte is <code>volatile</code> where you wrote it so, where you reach it through a pointer
+to <code>volatile</code>, or where it is one of the Target's registers, whatever C
+declared.</p>
+<p>A parameter is never <code>volatile</code>, because only its Proc reaches its byte. A
+member is not, because the subset keeps <code>volatile</code> to whole objects and to
+pointees.</p>
+<h2 id="reading-the-assembler">Reading the assembler</h2>
+<p><code>extern</code> does not declare a name for the linker. It says <strong>how C reads a name
+the assembler exports</strong>. Write it once in the program and every file sees it.</p>
+<pre><code class="language-c"><span class="t-keyword">extern</span> <span class="t-keyword">const</span> <span class="t-name">Sprite</span> <span class="t-name">sprites</span><span class="t-punctuation">[</span><span class="t-punctuation">]</span><span class="t-punctuation">;</span>
+<span class="t-keyword">extern</span> <span class="t-name">State</span> <span class="t-name">state</span><span class="t-punctuation">;</span>
+<span class="t-keyword">extern</span> <span class="t-keyword">const</span> <span class="t-keyword">i8</span> <span class="t-name">OFFSET</span><span class="t-punctuation">;</span>
+<span class="t-keyword">extern</span> <span class="t-keyword">void</span> <span class="t-name">drawSprite</span><span class="t-punctuation">(</span><span class="t-name">Sprite</span> <span class="t-name">sprite</span><span class="t-punctuation">,</span> <span class="t-keyword">u8</span> <span class="t-name">frame</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+</code></pre>
+<p>Without an <code>extern</code>, what an assembler Module exports is read by its shape:</p>
+<table>
+<thead>
+<tr>
+<th>The assembler's</th>
+<th>In C</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the entry of a <code><a class="ref" href="../assembler/#proc">.proc</a></code></td>
+<td>a function taking what its <code>.declare arg</code>s name and returning what its <code>.declare ret</code> names</td>
+</tr>
+<tr>
+<td>a Label over <code>.res</code> or <code>.ztemp</code>, of 1 byte, of 2, of 3 or more</td>
+<td><code>u8</code>, <code>u16</code>, <code>u8[N]</code></td>
+</tr>
+<tr>
+<td>a Label over <code>.byte</code> lines, or <code>.word</code> lines</td>
+<td><code>u8[]</code>, <code>u16[]</code></td>
+</tr>
+<tr>
+<td>a Constant of literals</td>
+<td>a constant, folded</td>
+</tr>
+<tr>
+<td>any other Constant, such as <code>label + 2</code></td>
+<td>a <code>u16</code> with a value, no size and no address</td>
+</tr>
+<tr>
+<td>a <code><a class="ref" href="../project-file/#register">register</a></code> or a <code><a class="ref" href="../project-file/#region">region</a></code>, of 1 byte, of 2, of more</td>
+<td><code>u8</code>, <code>u16</code>, <code>u8[N]</code> at its address</td>
+</tr>
+</tbody>
+</table>
+<p>A Label with no clear shape is refused: code, <code>.byte</code> and <code>.word</code> under one
+Label, or data and a reservation together. So is a character set, a Window, a
+Pane, a macro or a Slot the assembler declared.</p>
+<p><code>extern RESULT NAME(PARAMETERS);</code> says how C calls a <code><a class="ref" href="../assembler/#proc">.proc</a></code>. It must have as
+many parameters as the Proc has <code>.declare arg</code> lines, and a result exactly where
+the Proc has a <code>.declare ret</code>. A parameter's name, where you write one, is the
+name of the byte its <code><a class="ref" href="../assembler/#declare">.declare</a></code> names.</p>
+<p><code>const</code> on an <code>extern</code> keeps C from writing the name.</p>
+<h2 id="attributes">Attributes</h2>
+<p>An attribute is written before a declaration, a function, a block or a <code>return</code>,
+with no prefix. The dialect has nine.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Stands on</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[[in(PANE)]]</code></td>
+<td>a function or a file-scope object</td>
+<td>the Proc or Section carries <code>in PANE</code></td>
+</tr>
+<tr>
+<td><code>[[under(PANE)]]</code></td>
+<td>a function</td>
+<td>the Proc is a Trampoline: <code>.proc NAME, under PANE</code></td>
+</tr>
+<tr>
+<td><code>[[with(...)]]</code></td>
+<td>a block</td>
+<td>the block is a macro used once under <code><a class="ref" href="../assembler/#with">.with</a></code></td>
+</tr>
+<tr>
+<td><code>trampoline</code></td>
+<td>beside <code>with</code></td>
+<td>the compiler emits a Trampoline Proc for the block</td>
+</tr>
+<tr>
+<td><code>[[transition(PHASE)]]</code></td>
+<td>a bare <code>return;</code></td>
+<td>writes <code>.transition PHASE</code> in place of the <code>rts</code></td>
+</tr>
+<tr>
+<td><code>[[slot]]</code></td>
+<td>an <code>extern</code></td>
+<td>declares a Slot, with the Binding its type gives</td>
+</tr>
+<tr>
+<td><code>[[implements(SLOT)]]</code></td>
+<td>a function or a file-scope object</td>
+<td>writes <code>.implements SLOT, NAME</code></td>
+</tr>
+<tr>
+<td><code>[[striped]]</code></td>
+<td>an array</td>
+<td>a Section per byte of an element</td>
+</tr>
+<tr>
+<td><code>[[placement(...)]]</code></td>
+<td>a declaration, a block or a function</td>
+<td><code>zeropage</code> or <code>absolute</code></td>
+</tr>
+</tbody>
+</table>
+<p>An attribute with a prefix, one given arguments where it takes none, and any of
+C23's own are none of the dialect's.</p>
+<h3 id="panes">Panes</h3>
+<p>See <a href="../panes/">Panes</a>.</p>
+<p><code>[[with(...)]]</code> has the four forms <code><a class="ref" href="../assembler/#with">.with</a></code> has: <code>with(PANE)</code>, <code>with(FAMILY, i)</code>,
+<code>with(WINDOW, i)</code> and <code>with(WINDOW = STATE)</code>. The index <code>i</code> is a <code>u8</code> computed
+before the block, or a constant, which for a family names the member.</p>
+<p>A <code>[[with]]</code> block is a macro, so <code>return</code>, and <code>break</code> or <code>continue</code> of a loop
+around it, are errors inside it. A loop inside it is its own. A <code>switch</code> inside
+it is the block's own code.</p>
+<p>The address of what the block shows may be kept in a local of the block or
+handed to a call in the block. Stored anywhere else it escapes the block, which
+is an error.</p>
+<p>Code in a Pane cannot switch its own Window. A direct call from a function
+<code>[[in(P)]]</code> into a function in another Pane of that Window is an error. Write it
+in a <code>[[with(Q), trampoline]]</code> block, or in an <code>[[under(P)]]</code> function.</p>
+<p><code>trampoline</code> where none is needed is an error, and so is <code>with</code> alone where one
+is needed. The form states the cost, so the tool holds it to the place.</p>
+<p>A call is wrapped in <code>.with PANE</code> where its callee is in a Pane the calling code
+is not in. You do not write that.</p>
+<h3 id="phases">Phases</h3>
+<p>See <a href="../phases/">Phases</a> and <a href="../slots/">Slots</a>.</p>
+<p><code>[[transition(PHASE)]]</code> stands on a bare <code>return;</code> in a <code>void</code> function. A
+transition never comes back, so a <code>return</code> with a value and a function with a
+result are errors. So is a transition in a <code>[[with]]</code> block, because the block
+is a macro.</p>
+<p>In a case of a <code>switch</code> a transition stands, and ends that case.</p>
+<p><code>[[slot]] extern</code> is the one <code>extern</code> that names nothing of the assembler's. The
+Binding comes from the type:</p>
+<pre><code class="language-c"><span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">slot</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">extern</span> <span class="t-keyword">void</span> <span class="t-name">update</span><span class="t-punctuation">(</span><span class="t-keyword">void</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>      <span class="t-comment">// .slot update, vector</span>
+<span class="t-punctuation">[</span><span class="t-punctuation">[</span><span class="t-name">slot</span><span class="t-punctuation">]</span><span class="t-punctuation">]</span> <span class="t-keyword">extern</span> <span class="t-keyword">u8</span><span class="t-punctuation">*</span> <span class="t-keyword">const</span> <span class="t-name">screen</span><span class="t-punctuation">;</span>       <span class="t-comment">// .slot screen, pointer, zeropage</span>
+</code></pre>
+<p>The pointer is written <code>const</code> because the Cell is the Transition routine's to
+write.</p>
+<p>A Slot to a function may take and return. Its Temporaries stand in a Namespace
+of its own name, every Implementation reads them, and an Implementation declares
+none of its own.</p>
+<p><code>[[implements(NAME)]]</code> stands on a function definition or a file-scope object,
+<code>static</code> included.</p>
+<h3 id="striped"><code>[[striped]]</code></h3>
+<p>An array of <code>u16</code>, <code>i16</code>, or a <code>struct</code> of members of one or two bytes,
+pointers, and <code>struct</code>s of such. At most 256 elements. Each byte of an element
+becomes a Section of its own.</p>
+<p>An element is indexed by a <code>u8</code> or by a constant inside the array. A byte of a
+stripe has an address. An element, a member of more than a byte, and the array
+itself have none.</p>
+<h3 id="placement"><code>[[placement(...)]]</code></h3>
+<p><code>zeropage</code> or <code>absolute</code>. Its argument is a word of the model rather than a name
+you declared.</p>
+<p>Every byte the program names takes the class of the innermost <code>[[placement]]</code>
+over its declaration. The compiler's own scratch follows the function. With
+nothing over it a byte is <code>zeropage</code> inside a function and <code>absolute</code> at file
+scope.</p>
+<p>A pointer lies in the zero page whatever you ask. A <code>struct</code> or a <code>union</code> of
+more than four bytes lies off it. A <code>[[striped]]</code> array settles its own place.
+Asking for the class already in force is a warning.</p>
+<h2 id="function-types">Function types</h2>
+<p>A pointer to a function is always a pointer to a named type, and the name comes
+from the one <code>typedef</code> the dialect has:</p>
+<pre><code class="language-c"><span class="t-keyword">typedef</span> <span class="t-keyword">u8</span> <span class="t-name">chooser</span><span class="t-punctuation">(</span><span class="t-keyword">u8</span> <span class="t-name">x</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span>
+</code></pre>
+<p>The name is a type as a pointer alone, <code>chooser* pick;</code>. A value of the type is
+an error, because a function type has no bytes. Every parameter carries a name,
+because those names are the Temporaries the type's members read.</p>
+<p>A function becomes a member of the type its address is taken as. A member reads
+its arguments from the type's Temporaries and declares none of its own, so a
+direct call writes the type's bytes as a call through a pointer does.</p>
+<p>A function's name alone is its address, so <code>pick = twice</code> and <code>pick = &amp;twice</code>
+are one thing.</p>
+<p>A function taken as two types is an error. So is an address whose signature is
+not the type's, at the line that takes it.</p>
+<p>A member may not call its own type, through a pointer of it or by naming another
+member. It would write the Temporaries it reads. A member that dispatches writes
+the second step through another type, or calls it by name.</p>
+<p>There is no array of pointers, so hold handlers in objects.</p>
+<p>A <code><a class="ref" href="../assembler/#proc">.proc</a></code> of the assembler joins a type by saying <code>.proc play, as chooser</code>. A
+Proc that says nothing is no member.</p>
+<h2 id="statements-and-expressions">Statements and expressions</h2>
+<p>The statements are C's, less <code>goto</code>. Two differences:</p>
+<p><code>if</code> and <code>switch</code> take an initialiser, as C++17 has it:</p>
+<pre><code class="language-c"><span class="t-keyword">if</span> <span class="t-punctuation">(</span><span class="t-keyword">u8</span> <span class="t-name">c</span> <span class="t-punctuation">=</span> <span class="t-name">next</span><span class="t-punctuation">(</span><span class="t-punctuation">)</span><span class="t-punctuation">;</span> <span class="t-name">c</span> <span class="t-punctuation">!=</span> <span class="t-number">0</span><span class="t-punctuation">)</span> <span class="t-punctuation">{</span> <span class="t-punctuation">...</span> <span class="t-punctuation">}</span>
+</code></pre>
+<p>A <code>switch</code>'s labels stand directly in its braces. A statement before the first
+label is a parse error.</p>
+<p>The binary operators bind as C's levels do. <code>=</code> binds loosest and to the right.</p>
+<p><code>(Light)x</code> is not a cast. A cast takes a keyword type, so a <code>(</code> followed by a
+type name and <code>)</code> is a cast, and any other <code>(</code> a parenthesised expression.</p>
+<p>A statement that opens with a name and then a name, <code>const</code>, or <code>*</code> and a name
+is a declaration. <code>Light *p;</code> declares, where <code>a * b;</code> would be an expression
+statement that neither assigns nor calls.</p>
+<p>The grammar reads these and the compiler does not compile them yet, so each is
+an error where it stands: a call of anything but a name, an assignment to
+anything but a name, an expression statement that neither assigns nor calls, a
+shift by a value that is not a <code>u8</code>, a comparison of two constants, and any
+operator of a pointer but <code>+</code>, <code>-</code>, <code>==</code> and <code>!=</code>.</p>
+<h2 id="what-a-program-may-not-count-on">What a program may not count on</h2>
+<p>The compiler is written as if no program did these. A program that does them is
+wrong, and what it gets is whatever the output does with it.</p>
+<p><strong>An element's index stays within its array.</strong> The compiler takes a store to an
+element of <code>t</code> to change <code>t</code> and nothing else. An index past the end reaches the
+next object without complaint.</p>
+<p><strong>A global nobody assigned holds what was there.</strong> See <code>static</code> storage above.
+The test machine hands out <code>$A5</code> rather than zero so that a program counting on
+a zero fails there.</p>
+<p><strong>The bytes of a function are its own.</strong> Its parameters, its result and its
+locals are Temporaries the compiler keeps where it chooses: in a register for
+the length of a call, in no byte at all where nothing reads them, or in a byte
+shared with another Temporary. What a caller writes before the <code>jsr</code> and reads
+after it is what the <code><a class="ref" href="../assembler/#declare">.declare</a></code> lines name, and that is all.</p>
+<p>An assembler Module that takes the address of any other of them, or reads or
+writes one otherwise, is outside what the tool promises. So is a pointer of C
+aimed at one by arithmetic from another object.</p>
+<h2 id="limits">Limits</h2>
+<p>Operators nest at most 64 deep in one expression, and parentheses at most 64
+deep. A call, a prefix operator and <code>=</code> each count as one level.</p>
+<p>Blocks and the statements <code>if</code>, <code>while</code>, <code>do</code> and <code>for</code> nest at most 127 deep
+together, which is C's own translation limit.</p>
+<p>Past any of the three the parser refuses before it descends, once, and skips
+what it refused.</p>
+<h2 id="errors">Errors</h2>
+<p>The lexer reports every error in the file and carries on. Lexical findings are
+<code>NGA70xx</code>.</p>
+<p>A parse error names what was expected and what was found. The parser then skips
+to the <code>;</code> that ends the statement, or past the <code>}</code> of a block, and carries on.</p>
+<p>A file that holds an error compiles to nothing and its Module holds no Sections.
+It still defines what it parsed, so no other file is told those names are
+undeclared.</p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

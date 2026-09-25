@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Targets — The NGA tutorial</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home" href="../">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"../assembler/#charset"},{"n":".declare","u":"../assembler/#declare"},{"n":".dispatch","u":"../assembler/#dispatch"},{"n":".endp then NAME","u":"../assembler/#endp-then-name"},{"n":".export","u":"../assembler/#export"},{"n":".macro","u":"../assembler/#macro"},{"n":".off","u":"../assembler/#off"},{"n":".proc","u":"../assembler/#proc"},{"n":".section","u":"../assembler/#section"},{"n":".source","u":"../assembler/#source"},{"n":".transition","u":"../assembler/#transition"},{"n":".with","u":"../assembler/#with"},{"n":"WINDOW = STATE","u":"../assembler/#window-state"},{"n":"[[placement(...)]]","u":"../c-dialect/#placement"},{"n":"[[striped]]","u":"../c-dialect/#striped"},{"n":"auto","u":"../c-dialect/#auto"},{"n":"constants","u":"../project-file/#constants"},{"n":"container","u":"../project-file/#container"},{"n":"containers","u":"../project-file/#containers"},{"n":"cpu","u":"../project-file/#cpu"},{"n":"diagnostics","u":"../project-file/#diagnostics"},{"n":"entry","u":"../project-file/#entry"},{"n":"group","u":"../project-file/#group"},{"n":"in NAME","u":"../assembler/#in-name"},{"n":"include","u":"../project-file/#include"},{"n":"modules","u":"../project-file/#modules"},{"n":"movable","u":"../assembler/#movable"},{"n":"optimize","u":"../project-file/#optimize"},{"n":"panes","u":"../project-file/#panes"},{"n":"phase","u":"../project-file/#phase"},{"n":"region","u":"../project-file/#region"},{"n":"register","u":"../project-file/#register"},{"n":"resident","u":"../project-file/#resident"},{"n":"root","u":"../assembler/#root"},{"n":"storage","u":"../project-file/#storage"},{"n":"target","u":"../project-file/#target"},{"n":"temporary","u":"../assembler/#temporary"},{"n":"transform","u":"../project-file/#transform"},{"n":"units","u":"../project-file/#units"},{"n":"window","u":"../project-file/#window"},{"n":"The Project and Modules","u":"../the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"../temporaries-and-liveness/"},{"n":"Targets","u":"../targets/"},{"n":"Phases","u":"../phases/"},{"n":"Banks and Windows","u":"../banks-and-windows/"},{"n":"Panes","u":"../panes/"},{"n":"Slots","u":"../slots/"},{"n":"Generators","u":"../generators/"},{"n":"Macros","u":"../macros/"},{"n":"Conditionals and packs","u":"../conditionals/"},{"n":"Character sets","u":"../character-sets/"},{"n":"Instructions","u":"../instructions/"},{"n":"Roots","u":"../roots/"},{"n":"Cartridges","u":"../cartridges/"},{"n":"The Project file","u":"../project-file/"},{"n":"The assembler","u":"../assembler/"},{"n":"The C dialect","u":"../c-dialect/"},{"n":"Diagnostics","u":"../diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "../diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="../the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="../temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li class="here"><a href="../targets/">Targets</a>
+<ul class="programs"><li><a href="../targets/machine/">machine</a></li><li><a href="../targets/pinned/">pinned</a></li><li><a href="../targets/rainbow/">rainbow</a></li><li><a href="../targets/rainbow-in-c/">rainbow-in-c</a></li><li><a href="../targets/registers/">registers</a></li></ul>
+</li>
+<li><a href="../phases/">Phases</a>
+</li>
+<li><a href="../banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="../panes/">Panes</a>
+</li>
+<li><a href="../slots/">Slots</a>
+</li>
+<li><a href="../generators/">Generators</a>
+</li>
+<li><a href="../macros/">Macros</a>
+</li>
+<li><a href="../conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="../character-sets/">Character sets</a>
+</li>
+<li><a href="../instructions/">Instructions</a>
+</li>
+<li><a href="../roots/">Roots</a>
+</li>
+<li><a href="../cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="../project-file/">The Project file</a>
+</li>
+<li><a href="../assembler/">The assembler</a>
+</li>
+<li><a href="../c-dialect/">The C dialect</a>
+</li>
+<li><a href="../diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="targets">Targets</h1>
+<p>A raw memory image is not a file a machine will load. NGA writes the machine's
+own format itself, with no packer to run afterwards, and the project asks for
+it in a word: <code>container xex</code> is the Atari binary DOS reads.</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#modules">modules</a></span> <span class="t-punctuation">{</span> <span class="t-string">&quot;rainbow.asm&quot;</span> <span class="t-punctuation">}</span>
+
+<span class="t-keyword"><a class="ref" href="../project-file/#container">container</a></span> <span class="t-name">xex</span>
+</code></pre><p class="from"><a href="../targets/rainbow/">the whole of rainbow</a></p>
+<pre><code class="language-asm"><span class="t-label">COLBK</span>  <span class="t-punctuation">=</span> <span class="t-number">$D01A</span>
+<span class="t-label">COLPF2</span> <span class="t-punctuation">=</span> <span class="t-number">$D018</span>
+<span class="t-label">WSYNC</span>  <span class="t-punctuation">=</span> <span class="t-number">$D40A</span>
+<span class="t-label">VCOUNT</span> <span class="t-punctuation">=</span> <span class="t-number">$D40B</span>
+
+<span class="t-directive">.</span><span class="t-directive">proc</span> <span class="t-name"><a class="ref" href="../project-file/#entry">entry</a></span>
+<span class="t-label">@top</span>    <span class="t-mnemonic">lda</span> <span class="t-name">VCOUNT</span>
+        <span class="t-mnemonic">jne</span> <span class="t-name">@top</span>
+
+        <span class="t-mnemonic">ldx</span> <span class="t-punctuation">#</span><span class="t-number">0</span>
+<span class="t-label">@line</span>   <span class="t-mnemonic">sta</span> <span class="t-name">WSYNC</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">COLBK</span>
+        <span class="t-mnemonic">stx</span> <span class="t-name">COLPF2</span>
+        <span class="t-mnemonic">inx</span>
+        <span class="t-mnemonic">cpx</span> <span class="t-punctuation">#</span><span class="t-number">240</span>
+        <span class="t-mnemonic">jcc</span> <span class="t-name">@line</span>
+
+        <span class="t-mnemonic">jmp</span> <span class="t-name">@top</span>
+<span class="t-directive">.</span><span class="t-directive">endp</span>
+</code></pre><p class="from"><a href="../targets/rainbow/">the whole of rainbow</a></p>
+<p>This is the straightforward implementation of the classic Atari rainbow.
+The implementation is fine, but NGA applied on it default placement rules which restrict memory usage to $2000-$9fff.</p>
+<p>NGA can be told about specific needs about the placement rules for a project using a <code><a class="ref" href="../project-file/#target">target</a></code> block. Within we can among others tell the allocator about the <code>regions</code> we require.</p>
+<h2 id="regions">Regions</h2>
+<p>You tell it in a <code><a class="ref" href="../project-file/#target">target</a></code> block, one line per range.</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span>        <span class="t-number">$0080</span> <span class="t-punctuation">..</span> <span class="t-number">$00FF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span>        <span class="t-number">$2000</span> <span class="t-punctuation">..</span> <span class="t-number">$BFFF</span>  <span class="t-name">ram</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../targets/machine/">the whole of machine</a></p>
+<p><code>ram</code> is where the solver may put things and it's the only thing what is really needed to instruct the allocator.</p>
+<p><code>reserved</code> is where it may not, though you may still pin a section there with
+<code>at</code>. Then the tool warns rather than refuses, because you may know something
+the machine's description does not — and the finding names both lines.</p>
+<pre><code class="language-ngp"><span class="t-keyword"><a class="ref" href="../project-file/#target">target</a></span> <span class="t-punctuation">{</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span>        <span class="t-number">$0080</span> <span class="t-punctuation">..</span> <span class="t-number">$00FF</span>  <span class="t-name">ram</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">dos</span>    <span class="t-number">$0700</span> <span class="t-punctuation">..</span> <span class="t-number">$1FFF</span>  <span class="t-keyword">reserved</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span>        <span class="t-number">$2000</span> <span class="t-punctuation">..</span> <span class="t-number">$BFFF</span>  <span class="t-name">ram</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../targets/pinned/">the whole of pinned</a></p>
+<pre><code class="language-asm"><span class="t-directive">.</span><span class="t-directive">section</span> <span class="t-name">absolute</span> <span class="t-name">at</span> <span class="t-number">$0800</span>
+<span class="t-label">belowDos</span>
+        <span class="t-directive">.</span><span class="t-directive">res</span> <span class="t-number">1</span>
+<span class="t-directive">.</span><span class="t-directive">ends</span>
+</code></pre><p class="from"><a href="../targets/pinned/">the whole of pinned</a></p>
+<pre><code>warning[<a class="ref" href="../diagnostics/#nga5218">NGA5218</a>]: `belowDos` is pinned at $800, in the reserved region `dos`
+ --&gt; pinned.asm:2:1
+  |
+2 | .section absolute at $0800
+  | ^^^^^^^^
+note: the region `dos` is declared here
+ --&gt; main.ngp:4:3
+  |
+4 |   region dos    $0700 .. $1FFF  reserved
+  |   ^^^^^^
+</code></pre><p class="from"><a href="../targets/pinned/">the whole of pinned</a></p>
+<p><code><a class="ref" href="../project-file/#register">register</a></code> is where it cannot. Pinning anything within a region <code><a class="ref" href="../project-file/#register">register</a></code> generates an error.</p>
+<p>A region's name is a symbol every module sees, whose value is the address it
+starts at, which is how a hardware register is declared. There is a shorter
+form for that, and a two-byte register is written by adding <code>, 2</code> after the
+address.</p>
+<pre><code class="language-ngp">  <span class="t-keyword"><a class="ref" href="../project-file/#region">region</a></span> <span class="t-name">COLBK</span>    <span class="t-number">$D01A</span> <span class="t-punctuation">..</span> <span class="t-number">$D01A</span>  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span> <span class="t-name">COLPF2</span> <span class="t-number">$D018</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span> <span class="t-name">WSYNC</span>  <span class="t-number">$D40A</span>
+  <span class="t-keyword"><a class="ref" href="../project-file/#register">register</a></span> <span class="t-name">VCOUNT</span> <span class="t-number">$D40B</span>
+</code></pre><p class="from"><a href="../targets/registers/">the whole of registers</a></p>
+<p>With that in the project's <code><a class="ref" href="../project-file/#target">target</a></code> block, the module stops declaring those four names. Redeclaration or shadowing registers is an error.</p>
+<p>A name from a <code><a class="ref" href="../project-file/#target">target</a></code> block is reached the same way from C, with nothing
+declared at all — no <code>extern</code>, and no <code>volatile</code> either. The Target's
+registers are volatile whatever C says about them, so every read and every
+write happens exactly where the source puts it. The type comes from the width:
+one byte is a <code>u8</code>, two a <code>u16</code>, more a <code>u8[N]</code> at its address.</p>
+<pre><code class="language-c"><span class="t-keyword">void</span> <span class="t-name"><a class="ref" href="../project-file/#entry">entry</a></span><span class="t-punctuation">(</span><span class="t-punctuation">)</span>
+<span class="t-punctuation">{</span>
+  <span class="t-keyword">for</span> <span class="t-punctuation">(</span> <span class="t-punctuation">;</span><span class="t-punctuation">;</span> <span class="t-punctuation">)</span>
+  <span class="t-punctuation">{</span>
+    <span class="t-keyword">while</span> <span class="t-punctuation">(</span> <span class="t-name">VCOUNT</span> <span class="t-punctuation">!=</span> <span class="t-number">0</span> <span class="t-punctuation">)</span>
+    <span class="t-punctuation">{</span>
+    <span class="t-punctuation">}</span>
+    <span class="t-keyword">for</span> <span class="t-punctuation">(</span> <span class="t-keyword">u8</span> <span class="t-name">i</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span> <span class="t-name">i</span> <span class="t-punctuation">&lt;</span> <span class="t-number">240</span><span class="t-punctuation">;</span> <span class="t-punctuation">++</span><span class="t-name">i</span> <span class="t-punctuation">)</span>
+    <span class="t-punctuation">{</span>
+      <span class="t-name">WSYNC</span> <span class="t-punctuation">=</span> <span class="t-number">0</span><span class="t-punctuation">;</span>
+      <span class="t-name">COLBK</span> <span class="t-punctuation">=</span> <span class="t-name">i</span><span class="t-punctuation">;</span>
+      <span class="t-name">COLPF2</span> <span class="t-punctuation">=</span> <span class="t-name">i</span><span class="t-punctuation">;</span>
+    <span class="t-punctuation">}</span>
+  <span class="t-punctuation">}</span>
+<span class="t-punctuation">}</span>
+</code></pre><p class="from"><a href="../targets/rainbow-in-c/">the whole of rainbow-in-c</a></p>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>

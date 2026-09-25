@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The NGA tutorial</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<label class="menu" for="nav">Chapters</label>
+<input type="checkbox" id="nav">
+<nav class="chapters" aria-label="Chapters">
+<a class="home here" href="">The NGA tutorial</a>
+<div class="find">
+<input id="q" type="search" placeholder="Find a directive, a block, NGA1234" autocomplete="off">
+<ul id="r"></ul>
+</div>
+<script>
+const index = [{"n":".charset","u":"assembler/#charset"},{"n":".declare","u":"assembler/#declare"},{"n":".dispatch","u":"assembler/#dispatch"},{"n":".endp then NAME","u":"assembler/#endp-then-name"},{"n":".export","u":"assembler/#export"},{"n":".macro","u":"assembler/#macro"},{"n":".off","u":"assembler/#off"},{"n":".proc","u":"assembler/#proc"},{"n":".section","u":"assembler/#section"},{"n":".source","u":"assembler/#source"},{"n":".transition","u":"assembler/#transition"},{"n":".with","u":"assembler/#with"},{"n":"WINDOW = STATE","u":"assembler/#window-state"},{"n":"[[placement(...)]]","u":"c-dialect/#placement"},{"n":"[[striped]]","u":"c-dialect/#striped"},{"n":"auto","u":"c-dialect/#auto"},{"n":"constants","u":"project-file/#constants"},{"n":"container","u":"project-file/#container"},{"n":"containers","u":"project-file/#containers"},{"n":"cpu","u":"project-file/#cpu"},{"n":"diagnostics","u":"project-file/#diagnostics"},{"n":"entry","u":"project-file/#entry"},{"n":"group","u":"project-file/#group"},{"n":"in NAME","u":"assembler/#in-name"},{"n":"include","u":"project-file/#include"},{"n":"modules","u":"project-file/#modules"},{"n":"movable","u":"assembler/#movable"},{"n":"optimize","u":"project-file/#optimize"},{"n":"panes","u":"project-file/#panes"},{"n":"phase","u":"project-file/#phase"},{"n":"region","u":"project-file/#region"},{"n":"register","u":"project-file/#register"},{"n":"resident","u":"project-file/#resident"},{"n":"root","u":"assembler/#root"},{"n":"storage","u":"project-file/#storage"},{"n":"target","u":"project-file/#target"},{"n":"temporary","u":"assembler/#temporary"},{"n":"transform","u":"project-file/#transform"},{"n":"units","u":"project-file/#units"},{"n":"window","u":"project-file/#window"},{"n":"The Project and Modules","u":"the-project-and-modules/"},{"n":"Temporaries and Liveness","u":"temporaries-and-liveness/"},{"n":"Targets","u":"targets/"},{"n":"Phases","u":"phases/"},{"n":"Banks and Windows","u":"banks-and-windows/"},{"n":"Panes","u":"panes/"},{"n":"Slots","u":"slots/"},{"n":"Generators","u":"generators/"},{"n":"Macros","u":"macros/"},{"n":"Conditionals and packs","u":"conditionals/"},{"n":"Character sets","u":"character-sets/"},{"n":"Instructions","u":"instructions/"},{"n":"Roots","u":"roots/"},{"n":"Cartridges","u":"cartridges/"},{"n":"The Project file","u":"project-file/"},{"n":"The assembler","u":"assembler/"},{"n":"The C dialect","u":"c-dialect/"},{"n":"Diagnostics","u":"diagnostics/"}];
+const q = document.getElementById( "q" ), r = document.getElementById( "r" );
+q.addEventListener( "input", () => {
+  const said = q.value.trim().toLowerCase();
+  r.innerHTML = "";
+  if ( !said ) return;
+  const found = index.filter( e => e.n.toLowerCase().includes( said ) ).slice( 0, 12 );
+  if ( /^nga\d{4}$/.test( said ) )
+    found.unshift( { n: said.toUpperCase(), u: "diagnostics/#" + said } );
+  for ( const e of found )
+    r.insertAdjacentHTML( "beforeend", `<li><a href="${e.u}">${e.n.replace( /</g, "&lt;" )}</a></li>` );
+} );
+</script>
+<ol>
+<li><a href="the-project-and-modules/">The Project and Modules</a>
+</li>
+<li><a href="temporaries-and-liveness/">Temporaries and Liveness</a>
+</li>
+<li><a href="targets/">Targets</a>
+</li>
+<li><a href="phases/">Phases</a>
+</li>
+<li><a href="banks-and-windows/">Banks and Windows</a>
+</li>
+<li><a href="panes/">Panes</a>
+</li>
+<li><a href="slots/">Slots</a>
+</li>
+<li><a href="generators/">Generators</a>
+</li>
+<li><a href="macros/">Macros</a>
+</li>
+<li><a href="conditionals/">Conditionals and packs</a>
+</li>
+<li><a href="character-sets/">Character sets</a>
+</li>
+<li><a href="instructions/">Instructions</a>
+</li>
+<li><a href="roots/">Roots</a>
+</li>
+<li><a href="cartridges/">Cartridges</a>
+</li>
+</ol><p class="aside">Reference — read for a detail, not in order.</p><ol start="15">
+<li><a href="project-file/">The Project file</a>
+</li>
+<li><a href="assembler/">The assembler</a>
+</li>
+<li><a href="c-dialect/">The C dialect</a>
+</li>
+<li><a href="diagnostics/">Diagnostics</a>
+</li>
+</ol></nav>
+<main>
+<h1 id="the-nga-tutorial">The NGA tutorial</h1>
+<p>The chapters, in the order they are meant to be read.</p>
+<ol>
+<li><a href="the-project-and-modules/">The Project and Modules</a> — the one file a
+run is given, and the same program written twice: in the assembler, and in
+the subset of C that compiles to it.</li>
+<li><a href="temporaries-and-liveness/">Temporaries and Liveness</a> — where a
+variable goes, which variables can have the same byte, and who works that
+out.</li>
+<li><a href="targets/">Targets</a> — what the program is going to be, and teaching the
+tool what machine it is for.</li>
+<li><a href="phases/">Phases</a> — a program in parts that take turns in memory: what
+the tool works out from them, what waits on the diskette, and what it
+refuses.</li>
+<li><a href="banks-and-windows/">Banks and Windows</a> — the same program on a machine
+whose storage is part of the address space: what a Window is, what a Bank
+is, and what may not live in one.</li>
+<li><a href="panes/">Panes</a> — a Bank as somewhere for code and data to stay: what
+one switch shows together, who may name it, N Banks of one layout, and the
+other half of the rule.</li>
+<li><a href="slots/">Slots</a> — how resident code reaches what differs from Phase to
+Phase: one name, one live definition at a time, and a cell the Transition
+rewrites.</li>
+<li><a href="generators/">Generators</a> — a Module whose text the tool writes: a file
+as a Section, a script that makes one, and what a script may and may not
+reach.</li>
+<li><a href="macros/">Macros</a> — a body instantiated where it is used: what a
+<code><a class="ref" href="assembler/#with">.with</a></code> can then cover, what a macro is not, and what a body may hold.</li>
+<li><a href="conditionals/">Conditionals and packs</a> — which statements are in the
+program, which value a number has, however many arguments there are, and
+why the first two are different questions.</li>
+<li><a href="character-sets/">Character sets</a> — what a literal means: a picture
+drawn in its own source, the same letters at other numbers, and why an
+unprefixed literal must be ASCII.</li>
+<li><a href="instructions/">Instructions</a> — statements the processor does not
+have: a branch that is two bytes or five, a jump into one of a Proc's own
+positions, a jump whose condition the writer vouches for, what the
+Target's processor adds, and the one rule that decides whether a
+parenthesis indirects.</li>
+<li><a href="roots/">Roots</a> — where the tool stops being able to see: an address
+taken and nobody behind it, who follows one, what saying so by hand costs,
+and the memory only the hardware reaches.</li>
+<li><a href="cartridges/">Cartridges</a> — a Container nothing loads: the same
+program as an image the CPU reads where it lies, what a board is, the ROM a
+Region can be, a bank left switched, and the cold start that brings the
+entry Phase its own bytes.</li>
+</ol>
+<p>The last four are reference. Read them when you need a detail, not in order.</p>
+<ol start="15">
+<li><a href="project-file/">The Project file</a> — every block and every option of a
+<code>.ngp</code>, and how the tool reads the file.</li>
+<li><a href="assembler/">The assembler</a> — every directive, attribute and operator
+an <code>.asm</code> Module may hold. The 6502 instruction set is not here.</li>
+<li><a href="c-dialect/">The C dialect</a> — what a <code>.ngc</code> Module is, written as the
+differences from C: what is gone, what changed, and what was added.</li>
+<li><a href="diagnostics/">Diagnostics</a> — every finding the tool can report, by
+the part of the tool that raises it: what the identifier means, what the
+severity costs, and a note where the message cannot say the whole of it.</li>
+</ol>
+
+<footer>NGA 0.9.3, composed from ac3a6fd of 2026-09-26</footer>
+</main>
+</body>
+</html>
