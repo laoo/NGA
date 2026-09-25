@@ -24,6 +24,17 @@ else( )
     -Wshadow -Wconversion -Wsign-conversion
     -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
     -Wunused -Woverloaded-virtual -Wdouble-promotion )
+
+  # A designated initialiser out of declaration order is ill-formed, and GCC and
+  # MSVC both reject it outright. clang accepts it as an extension and says so in
+  # a warning, which is one warning among many on a developer's machine and no
+  # warning at all in a build that is not `-Werror` — so the first machine to
+  # refuse the code was a release runner, after the tag had gone out. It is an
+  # error here too, for whichever of the three is compiling.
+  if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
+    target_compile_options( nga_warnings INTERFACE -Werror=reorder-init-list )
+  endif( )
+
   if( NGA_WERROR )
     target_compile_options( nga_warnings INTERFACE -Werror )
   endif( )

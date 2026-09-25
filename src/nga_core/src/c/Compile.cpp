@@ -7810,10 +7810,10 @@ private:
                                          .type = local.type,
                                          .isStatic = true,
                                          .at = declarator.location,
-                                         .written = mTyping.spellingOf( declarator ),
                                          .value = declared.isStatic && value != nullptr
                                                       ? std::optional{ constantOf( *value, local.type, site ) }
-                                                      : std::nullopt } );
+                                                      : std::nullopt,
+                                         .written = mTyping.spellingOf( declarator ) } );
         mTyping.settleLocal( declarator, local );
         markVolatile( declarator, local );
         if ( !declared.isStatic && value != nullptr )
