@@ -9,7 +9,7 @@ than reads, called where a file would be named.
 ## From a file
 
 <!-- include 08-generators/from-a-file/main.ngp tag=generator -->
-```
+```ngp
   binary( "maps/level1.map", section = levelMap, in = level ) as maps
 ```
 <!-- end -->
@@ -119,7 +119,7 @@ export default ( args, nga ) =>
 <!-- end -->
 
 <!-- include 08-generators/from-a-script/main.ngp tag=generator -->
-```
+```ngp
   script( "tools/rows.js", map = "maps/level1.map", width = 37, in = level ) as maps
 ```
 <!-- end -->

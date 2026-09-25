@@ -110,8 +110,4 @@ MemoryMap memoryMapOf( Patched const& build );
 /// The map as text, Phase by Phase — see docs/spec/memory-map.md.
 std::string renderMapText( MemoryMap const& map );
 
-/// The map as one self-contained HTML page: a rectangle per entry, address
-/// across and Phase down, with what the text says shown on hover.
-std::string renderMapHtml( MemoryMap const& map );
-
 } // namespace nga::model

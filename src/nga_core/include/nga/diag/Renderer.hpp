@@ -4,6 +4,7 @@
 #include "nga/diag/SourceManager.hpp"
 
 #include <string>
+#include <string_view>
 
 namespace nga::diag
 {
@@ -12,10 +13,16 @@ namespace nga::diag
 /// heading for whole-program ones. Notes follow their parent.
 std::string renderText( SourceManager const& sources, DiagnosticSink const& sink );
 
-/// Machine-readable rendering, schema 1 of docs/spec/diagnostics.md.
+/// The findings as two JSON fields, `diagnostics` and `summary`, indented by
+/// `indent` and without a trailing newline.
 ///
-/// `message` is present for convenience but is explicitly NOT stable; `id`,
-/// `name` and `arguments` are what a consumer may rely on.
-std::string renderJson( SourceManager const& sources, DiagnosticSink const& sink );
+/// Fields rather than a document, because the findings are a set of the facts
+/// of a build and travel inside that one -- see docs/spec/facts.md. `message`
+/// is present for convenience but is explicitly NOT stable; `id`, `name` and
+/// `arguments` are what a consumer may rely on.
+void appendJsonFindings( std::string& out,
+                         SourceManager const& sources,
+                         DiagnosticSink const& sink,
+                         std::string_view indent );
 
 } // namespace nga::diag

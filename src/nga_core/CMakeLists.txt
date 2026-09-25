@@ -1,4 +1,5 @@
 add_library( nga_core
+  src/Json.cpp
   src/Version.cpp
   src/PortabilityChecks.cpp
   src/c/Assigned.cpp
@@ -18,6 +19,7 @@ add_library( nga_core
   src/c/Select.cpp
   src/c/Token.cpp
   src/c/Walk.cpp
+  src/diag/Catalogue.cpp
   src/diag/Diagnostic.cpp
   src/diag/DiagnosticId.cpp
   src/diag/DiagnosticSink.cpp
@@ -29,6 +31,7 @@ add_library( nga_core
   src/model/Atr.cpp
   src/model/Charsets.cpp
   src/model/Emit.cpp
+  src/model/Facts.cpp
   src/model/Generator.cpp
   src/model/Script.cpp
   src/model/MemoryMap.cpp
@@ -69,6 +72,9 @@ add_library( nga_core
   src/model/TypeCheck.cpp
   src/model/Types.cpp
   src/model/Symbol.cpp
+  src/model/ContainerFacts.cpp
+  src/model/Symbols.cpp
+  src/model/Tokens.cpp
   src/syntax/Operand.cpp
   src/syntax/Expression.cpp
   src/syntax/ExpressionParser.cpp

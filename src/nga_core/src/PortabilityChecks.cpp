@@ -18,6 +18,7 @@ static_assert( __cpp_lib_span >= 202002L, "std::span is required" );
 static_assert( __cpp_lib_filesystem >= 201703L, "std::filesystem is required" );
 static_assert( __cpp_lib_bit_cast >= 201806L, "std::bit_cast is required" );
 static_assert( __cpp_lib_to_underlying >= 202102L, "std::to_underlying is required" );
+static_assert( __cpp_lib_string_contains >= 202011L, "std::string::contains is required" );
 static_assert( __cpp_explicit_this_parameter >= 202110L, "deducing this is required" );
 
 // Two differences between the three standard libraries that no feature macro

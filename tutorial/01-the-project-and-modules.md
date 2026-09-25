@@ -8,7 +8,7 @@ what you hand to the tool. The only thing
 the minimal project must say is which files the program is made of:
 
 <!-- include 01-the-project-and-modules/sum/main.ngp -->
-```
+```ngp
 modules { "sum.asm" }
 ```
 <!-- end -->
@@ -108,7 +108,7 @@ static const u8 numbers[] = { 3, 1, 4, 1, 5 };
 A `.ngc` file is a module like any other:
 
 <!-- include 01-the-project-and-modules/sum-in-c/main.ngp -->
-```
+```ngp
 modules { "sum.ngc" }
 ```
 <!-- end -->

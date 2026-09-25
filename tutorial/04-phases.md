@@ -126,7 +126,7 @@ left    .ztemp 1
 ## The project says which part is which
 
 <!-- include 04-phases/two-phases/main.ngp -->
-```
+```ngp
 include "atari/800xl.ngp"
 
 modules { "print.asm" "intro.asm" "level.asm" }
@@ -325,7 +325,7 @@ own size, and two more for the length in front of it. One line in the Project
 changes that, and nothing else about the program does:
 
 <!-- include 04-phases/compressed/main.ngp tag=transform -->
-```
+```ngp
 transform zx0 { level.levelMap }
 ```
 <!-- end -->

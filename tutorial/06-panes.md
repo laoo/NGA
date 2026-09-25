@@ -9,7 +9,7 @@ time. This chapter leaves the bytes where they are and runs against them there.
 The program is chapter five's, and the Project gains one line.
 
 <!-- include 06-panes/in-a-bank/main.ngp -->
-```
+```ngp
 include "atari/130xe.ngp"
 
 modules { "print.asm" "shared.asm" "intro.asm" "level.asm" }
@@ -192,7 +192,7 @@ consecutive Banks, and every Section `in` it stands in each member at the
 same address.
 
 <!-- include 06-panes/a-family/main.ngp -->
-```
+```ngp
 include "atari/130xe.ngp"
 
 modules { "print.asm" "intro.asm" "rows.asm" }

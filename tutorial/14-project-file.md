@@ -32,7 +32,7 @@ This keeps the result independent of the order of your `include` lines.
 
 ## `modules`
 
-```
+```ngp
 modules {
   "src/intro.asm"
   "gfx/tiles.asm"                        as gfxTiles
@@ -65,7 +65,7 @@ A name before the brace makes the block a [group](#group).
 
 ## `group`
 
-```
+```ngp
 modules engine { "engine/ball.asm"  "engine/draw.asm" }
 modules sfx    { "engine/beep.asm" }
 group   play   { engine, sfx }
@@ -93,7 +93,7 @@ the group inherits it.
 
 ## `phase`
 
-```
+```ngp
 phase intro { needs intro, hud   then game }
 phase game  { needs game, hud    then boss, intro  entry gameStart }
 ```
@@ -130,7 +130,7 @@ A Phase that no path from the entry reaches is a warning. An edge that no
 
 ## `resident`
 
-```
+```ngp
 resident { hud, music }
 ```
 
@@ -143,7 +143,7 @@ There is no way to name a subset of Phases other than listing them.
 
 ## `entry`
 
-```
+```ngp
 entry intro
 ```
 
@@ -162,7 +162,7 @@ the block states hardware truth. The tool ships variants in
 [the library](#the-library):
 
 <!-- include ../lib/atari/130xe.ngp -->
-```
+```ngp
 ; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings
 ; one of them into, the Window over the OS ROM, every Region of the address
 ; space, and the Modules a program on this machine needs. What PORTB takes to
@@ -210,7 +210,7 @@ resident { os, charsets, portb, zx0 }
 A Project adds its own `target` block for what the variant cannot know. A DOS in
 low memory is one line:
 
-```
+```ngp
 target { region dos $0700 .. $1FFF reserved }
 ```
 
@@ -218,7 +218,7 @@ Blocks sum, so this narrows the variant's Regions rather than replacing them.
 
 ### `region`
 
-```
+```ngp
 region ram    $0000 .. $CFFF  ram
 region stack  $0100 .. $01FF  reserved
 region io     $D000 .. $D7FF  register
@@ -247,7 +247,7 @@ the stand-in.
 
 ### `register`
 
-```
+```ngp
 register COLBK  $D01A
 register AUDF1  $D200, 2
 ```
@@ -257,7 +257,7 @@ width is 1 or 2.
 
 ### `units`
 
-```
+```ngp
 units extension 4
 ```
 
@@ -270,7 +270,7 @@ calls each one belongs to the driver.
 
 ### `window`
 
-```
+```ngp
 window ext $4000 .. $7FFF                  views main, extension  base main
 window os  $C000 .. $CFFF, $D800 .. $FFFF  views rom, ram         base rom
 ```
@@ -294,7 +294,7 @@ Region names, unit set names and Window names share one name space.
 
 ### `cpu`
 
-```
+```ngp
 cpu "65sc02"
 ```
 
@@ -314,7 +314,7 @@ instruction, the processor it needs, and the processor the Target is. See
 
 ### `containers`
 
-```
+```ngp
 containers xex, atr
 ```
 
@@ -325,7 +325,7 @@ Where no Target says anything, the Project's word stands.
 
 ## `storage`
 
-```
+```ngp
 storage { units extension }          ; the Banks of a unit set
 storage { units 720  size 128 }      ; units by number, such as a disk
 ```
@@ -350,7 +350,7 @@ then an error.
 
 ## `panes`
 
-```
+```ngp
 panes in ext      { level, tables[8] }
 panes in os = ram { under }
 ```
@@ -376,7 +376,7 @@ of the state the solver gave it.
 
 ## `transform`
 
-```
+```ngp
 transform rle { music.notes, levels.tiles }
 ```
 
@@ -397,7 +397,7 @@ transform, which is a warning.
 
 ## `container`
 
-```
+```ngp
 container xex
 ```
 
@@ -414,7 +414,7 @@ option names a path and chooses nothing.
 
 ## `optimize`
 
-```
+```ngp
 optimize speed
 ```
 
@@ -429,7 +429,7 @@ written `inline` under every Intent.
 
 ## `constants`
 
-```
+```ngp
 constants {
   CART   = 1
   LEVELS = 8
@@ -447,11 +447,11 @@ Project declared is an error.
 
 ## `diagnostics`
 
-```
+```ngp
 diagnostics {
-  deny  NGA2410
-  allow NGA5120
-  off   NGA3007
+  deny  NGA4501
+  allow NGA4606
+  off   NGA0113
 }
 ```
 
@@ -468,7 +468,7 @@ command line.
 
 ## `include`
 
-```
+```ngp
 include "targets/atari-assets.ngp"
 ```
 

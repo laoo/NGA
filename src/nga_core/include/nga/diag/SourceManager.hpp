@@ -62,6 +62,14 @@ public:
   /// written from.
   [[nodiscard]] std::optional<FileId> registeredAfter( SourceLocation location ) const;
 
+  /// The file a location stands in, and nothing for a location that stands in
+  /// none -- an invalid one, or one from another SourceManager.
+  ///
+  /// `expand` answers the same question for a reader, in lines and columns.
+  /// This answers it for a consumer of the facts, which counts in bytes from
+  /// the start of the file it was given.
+  [[nodiscard]] std::optional<FileId> fileContaining( SourceLocation location ) const;
+
   [[nodiscard]] std::uint32_t fileCount() const
   {
     return static_cast<std::uint32_t>( mFiles.size() );

@@ -81,7 +81,7 @@ literal with no prefix must be ASCII.
 
 ## `.section`
 
-```
+```asm
 .section [ attribute [ , attribute ]... ]
 .endsection
 .ends
@@ -158,7 +158,7 @@ goes with none of `in`, `movable` or `root`.
 
 ## `.proc`
 
-```
+```asm
 .proc NAME [ , attribute ]...
 .endproc [ then NAME ]
 .endp    [ then NAME ]
@@ -214,7 +214,7 @@ Proc's scope. `worker.ptr` is how a caller names an argument the Proc reads.
 
 ### `.declare`
 
-```
+```asm
 .declare arg [ TYPE | PLACE ]
 .declare ret [ TYPE | PLACE ]
 
@@ -278,7 +278,7 @@ anywhere else.
 
 ## Data
 
-```
+```asm
 .byte ITEM [ , ITEM ]...
 .word ITEM [ , ITEM ]...
 .hex    STRING
@@ -328,7 +328,7 @@ tool cannot fold early.
 
 ## `.ztemp` and `.temp`
 
-```
+```asm
 NAME .ztemp EXPRESSION
 NAME .temp EXPRESSION
 ```
@@ -355,7 +355,7 @@ jumps to the entered Phase's entry and resumes no frame.
 
 ## `.transition`
 
-```
+```asm
 .transition NAME
 ```
 
@@ -383,7 +383,7 @@ look anywhere.
 
 ## Slots
 
-```
+```asm
 .slot NAME, binding [ , placement ]
 .implements SLOT, SYMBOL
 
@@ -416,7 +416,7 @@ An Implementation stands in no Pane.
 
 ## `.with`
 
-```
+```asm
 .with PANE
 .with FAMILY, x
 .with WINDOW, x
@@ -457,7 +457,7 @@ The variant lists a Window's states after `views`. A name there is a unit set,
 which contributes one state per Bank and has no name of its own, or a named
 state of the hardware. Only a named state may stand after `=`.
 
-```
+```asm
 window os $C000 .. $CFFF, $D800 .. $FFFF  views rom, ram  base rom
 ```
 
@@ -526,7 +526,7 @@ refuses the name.
 The rule follows every `jsr` and `jmp` out of the statement. A routine two calls
 away that names a Pane's Section is caught:
 
-```
+```asm
 error[NGA3008]: what this statement reaches names `levelData`, in pane `level`,
                 which this `.with` does not show
 ```
@@ -558,7 +558,7 @@ Bank holds, declare a Pane and write `.with PANE`.
 
 ## `.own` and `.root`
 
-```
+```asm
 .own [ NAME [ , NAME ]... ]
 .root
 ```
@@ -590,7 +590,7 @@ an error. Both on one statement is an error.
 
 ## `.dispatch`
 
-```
+```asm
 .dispatch TARGET [ , TARGET ]...
 ```
 
@@ -614,7 +614,7 @@ It stands in a Section or a Proc and not in a macro body.
 
 ## `.macro`
 
-```
+```asm
 .macro NAME [ PATTERN ]
   ...
 .endm
@@ -678,7 +678,7 @@ a position inside.
 
 ### Packs
 
-```
+```asm
 .macro NAME [ NAME , ]... NAME...
 
 .match NAME
@@ -727,7 +727,7 @@ nothing before the first, at least one, and closes with `.endmatch`.
 
 ## Conditional assembly
 
-```
+```asm
 .if CONDITION
   ...
 .elsif CONDITION
@@ -767,7 +767,7 @@ before the body is instantiated.
 
 ## Namespaces
 
-```
+```asm
 .namespace NAME [ . NAME ]...
   ...
 .endnamespace
@@ -813,7 +813,7 @@ the block they stand in and take no qualification.
 
 ## `.charset`
 
-```
+```asm
 .charset NAME [ : BASE [ ^ EXPRESSION ] ]
   STRING = EXPRESSION
   ...
@@ -871,7 +871,7 @@ lines and comments, and nothing else.
 
 ## `.export`
 
-```
+```asm
 .export NAME [ , NAME ]...
 ```
 
@@ -895,7 +895,7 @@ The Project needs no export to reach a Section.
 
 ## `.driver` and `.transform`
 
-```
+```asm
 .driver ROLE NAME
 .driver ROLE WINDOW NAME
 .driver stream WINDOW
@@ -912,7 +912,7 @@ across the program. A program with a Transition declares one for `copy`.
 
 ## `.off`
 
-```
+```asm
 .off CODE [ , CODE ]...
 ```
 
@@ -936,7 +936,7 @@ A `CODE` naming no diagnostic is an error.
 
 ## `.source`
 
-```
+```asm
 .source "PATH", LINE
 ```
 
@@ -964,7 +964,7 @@ prefix.
 
 ### Operators
 
-```
+```asm
 -x  ~x  !x          Integer -> Integer;  an Address is an error
 <x  >x              Integer -> Integer;  Address -> Integer
 
@@ -994,7 +994,7 @@ asks the question `.assert` exists to ask.
 
 ### The conditional value
 
-```
+```asm
 CONDITION ? TAKEN : OTHERWISE
 ```
 
@@ -1029,7 +1029,7 @@ offset of a Label inside its Section is `label - mySection.runtimeSectionAddress
 
 Weakest to strongest:
 
-```
+```asm
 ? :                   conditional, right-associative
 ||
 &&
@@ -1070,7 +1070,7 @@ apart.
 
 ### Attribute access
 
-```
+```asm
 label.runtimeSectionAddress     Address: where the Section starts
 label.runtimeSectionSize        Integer: the Section's size, reservations included
 label.resident                  Integer: 1 when the Section is present in every Phase

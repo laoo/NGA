@@ -197,6 +197,7 @@ enum class Severity : std::uint8_t
   X( PATH_NAMES_CHARSET, 1116, ERROR, "a path is not translated, so it names no character set" )                       \
   X( EXPECTED_SEVERITY, 1117, ERROR, "expected `deny`, `allow` or `off`, found `{token}`" )                            \
   X( UNKNOWN_DIAGNOSTIC_CODE, 1118, ERROR, "`{code}` names no diagnostic" )                                            \
+  X( UNKNOWN_FACT_SET, 1215, ERROR, "`{name}` names no set of facts; the sets are {sets}" )                            \
   X( SEVERITY_ALREADY_SET, 1119, ERROR, "the severity of `{code}` is set more than once" )                             \
   X( PREVIOUS_SEVERITY, 1120, NOTE, "`{code}` was already set here" )                                                  \
   X( INCLUDE_CYCLE, 1121, ERROR, "this include reaches a file that is already being read" )                            \

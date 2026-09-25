@@ -2,16 +2,22 @@
 // and hands over to nga_core. Everything testable lives in the library.
 
 #include <CLI/CLI.hpp>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include "nga/Version.hpp"
+#include "nga/diag/Catalogue.hpp"
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/diag/Renderer.hpp"
 #include "nga/diag/SourceManager.hpp"
+#include "nga/model/ContainerFacts.hpp"
+#include "nga/model/Facts.hpp"
 #include "nga/model/MemoryMap.hpp"
 #include "nga/model/Pipeline.hpp"
 #include "nga/model/Project.hpp"
 #include "nga/model/ProjectFile.hpp"
+#include "nga/model/Symbols.hpp"
+#include "nga/model/Tokens.hpp"
 
 // Asking the platform where the executable is takes a platform's header. Both
 // of Windows' macro habits are turned off first: `min` and `max` as macros
@@ -33,6 +39,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -138,6 +145,28 @@ public:
 };
 
 /// Writes text to a file, or says why not.
+/// `a,b,,c` as the three names it holds. An empty piece is nobody's name and
+/// is dropped, so a trailing comma is not an error worth a message.
+std::vector<std::string> splitOnCommas( std::string_view given )
+{
+  std::vector<std::string> names;
+  while ( !given.empty() )
+  {
+    std::size_t const comma = given.find( ',' );
+    std::string_view const piece = given.substr( 0, comma );
+    if ( !piece.empty() )
+    {
+      names.emplace_back( piece );
+    }
+    if ( comma == std::string_view::npos )
+    {
+      break;
+    }
+    given.remove_prefix( comma + 1 );
+  }
+  return names;
+}
+
 bool writeText( std::string const& path, std::string const& text )
 {
   std::ofstream out{ path, std::ios::binary };
@@ -155,8 +184,11 @@ int run( int argc, char** argv )
   CLI::App app{ "NGA - resource-aware 6502 assembler", "nga" };
   app.set_version_flag( "-V,--version", std::string{ nga::versionString() } );
 
+  // Not `required()`: `--diagnostics-catalogue` describes the tool rather than
+  // a build, and asking it for a Project to read would be asking for a file it
+  // never opens. What a run without either is, is decided below.
   std::string projectPath;
-  app.add_option( "project", projectPath, "The `.ngp` project file to build" )->required();
+  app.add_option( "project", projectPath, "The `.ngp` project file to build" );
 
   std::string output;
   app.add_option( "-o,--output", output, "Where to write the bytes; the project says what they are" );
@@ -169,9 +201,6 @@ int run( int argc, char** argv )
   app.add_option( "--deny", denied, "Raise these diagnostics to errors" )->take_all();
   app.add_option( "--allow", allowed, "Lower these diagnostics to warnings" )->take_all();
   app.add_option( "--off", suppressed, "Suppress these diagnostics entirely" )->take_all();
-
-  bool json = false;
-  app.add_flag( "--diagnostics-json{true}", json, "Write diagnostics as JSON rather than as text" );
 
   unsigned int jobs = 0;
   app.add_option( "-j,--jobs", jobs, "Number of assembly threads; 0 selects one per core" );
@@ -192,14 +221,111 @@ int run( int argc, char** argv )
 
   std::string mapPath;
   app.add_option( "--map", mapPath, "Write the memory map, phase by phase, as text to this file" );
-  std::string mapHtmlPath;
-  app.add_option( "--map-html", mapHtmlPath, "Write the memory map as a self-contained HTML page to this file" );
 
   std::string emitAsmDir;
   app.add_option(
       "--emit-asm", emitAsmDir, "Write the text of every module the tool wrote rather than read into this directory" );
 
+  std::string cataloguePath;
+  app.add_option( "--diagnostics-catalogue",
+                  cataloguePath,
+                  "Write every diagnostic the tool can raise as JSON to this file, or to `-`; takes no project" );
+
+  std::vector<std::string> classifyPaths;
+  app.add_option( "--classify",
+                  classifyPaths,
+                  "Classify these files for a highlighter and write the result as JSON; takes no project" )
+      ->take_all();
+
+  std::string factsPath;
+  app.add_option( "--facts",
+                  factsPath,
+                  "Write what the tool knows about this build as JSON to this file, or to `-`; the format is not "
+                  "stable" );
+  std::vector<std::string> factNames;
+  app.add_option( "--fact", factNames, "Which facts to write: a name, `all`, or several separated by commas" )
+      ->take_all();
+
   CLI11_PARSE( app, argc, argv );
+
+  // The log goes to stderr, because stdout is where `--facts -` and the other
+  // machine-readable outputs write: a line of logging in the middle of a JSON
+  // document makes it no longer one.
+  spdlog::set_default_logger( spdlog::stderr_color_mt( "nga" ) );
+
+  // `--fact a,b` and `--fact a --fact b` are the same thing said twice over,
+  // and both are answered before the Project is opened so that a name nobody
+  // has is reported beside the run rather than after it.
+  std::set<nga::model::FactSet> wantedFacts;
+  std::vector<std::string> unknownFacts;
+  for ( std::string const& given : factNames )
+  {
+    for ( auto const& name : splitOnCommas( given ) )
+    {
+      if ( name == "all" )
+      {
+        wantedFacts.merge( nga::model::everyFactSet() );
+        continue;
+      }
+      if ( auto const set = nga::model::factSetFor( name ) )
+      {
+        wantedFacts.insert( *set );
+      }
+      else
+      {
+        unknownFacts.push_back( name );
+      }
+    }
+  }
+  // The cheapest two, which is what an editor asking after every save wants.
+  if ( wantedFacts.empty() )
+  {
+    wantedFacts = { nga::model::FactSet::DIAGNOSTICS, nga::model::FactSet::PROJECT };
+  }
+
+  // Before anything is read: this says what the tool can find, not what it
+  // found, so it answers on its own and a Project would be beside the point.
+  if ( !cataloguePath.empty() )
+  {
+    std::string const catalogue = nga::diag::renderCatalogueJson();
+    if ( cataloguePath == "-" )
+    {
+      std::fwrite( catalogue.data(), 1, catalogue.size(), stdout );
+      return 0;
+    }
+    return writeText( cataloguePath, catalogue ) ? 0 : 2;
+  }
+
+  // Text nobody built: the shapes of syntax a document is written in, or a
+  // file an editor is holding. The classification never needed a build, so
+  // neither does this.
+  if ( !classifyPaths.empty() )
+  {
+    nga::diag::SourceManager loose;
+    nga::diag::SeverityPolicy allowAll;
+    nga::diag::DiagnosticSink quiet{ allowAll };
+    std::vector<nga::diag::FileId> files;
+    for ( std::string const& path : classifyPaths )
+    {
+      std::ifstream in{ path, std::ios::binary };
+      if ( !in )
+      {
+        std::fprintf( stderr, "nga: cannot read %s\n", path.c_str() );
+        return 2;
+      }
+      std::string text{ std::istreambuf_iterator<char>{ in }, std::istreambuf_iterator<char>{} };
+      files.push_back( loose.addFile( path, std::move( text ) ) );
+    }
+    std::string const written = nga::model::renderClassificationJson( loose, files, quiet );
+    std::fwrite( written.data(), 1, written.size(), stdout );
+    return 0;
+  }
+
+  if ( projectPath.empty() )
+  {
+    std::fprintf( stderr, "nga: a project is required\n%s", app.help().c_str() );
+    return 1;
+  }
   spdlog::set_level( verbose ? spdlog::level::debug : spdlog::level::info );
 
   nga::diag::SourceManager sources;
@@ -217,6 +343,17 @@ int run( int argc, char** argv )
     sink.add( nga::diag::diagnostic( nga::diag::DiagnosticId::UNKNOWN_DIAGNOSTIC_CODE )
                   .arg( "code", code )
                   .sortedBy( code ) );
+  }
+
+  // A set nobody has is refused rather than written as an empty one: a name
+  // that answers with nothing looks like a set with nothing in it, and sends a
+  // consumer looking for the reason it is empty.
+  for ( std::string const& name : unknownFacts )
+  {
+    sink.add( nga::diag::diagnostic( nga::diag::DiagnosticId::UNKNOWN_FACT_SET )
+                  .arg( "name", name )
+                  .arg( "sets", nga::model::factSetNames() )
+                  .sortedBy( name ) );
   }
 
   // Applied before the Project is read, so that reading it obeys them, and
@@ -245,7 +382,10 @@ int run( int argc, char** argv )
 
   applyOverrides( overrides, policy );
 
-  bool const wantMap = !mapPath.empty() || !mapHtmlPath.empty();
+  // The bytes are attributed through the Layout the map reports, so asking
+  // for them asks for it too.
+  bool const wantMap = !mapPath.empty() || wantedFacts.contains( nga::model::FactSet::MAP ) ||
+                       wantedFacts.contains( nga::model::FactSet::BYTES );
 
   // A Project that failed to load names no Modules to build, and building from
   // it would report the absence a second time. What Container is written was
@@ -254,6 +394,10 @@ int run( int argc, char** argv )
   std::vector<std::uint8_t> bytes;
   std::optional<std::uint32_t> origin;
   std::optional<nga::model::MemoryMap> map;
+  std::optional<std::vector<nga::model::SymbolFacts>> symbols;
+  std::optional<nga::model::ContainerFacts> container;
+  bool const wantSymbols = wantedFacts.contains( nga::model::FactSet::SYMBOLS ) && !factsPath.empty();
+  bool const wantBytes = wantedFacts.contains( nga::model::FactSet::BYTES ) && !factsPath.empty();
   if ( !sink.hasErrors() )
   {
     nga::model::BuildOptions const options{ .verifyLayout = verifyLayout, .explain = explain };
@@ -269,8 +413,17 @@ int run( int argc, char** argv )
                          {
                            map = nga::model::memoryMapOf( patched );
                          }
+                         if ( wantSymbols )
+                         {
+                           symbols = nga::model::symbolsOf( patched );
+                         }
                          bytes = emitted.bytes;
                          origin = emitted.origin;
+                         if ( wantBytes && map.has_value() )
+                         {
+                           container = nga::model::containerFactsOf(
+                               patched, *map, bytes, nga::model::nameOf( project.container ) );
+                         }
                        } );
   }
 
@@ -297,10 +450,31 @@ int run( int argc, char** argv )
   }
 
   sink.sortForOutput( sources );
-  std::string const report = json ? nga::diag::renderJson( sources, sink ) : nga::diag::renderText( sources, sink );
+  std::string const report = nga::diag::renderText( sources, sink );
   if ( !report.empty() )
   {
     std::fputs( report.c_str(), stderr );
+  }
+
+  // Before the exit code, and whatever it turns out to be: a build that failed
+  // still learned something, and the findings are what a reader wants most
+  // when it did -- see docs/spec/facts.md.
+  if ( !factsPath.empty() )
+  {
+    nga::model::Facts const facts{ .projectPath = projectPath,
+                                   .project = &project,
+                                   .map = map.has_value() ? &*map : nullptr,
+                                   .symbols = symbols.has_value() ? &*symbols : nullptr,
+                                   .bytes = container.has_value() ? &*container : nullptr };
+    std::string const written = nga::model::renderFactsJson( sources, sink, facts, wantedFacts );
+    if ( factsPath == "-" )
+    {
+      std::fwrite( written.data(), 1, written.size(), stdout );
+    }
+    else if ( !writeText( factsPath, written ) )
+    {
+      return 2;
+    }
   }
 
   if ( sink.hasErrors() )
@@ -308,16 +482,9 @@ int run( int argc, char** argv )
     return 1;
   }
 
-  if ( map.has_value() )
+  if ( map.has_value() && !mapPath.empty() && !writeText( mapPath, nga::model::renderMapText( *map ) ) )
   {
-    if ( !mapPath.empty() && !writeText( mapPath, nga::model::renderMapText( *map ) ) )
-    {
-      return 2;
-    }
-    if ( !mapHtmlPath.empty() && !writeText( mapHtmlPath, nga::model::renderMapHtml( *map ) ) )
-    {
-      return 2;
-    }
+    return 2;
   }
 
   if ( !output.empty() )

@@ -69,6 +69,10 @@ notices a binary release carries, are in
 
 ## Documentation
 
+Read the tutorial at **<https://laoo.github.io/NGA/>**. The tool colours the
+code there with its own lexer, the Project file included. Every program has a
+page of its own, with its files, its memory map and its bytes.
+
 [The tutorial](tutorial/README.md) is the documentation: what this tool does
 that another 6502 assembler does not, a chapter at a time, from the first
 program to the whole memory model, every one of them with programs this

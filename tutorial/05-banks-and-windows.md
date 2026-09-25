@@ -13,7 +13,7 @@ are the same files; so are the Phases, the `resident` line and the
 `.transition`. Two lines of the Project differ:
 
 <!-- include 05-banks-and-windows/banked/main.ngp -->
-```
+```ngp
 include "atari/130xe.ngp"
 
 modules { "print.asm" "intro.asm" "level.asm" }
@@ -41,7 +41,7 @@ The variant is worth reading in full, since every `include` so far has stood
 for one.
 
 <!-- include ../lib/atari/130xe.ngp -->
-```
+```ngp
 ; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings
 ; one of them into, the Window over the OS ROM, every Region of the address
 ; space, and the Modules a program on this machine needs. What PORTB takes to

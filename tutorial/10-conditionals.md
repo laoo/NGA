@@ -181,7 +181,7 @@ frames = NTSC ? 60 : 50
 and every Module sees it.
 
 <!-- include 10-conditionals/a-value/main.ngp tag=constants -->
-```
+```ngp
 constants {
   NTSC = 1
 }

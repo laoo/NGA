@@ -194,7 +194,7 @@ The other form needs `jmp (abs,x)`, which the 6502 does not have. Saying so is
 one line of the Project file:
 
 <!-- include 12-instructions/dispatch-65sc02/main.ngp tag=cpu -->
-```
+```ngp
 target {
   cpu "65sc02"
   region $0080 .. $00FF ram

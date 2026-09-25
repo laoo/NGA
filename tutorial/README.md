@@ -42,7 +42,7 @@ The chapters, in the order they are meant to be read.
     taken and nobody behind it, who follows one, what saying so by hand costs,
     and the memory only the hardware reaches.
 
-The last three are reference. Read them when you need a detail, not in order.
+The last four are reference. Read them when you need a detail, not in order.
 
 14. [The Project file](14-project-file.md) — every block and every option of a
     `.ngp`, and how the tool reads the file.
@@ -50,3 +50,6 @@ The last three are reference. Read them when you need a detail, not in order.
     an `.asm` Module may hold. The 6502 instruction set is not here.
 16. [The C dialect](16-c-dialect.md) — what a `.ngc` Module is, written as the
     differences from C: what is gone, what changed, and what was added.
+17. [Diagnostics](17-diagnostics.md) — every finding the tool can report, by
+    the part of the tool that raises it: what the identifier means, what the
+    severity costs, and a note where the message cannot say the whole of it.

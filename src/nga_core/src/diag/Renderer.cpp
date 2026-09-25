@@ -1,4 +1,5 @@
 #include "nga/diag/Renderer.hpp"
+#include "nga/Json.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -155,54 +156,14 @@ void appendDiagnostic( std::string& out, SourceManager const& sources, Diagnosti
   }
 }
 
-void appendJsonString( std::string& out, std::string_view text )
-{
-  out.push_back( '"' );
-  for ( char const c : text )
-  {
-    switch ( c )
-    {
-    case '"':
-      out.append( R"(\")" );
-      break;
-    case '\\':
-      out.append( R"(\\)" );
-      break;
-    case '\n':
-      out.append( "\\n" );
-      break;
-    case '\r':
-      out.append( "\\r" );
-      break;
-    case '\t':
-      out.append( "\\t" );
-      break;
-    default:
-      if ( static_cast<unsigned char>( c ) < 0x20 )
-      {
-        static constexpr std::string_view DIGITS = "0123456789abcdef";
-        out.append( "\\u00" );
-        out.push_back( DIGITS[( static_cast<unsigned char>( c ) >> 4 ) & 0xF] );
-        out.push_back( DIGITS[static_cast<unsigned char>( c ) & 0xF] );
-      }
-      else
-      {
-        out.push_back( c );
-      }
-      break;
-    }
-  }
-  out.push_back( '"' );
-}
-
 void appendJsonArgument( std::string& out, Argument const& argument )
 {
-  appendJsonString( out, argument.name );
+  nga::json::appendString( out, argument.name );
   out.append( ": " );
 
   if ( auto const* text = std::get_if<std::string>( &argument.value ) )
   {
-    appendJsonString( out, *text );
+    nga::json::appendString( out, *text );
   }
   else if ( auto const* flag = std::get_if<bool>( &argument.value ) )
   {
@@ -223,7 +184,7 @@ void appendJsonLocation( std::string& out,
   std::uint32_t const length = span.length == 0 ? 1 : span.length;
 
   out.append( indent ).append( R"("location": { "file": )" );
-  appendJsonString( out, where.path );
+  nga::json::appendString( out, where.path );
   out.append( ", \"line\": " ).append( std::to_string( where.line ) );
   out.append( ", \"column\": " ).append( std::to_string( where.column ) );
   out.append( ", \"endLine\": " ).append( std::to_string( where.line ) );
@@ -234,7 +195,7 @@ void appendJsonLocation( std::string& out,
   if ( std::optional<SourceReference> const source = sources.sourceOf( span.begin ); source.has_value() )
   {
     out.append( indent ).append( R"("source": { "file": )" );
-    appendJsonString( out, source->path );
+    nga::json::appendString( out, source->path );
     out.append( ", \"line\": " ).append( std::to_string( source->line ) );
     out.append( " },\n" );
   }
@@ -251,19 +212,19 @@ void appendJsonDiagnostic( std::string& out,
   out.append( indent ).append( "{\n" );
 
   out.append( indent ).append( "  \"id\": " );
-  appendJsonString( out, entry.code );
+  nga::json::appendString( out, entry.code );
   out.append( ",\n" );
 
   out.append( indent ).append( "  \"name\": " );
-  appendJsonString( out, entry.name );
+  nga::json::appendString( out, entry.name );
   out.append( ",\n" );
 
   out.append( indent ).append( "  \"severity\": " );
-  appendJsonString( out, severityLabel( severity ) );
+  nga::json::appendString( out, severityLabel( severity ) );
   out.append( ",\n" );
 
   out.append( indent ).append( "  \"message\": " );
-  appendJsonString( out, renderMessage( value ) );
+  nga::json::appendString( out, renderMessage( value ) );
   out.append( ",\n" );
 
   // Absent, never null, when a finding has no source position.
@@ -308,21 +269,24 @@ std::string renderText( SourceManager const& sources, DiagnosticSink const& sink
   return out;
 }
 
-std::string renderJson( SourceManager const& sources, DiagnosticSink const& sink )
+void appendJsonFindings( std::string& out,
+                         SourceManager const& sources,
+                         DiagnosticSink const& sink,
+                         std::string_view indent )
 {
-  std::string out;
-  out.append( "{\n  \"schema\": 1,\n  \"diagnostics\": [\n" );
+  out.append( indent ).append( "\"diagnostics\": [\n" );
 
   auto const findings = sink.findings();
+  std::string const deeper = std::string{ indent } + "  ";
   for ( std::size_t i = 0; i < findings.size(); ++i )
   {
-    appendJsonDiagnostic( out, sources, findings[i].diagnostic, findings[i].severity, "    " );
+    appendJsonDiagnostic( out, sources, findings[i].diagnostic, findings[i].severity, deeper );
     out.append( i + 1 < findings.size() ? ",\n" : "\n" );
   }
 
-  out.append( "  ],\n  \"summary\": { \"errors\": " ).append( std::to_string( sink.errorCount() ) );
-  out.append( ", \"warnings\": " ).append( std::to_string( sink.warningCount() ) ).append( " }\n}\n" );
-  return out;
+  out.append( indent ).append( "],\n" ).append( indent );
+  out.append( R"("summary": { "errors": )" ).append( std::to_string( sink.errorCount() ) );
+  out.append( R"(, "warnings": )" ).append( std::to_string( sink.warningCount() ) ).append( " }" );
 }
 
 } // namespace nga::diag

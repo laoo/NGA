@@ -96,6 +96,16 @@ std::optional<SourceReference> SourceManager::sourceOf( SourceLocation location 
   return SourceReference{ .path = mark.path, .line = mark.line };
 }
 
+std::optional<FileId> SourceManager::fileContaining( SourceLocation location ) const
+{
+  std::size_t const index = indexOfFileContaining( location );
+  if ( index == mFiles.size() )
+  {
+    return std::nullopt;
+  }
+  return FileId{ static_cast<std::uint32_t>( index ) };
+}
+
 std::string_view SourceManager::pathOf( FileId file ) const
 {
   return mFiles.at( file.value ).path;

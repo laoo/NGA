@@ -5,7 +5,7 @@ own format itself, with no packer to run afterwards, and the project asks for
 it in a word: `container xex` is the Atari binary DOS reads.
 
 <!-- include 03-targets/rainbow/main.ngp -->
-```
+```ngp
 modules { "rainbow.asm" }
 
 container xex
@@ -46,7 +46,7 @@ NGA can be told about specific needs about the placement rules for a project usi
 You tell it in a `target` block, one line per range.
 
 <!-- include 03-targets/machine/main.ngp tag=ram -->
-```
+```ngp
 target {
   region        $0080 .. $00FF  ram
   region        $2000 .. $BFFF  ram
@@ -61,7 +61,7 @@ target {
 the machine's description does not — and the finding names both lines.
 
 <!-- include 03-targets/pinned/main.ngp tag=res -->
-```
+```ngp
 target {
   region        $0080 .. $00FF  ram
   region dos    $0700 .. $1FFF  reserved
@@ -102,7 +102,7 @@ form for that, and a two-byte register is written by adding `, 2` after the
 address.
 
 <!-- include 03-targets/registers/main.ngp tag=registers -->
-```
+```ngp
   region COLBK    $D01A .. $D01A  register
   register COLPF2 $D018
   register WSYNC  $D40A
