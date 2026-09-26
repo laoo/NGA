@@ -1,6 +1,7 @@
 #include "nga/model/Storage.hpp"
 
 #include "nga/model/Prune.hpp"
+#include "nga/model/ReadOnly.hpp"
 #include "nga/model/Slots.hpp"
 #include "nga/model/Transition.hpp"
 
@@ -110,7 +111,7 @@ std::uint32_t Storage::landingOf( SectionRef where ) const
 }
 
 void Storage::declareFrame( FrameIndex index,
-                            PhaseIndex from,
+                            std::optional<PhaseIndex> from,
                             PhaseIndex to,
                             std::vector<SectionRef> payloads,
                             std::uint32_t cellWrites,
@@ -129,7 +130,7 @@ void Storage::declareFrame( FrameIndex index,
   frame.size = sizeOfFrame( static_cast<std::uint32_t>( frame.payloads.size() ), cellWrites, windows );
 }
 
-std::optional<FrameIndex> Storage::frameOf( PhaseIndex from, PhaseIndex to ) const
+std::optional<FrameIndex> Storage::frameOf( std::optional<PhaseIndex> from, PhaseIndex to ) const
 {
   for ( std::uint32_t index = 0; index < mFrames.size(); ++index )
   {
@@ -192,7 +193,7 @@ std::span<std::uint8_t const> Storage::frameBytesOf( FrameIndex index ) const
   return mFrames[index.value].bytes;
 }
 
-PhaseIndex Storage::frameFrom( FrameIndex index ) const
+std::optional<PhaseIndex> Storage::frameFrom( FrameIndex index ) const
 {
   return mFrames[index.value].from;
 }
@@ -308,7 +309,15 @@ void reportEvictedRoots( Pruned const& build, diag::DiagnosticSink& sink )
   }
 }
 
-Storage findPayloads( Pruned const& build, diag::DiagnosticSink& sink )
+bool takesColdStart( Project const& project )
+{
+  // Storage is where a Frame waits, so a board with no banks takes no cold
+  // start: there is nothing for one to wait in, and a program on such a board
+  // holds every byte it has in ROM.
+  return project.container == Container::CAR && project.target.unitCount > 0;
+}
+
+Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, diag::DiagnosticSink& sink )
 {
   PhaseGraph const& graph = build.phases();
   Storage storage{ build.modules() };
@@ -323,14 +332,38 @@ Storage findPayloads( Pruned const& build, diag::DiagnosticSink& sink )
   {
     needed[module].assign( build.modules()[module].sections().size(), Residency{ graph.phases.size() } );
   }
+  // The cold start is an edge into the entry Phase from nowhere, which a
+  // Container with no loader takes to put the entry Phase's own bytes where
+  // they belong — see
+  // docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+  // Its Payloads are marked with every other edge's, since a Payload belongs
+  // to a Section and not to an edge.
+  std::vector<SectionRef> coldBlocks;
+  if ( takesColdStart( build.project() ) )
+  {
+    coldBlocks = loadSetOf( graph, std::nullopt, graph.entry, build.modules() );
+    std::erase_if( coldBlocks,
+                   [&readOnly, &build]( SectionRef const& where )
+                   { return readOnly.standsInRom( where ) || !build.reachable().includes( where ); } );
+    for ( SectionRef const where : coldBlocks )
+    {
+      storage.markPayload( where );
+      needed[where.module.value][where.section.value].add( graph.entry );
+    }
+  }
+
+  bool const coldStart = takesColdStart( build.project() );
   for ( std::uint32_t from = 0; from < graph.phases.size(); ++from )
   {
     for ( PhaseIndex const next : graph.phases[from].then )
     {
       for ( SectionRef const where : loadSetOf( graph, PhaseIndex{ from }, next, build.modules() ) )
       {
-        // What Prune dropped is loaded by nothing.
-        if ( build.reachable().includes( where ) )
+        // What Prune dropped is loaded by nothing, and neither is what stands
+        // in ROM: the bytes are in the address space already, and a Transition
+        // that tried to copy them would be writing to ROM — see
+        // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+        if ( build.reachable().includes( where ) && !readOnly.standsInRom( where ) )
         {
           storage.markPayload( where );
           needed[where.module.value][where.section.value].add( PhaseIndex{ from } );
@@ -359,6 +392,19 @@ Storage findPayloads( Pruned const& build, diag::DiagnosticSink& sink )
   // writes those before any Payload's stored form exists.
   auto const slotCount = static_cast<std::uint32_t>( slotsOf( build.modules() ).size() );
   std::uint32_t frames = 0;
+  if ( coldStart )
+  {
+    storage.declareFrame( FrameIndex{ frames },
+                          std::nullopt,
+                          graph.entry,
+                          std::move( coldBlocks ),
+                          slotCount,
+                          static_cast<std::uint32_t>( baseOrderOf( build.project() ).size() ) );
+    // Read before anything of the program runs, and on every reset for as long
+    // as it lives, so it is live wherever the program is.
+    storage.liveFrame( FrameIndex{ frames }, Residency::all( graph.phases.size() ) );
+    ++frames;
+  }
   for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
   {
     Module const& one = build.modules()[module];
@@ -386,12 +432,16 @@ Storage findPayloads( Pruned const& build, diag::DiagnosticSink& sink )
           {
             continue;
           }
+          // The same set, less what stands in ROM: a Frame's blocks are what
+          // the routine copies, and it copies none of those.
+          std::vector<SectionRef> blocks = loadSetOf( graph, from, to, build.modules() );
+          std::erase_if( blocks, [&readOnly]( SectionRef const& where ) { return readOnly.standsInRom( where ); } );
           storage.declareFrame( FrameIndex{ frames },
                                 from,
                                 to,
-                                loadSetOf( graph, from, to, build.modules() ),
+                                std::move( blocks ),
                                 slotCount,
-                                static_cast<std::uint32_t>( build.target().windows.size() ) );
+                                static_cast<std::uint32_t>( baseOrderOf( build.project() ).size() ) );
           // Read when the edge is taken, so needed in the Phase left and
           // live in it and in every Phase that reaches it.
           Residency neededBy{ graph.phases.size() };

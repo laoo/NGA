@@ -41,15 +41,19 @@ The chapters, in the order they are meant to be read.
 13. [Roots](13-roots.md) — where the tool stops being able to see: an address
     taken and nobody behind it, who follows one, what saying so by hand costs,
     and the memory only the hardware reaches.
+14. [Cartridges](14-cartridges.md) — a Container nothing loads: the same
+    program as an image the CPU reads where it lies, what a board is, the ROM a
+    Region can be, a bank left switched, and the cold start that brings the
+    entry Phase its own bytes.
 
 The last four are reference. Read them when you need a detail, not in order.
 
-14. [The Project file](14-project-file.md) — every block and every option of a
+15. [The Project file](15-project-file.md) — every block and every option of a
     `.ngp`, and how the tool reads the file.
-15. [The assembler](15-assembler.md) — every directive, attribute and operator
+16. [The assembler](16-assembler.md) — every directive, attribute and operator
     an `.asm` Module may hold. The 6502 instruction set is not here.
-16. [The C dialect](16-c-dialect.md) — what a `.ngc` Module is, written as the
+17. [The C dialect](17-c-dialect.md) — what a `.ngc` Module is, written as the
     differences from C: what is gone, what changed, and what was added.
-17. [Diagnostics](17-diagnostics.md) — every finding the tool can report, by
+18. [Diagnostics](18-diagnostics.md) — every finding the tool can report, by
     the part of the tool that raises it: what the identifier means, what the
     severity costs, and a note where the message cannot say the whole of it.

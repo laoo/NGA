@@ -171,6 +171,23 @@ public:
     return mRoot;
   }
 
+  /// Whether the source said `readonly`: the Section's bytes never change at
+  /// run time, and the pointers its address is taken into are read through.
+  /// Declared and not checked, as `temporary` is — but a Write Reference to
+  /// the Section is refused, so the word cannot lie about what the tool can
+  /// see for itself. It is the missing half of `.own`, which says who follows
+  /// an address taken and never whether they write through it — see
+  /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  [[nodiscard]] bool saysReadOnly() const
+  {
+    return mReadOnly;
+  }
+
+  void declareReadOnly()
+  {
+    mReadOnly = true;
+  }
+
   /// Whether the Section is a Temporary: its value is not needed while no
   /// Section that names it is running or waiting for a call to return, so
   /// it may share addresses with another Temporary never active at the same
@@ -439,6 +456,7 @@ public:
 private:
   bool mMovable = false;
   bool mRoot = false;
+  bool mReadOnly = false;
   SectionKind mKind = SectionKind::PLAIN;
   std::uint8_t mFormat = 0;
   PlacementClass mPlacement = PlacementClass::ABSOLUTE;

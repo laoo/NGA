@@ -96,6 +96,12 @@ struct MemoryMap
   Pools pools;
   std::uint32_t bankSize = 0;
 
+  /// What the program takes of the ROM pool, over the whole run and not per
+  /// Phase: nothing loads ROM, so two Sections cannot share an address there
+  /// and every Phase's Sections add up in one space — see
+  /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  std::uint32_t romUsed = 0;
+
   /// What one unit of storage is called here: a **Bank** where storage is a
   /// unit set, since that is what a Bank is, and a plain **unit** where
   /// storage is by count — a diskette has no unit set, and the glossary

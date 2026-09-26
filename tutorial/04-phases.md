@@ -189,7 +189,8 @@ phase intro (0)
   $0900-$09FF  disk.diskBuffer              section            intro..level
   $0A00-$0A2C  disk.diskCopy                proc               intro..level
   $0A2D-$0A3E  intro.introStart             proc               intro
-  $0BC6-$0C9F  nga.transition.ngaTransition proc               intro..level
+  $0BC6-$0C0E  nga.transition.ngaTransition proc               intro..level
+  $0C0F-$0C9F  nga.transition.ngaEnter      proc               intro..level
   $0CA0-$0CA9  nga.transition.ngaFrameSkip  proc               intro..level
   $0CAA-$0CB1  nga.transforms.ngaTransform  proc               intro..level
   $C000-$CFFF  os.osRomLow                  section root       intro..level

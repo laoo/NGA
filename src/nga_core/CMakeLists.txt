@@ -29,6 +29,7 @@ add_library( nga_core
   src/model/Assemble.cpp
   src/model/Boot.cpp
   src/model/Atr.cpp
+  src/model/Car.cpp
   src/model/Charsets.cpp
   src/model/Emit.cpp
   src/model/Facts.cpp
@@ -61,6 +62,7 @@ add_library( nga_core
   src/model/Runtime.cpp
   src/model/Suppressions.cpp
   src/model/Prune.cpp
+  src/model/ReadOnly.cpp
   src/model/Trace.cpp
   src/model/References.cpp
   src/model/ProjectFile.cpp

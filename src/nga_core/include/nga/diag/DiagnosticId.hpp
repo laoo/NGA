@@ -98,6 +98,11 @@ enum class Severity : std::uint8_t
      "`{what}` stands in no section; what has an address is written in a `.section` or a `.proc`" )                    \
   X( TEMPORARY_EXCLUDES, 0179, ERROR, "`temporary` does not go with `{other}`" )                                       \
   X( PROC_NOT_TEMPORARY, 0180, ERROR, "a `.proc` is code, and `temporary` is a reservation" )                          \
+  X( READONLY_EXCLUDES, 0192, ERROR, "`readonly` does not go with `{other}`" )                                         \
+  X( PROC_IS_READONLY,                                                                                                 \
+     0193,                                                                                                             \
+     WARNING,                                                                                                          \
+     "a `.proc` holds code, which nothing writes unless a statement says so, and `readonly` changes nothing" )         \
   X( SOURCE_TAKES_PATH_AND_LINE,                                                                                       \
      0181,                                                                                                             \
      ERROR,                                                                                                            \
@@ -182,6 +187,22 @@ enum class Severity : std::uint8_t
   X( PREVIOUS_CONTAINER, 1140, NOTE, "the container was already set here" )                                            \
   X( CONTAINER_NOT_TAKEN, 1141, ERROR, "this machine does not take a `{name}`; it takes {taken}" )                     \
   X( CONTAINERS_DECLARED_HERE, 1142, NOTE, "the machine says what it takes here" )                                     \
+  X( CONTAINER_TAKES_NO_FORMAT, 1216, ERROR, "a `{name}` is one thing and takes no format; only `car` names a board" ) \
+  X( CARTRIDGE_WITHOUT_FORMAT,                                                                                         \
+     1217,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `.car` is an image of one board and this says none; write `container car \"8k\"`, and the boards are "         \
+     "{known}" )                                                                                                       \
+  X( UNKNOWN_CARTRIDGE, 1218, ERROR, "`{name}` names no cartridge board; the boards are {known}" )                     \
+  X( CARTRIDGE_FIXED_PART, 1219, ERROR, "a `{name}` cartridge is ROM at {range} and this machine has {found}" )        \
+  X( CARTRIDGE_WINDOW,                                                                                                 \
+     1220,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `{name}` cartridge switches banks into {range} and this machine declares no window of that one range" )        \
+  X( CARTRIDGE_UNITS,                                                                                                  \
+     1221,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `{name}` cartridge has {units:n} banks of storage and window `{window}` shows a set of {found:n}" )            \
   X( UNKNOWN_INTENT, 1143, ERROR, "`{name}` is not what a program is optimised for; the words are {known}" )           \
   X( INTENT_ALREADY_SET, 1144, ERROR, "what the program is optimised for is set more than once" )                      \
   X( PREVIOUS_INTENT, 1145, NOTE, "it was already set here" )                                                          \
@@ -232,7 +253,7 @@ enum class Severity : std::uint8_t
   X( UNKNOWN_REGION_PROPERTY,                                                                                          \
      1156,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{word}` is not a region property; write `ram`, `register` or `reserved`" )                                      \
+     "`{word}` is not a region property; write `ram`, `rom`, `register` or `reserved`" )                               \
   X( REGION_NOT_A_RANGE,                                                                                               \
      1157,                                                                                                             \
      ERROR,                                                                                                            \
@@ -476,7 +497,6 @@ enum class Severity : std::uint8_t
      "`{name}` is a {kind}, and `.with` takes a pane, a family with `, x`, a window with `, x` or a window `= "        \
      "STATE`" )                                                                                                        \
   X( WITH_STATE_UNKNOWN, 3003, ERROR, "`{state}` is not a named state of window `{window}`" )                          \
-  X( WITH_NO_BASE, 3004, ERROR, "window `{window}` has no base, so nothing can be shown again after the statement" )   \
   X( WITH_DOES_NOTHING, 3005, WARNING, "`{window}` shows this state already, so this `.with` changes nothing" )        \
   X( WITH_NESTED_SAME_WINDOW,                                                                                          \
      3006,                                                                                                             \
@@ -802,6 +822,16 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{section}` stands at {address:hex}, inside the boot record the .atr loads over {begin:hex} to "                 \
      "{end:hex}, which is still loading the program when those bytes are written" )                                    \
+  X( CAR_STORAGE_PAST_THE_END,                                                                                         \
+     6231,                                                                                                             \
+     ERROR,                                                                                                            \
+     "storage comes to {required:n} bytes and a `{name}` cartridge holds {available:n}" )                              \
+  X( CAR_SECTION_OUTSIDE_ROM,                                                                                          \
+     6232,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` holds bytes at {address:hex}, and a `{name}` cartridge is ROM at {range} and nothing else, so "      \
+     "nothing would ever put them there" )                                                                             \
+  X( CAR_WITHOUT_HEADER, 6233, ERROR, "a cartridge is started through the six bytes at its top, and none were made" )  \
   X( ATR_WITHOUT_BOOT_RECORD, 6226, ERROR, "an .atr is booted by its first sectors, and none were made" )              \
   X( ATR_BOOT_RECORD_TOO_LARGE,                                                                                        \
      6227,                                                                                                             \
@@ -855,6 +885,20 @@ enum class Severity : std::uint8_t
      4602,                                                                                                             \
      ERROR,                                                                                                            \
      "`{section}` is temporary while `{owner}` runs, and `{owner}` can be entered again before it returns" )           \
+  X( READONLY_WRITTEN, 5230, ERROR, "`{section}` says `readonly` and this writes it" )                                 \
+  X( READONLY_DECLARED_HERE, 5231, NOTE, "`readonly` is declared here" )                                               \
+  X( ROM_DOES_NOT_FIT,                                                                                                 \
+     5234,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the sections nothing writes come to {required:n} bytes and this machine has {available:n} of ROM" )              \
+  X( PIN_IN_ROM,                                                                                                       \
+     5233,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is pinned at {address:hex} in `{region}`, which is ROM, and something writes it" )                   \
+  X( READONLY_WITHOUT_BYTES,                                                                                           \
+     5232,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{section}` reserves space and emits no bytes, so `readonly` says nothing about it" )                            \
   X( LAYOUT_UNREACHABLE_PLACED, 5250, ERROR, "the layout gives `{section}` an address, and nothing reaches it" )       \
   X( LAYOUT_NOT_FOLLOWING,                                                                                             \
      5251,                                                                                                             \

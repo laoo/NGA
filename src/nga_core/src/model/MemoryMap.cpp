@@ -288,9 +288,24 @@ MemoryMap memoryMapOf( Patched const& build )
     std::vector<std::pair<std::uint32_t, std::uint32_t>> general;
   };
 
+  // A Section standing in the ROM pool is in neither: the general pool is RAM,
+  // and what ROM comes to is one number for the whole run.
+  auto const inRom = [&map]( MapEntry const& entry )
+  {
+    return std::ranges::any_of( map.pools.readOnly,
+                                [&entry]( AddressRange const& range )
+                                { return entry.begin >= range.begin && entry.begin < range.end; } );
+  };
+
   std::vector<Shared> temporaries( map.phases.size() );
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> rom;
   for ( MapEntry const& entry : map.entries )
   {
+    if ( inRom( entry ) )
+    {
+      rom.emplace_back( entry.begin, entry.end );
+      continue;
+    }
     if ( !entry.firstPhase.has_value() || !entry.lastPhase.has_value() )
     {
       continue;
@@ -327,6 +342,9 @@ MemoryMap memoryMapOf( Patched const& build )
     map.phases[phase].zeroPageUsed += covered( std::move( temporaries[phase].zeroPage ) );
     map.phases[phase].generalUsed += covered( std::move( temporaries[phase].general ) );
   }
+  // A Movable Section is not read-only and so is in no ROM pool, but the union
+  // is what the number means whatever the entries turn out to be.
+  map.romUsed = covered( std::move( rom ) );
 
   // Storage: every Frame, and what every Bank came to.
   for ( std::uint32_t index = 0; index < storage.frameCount(); ++index )
@@ -373,6 +391,14 @@ std::string renderMapText( MemoryMap const& map )
   std::string out = "NGA memory map\n";
   std::uint32_t const zeroPageSize = map.pools.zeroPageSize();
   std::uint32_t const generalSize = map.pools.generalSize();
+  std::uint32_t const romSize = map.pools.readOnlySize();
+
+  // Once, and not per Phase, and only where the Target has ROM at all, so that
+  // a machine without a cartridge reads as it always did.
+  if ( romSize > 0 )
+  {
+    out += fmt::format( "\nrom: {} of {} bytes\n", map.romUsed, romSize );
+  }
 
   // Columns as wide as the longest name, so that every line reads.
   std::size_t width = 0;

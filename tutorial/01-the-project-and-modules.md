@@ -145,7 +145,7 @@ total
         rts
 .endp
 
-.section
+.section readonly
 numbers
         .byte 3, 1, 4, 1, 5
 .ends
@@ -155,4 +155,7 @@ numbers
 The compiler has no runtime of its own to hide in and no stack frames to build: it writes the
 assembler you would have written, against the same model, and everything the
 rest of this tutorial teaches about memory applies to both languages in the
-same words.
+same words. The one word it wrote that the C did not is `readonly`, which is
+what a `const` becomes where it is bytes rather than a number the assembler can
+fold — it lets the solver put the table in ROM on a machine that has some, and
+[chapter fourteen](14-cartridges.md) is where that matters.

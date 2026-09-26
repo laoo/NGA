@@ -69,8 +69,8 @@ struct ContainerFacts
 /// comes from the model: the Layout says which Section stands at an address,
 /// and the Sizes say which of its statements wrote which byte.
 ///
-/// A Container that is not a `.xex` gives back its size and nothing else, for
-/// now: the diskette waits, and says so by leaving `segments` empty.
+/// A `.xex`, an `.atr` and a `.car` are each read back whole, with `unaccounted`
+/// zero; anything else gives back its size and nothing else.
 ContainerFacts containerFactsOf( Patched const& build,
                                  MemoryMap const& map,
                                  std::span<std::uint8_t const> bytes,

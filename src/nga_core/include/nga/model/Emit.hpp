@@ -80,4 +80,25 @@ struct AtrFile
 /// sectors than a single-density diskette has.
 AtrFile emitAtr( Patched const& build, diag::DiagnosticSink& sink );
 
+/// A cartridge image, as bytes: the sixteen-byte header every reader knows a
+/// `.car` by, and then the board's ROM exactly as large as the board is. The
+/// CLI writes them; `nga_core` does no I/O.
+struct CarFile
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the `.car` Container, the one that loads nothing: every
+/// Section standing in the machine's `rom` Region at its offset in the image,
+/// `$FF` wherever nothing accounts for a byte, the program's start patched
+/// into the six bytes at `$BFFA`, and the header. The layout is the contract
+/// in docs/spec/car.md and the reasoning is
+/// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+///
+/// Refused, with nothing emitted, when the board has banks — which is not
+/// written yet — when a Section holding bytes stands where no part of the
+/// image reaches, and when the entry Phase has no entry Label defined exactly
+/// once among the Modules it needs.
+CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink );
+
 } // namespace nga::model

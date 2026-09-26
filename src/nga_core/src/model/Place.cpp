@@ -1,6 +1,7 @@
 #include "nga/model/Place.hpp"
 
 #include "nga/model/Prune.hpp"
+#include "nga/model/ReadOnly.hpp"
 
 #include "nga/model/Solver.hpp"
 #include "nga/model/Trace.hpp"
@@ -46,6 +47,16 @@ struct Candidate
   /// A Temporary, which may share an address with another the Interference
   /// allows — see docs/decisions/0034-trace.md.
   bool temporary = false;
+
+  /// What the ReadOnly Step said: nothing writes this Section.
+  bool readOnly = false;
+
+  /// Whether it therefore stands in ROM — the third pool, or a pin inside a
+  /// `rom` Region. Then its `live` is every Phase, because nothing loads ROM:
+  /// its bytes are there for the whole run and no other Section's may be at
+  /// that address, whatever the two Residencies say — see
+  /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  bool inRom = false;
 
   /// The Proc this one falls through into, placed immediately after it.
   std::optional<SectionRef> next;
@@ -132,7 +143,8 @@ std::string nameOfSection( Merged const& build, SectionRef where )
   return build.symbols().moduleAt( where.module ).displayNameOf( where.section, build.sources() );
 }
 
-std::vector<Candidate> candidatesOf( Sized const& build, Storage const& storage, diag::DiagnosticSink& sink )
+std::vector<Candidate>
+candidatesOf( Sized const& build, Storage const& storage, ReadOnly const& readOnly, diag::DiagnosticSink& sink )
 {
   Sizes const& sizes = build.sizes();
   std::vector<Candidate> candidates;
@@ -201,6 +213,7 @@ std::vector<Candidate> candidatesOf( Sized const& build, Storage const& storage,
         }
       }
       candidate.temporary = section.isTemporary();
+      candidate.readOnly = readOnly.includes( where );
       if ( std::optional<SectionIndex> const next = section.next(); next.has_value() )
       {
         candidate.next = SectionRef{ .module = where.module, .section = *next };
@@ -260,6 +273,15 @@ std::vector<Candidate> candidatesOf( Sized const& build, Storage const& storage,
         {
           candidate.boundary = static_cast<std::uint32_t>( *value );
         }
+      }
+
+      // Where it stands is the ReadOnly Step's answer and not a second one of
+      // Place's. A Pane's Section has its Window for a pool whatever else is
+      // true of it.
+      candidate.inRom = candidate.readOnly && !candidate.pane.has_value() && readOnly.standsInRom( where );
+      if ( candidate.inRom )
+      {
+        candidate.live = Residency::all( one.residency().phaseCount() );
       }
 
       // Nothing that large lies within the boundary wherever it starts: a
@@ -341,7 +363,10 @@ bool reportCapacity( Sized const& build, std::span<Candidate const> candidates, 
       std::vector<Contribution> contributions;
       auto const presentHere = [&]( Candidate const& candidate )
       {
-        return candidate.placement == placement && !candidate.pane.has_value() &&
+        // A Section in ROM takes nothing of either pool a Phase has: its
+        // bytes are in a third, and what that comes to is summed once for
+        // the whole run below.
+        return candidate.placement == placement && !candidate.pane.has_value() && !candidate.inRom &&
                candidate.residency->phaseCount() > index && candidate.residency->includes( phase );
       };
       for ( Candidate const& candidate : candidates )
@@ -399,6 +424,39 @@ bool reportCapacity( Sized const& build, std::span<Candidate const> candidates, 
     report( PlacementClass::ZEROPAGE,
             pools.zeroPage,
             diag::diagnostic( diag::DiagnosticId::ZERO_PAGE_DOES_NOT_FIT_IN_PHASE ) );
+  }
+
+  // ROM is summed **once** and not per Phase: nothing loads it, so no Section
+  // there gives its address up to another Phase's and every one of them adds
+  // up in one space — see
+  // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  std::uint32_t required = 0;
+  std::vector<Contribution> contributions;
+  for ( Candidate const& candidate : candidates )
+  {
+    std::uint32_t const bytes = candidate.inRom ? bytesWithin( candidate, pools.readOnly ) : 0;
+    if ( bytes == 0 )
+    {
+      continue;
+    }
+    required += bytes;
+    contributions.push_back( Contribution{ .bytes = bytes, .who = &candidate } );
+  }
+  if ( required > sizeOf( pools.readOnly ) )
+  {
+    refused = true;
+    std::ranges::stable_sort( contributions, std::ranges::greater{}, &Contribution::bytes );
+    diag::Diagnostic finding = diag::diagnostic( diag::DiagnosticId::ROM_DOES_NOT_FIT )
+                                   .arg( "required", required )
+                                   .arg( "available", sizeOf( pools.readOnly ) );
+    for ( Contribution const& contribution : contributions | std::views::take( largest ) )
+    {
+      finding = std::move( finding ).note( diag::diagnostic( diag::DiagnosticId::LARGEST_CONTRIBUTOR )
+                                               .at( contribution.who->span.begin, contribution.who->span.length )
+                                               .arg( "section", nameOfSection( build, contribution.who->where ) )
+                                               .arg( "size", contribution.bytes ) );
+    }
+    sink.add( std::move( finding ).sortedBy( "rom" ) );
   }
   return refused;
 }
@@ -543,8 +601,11 @@ bool reportPaneCapacity( Sized const& build, std::span<Candidate const> candidat
 std::vector<AddressRange>
 allowedStartsOf( Candidate const& candidate, Pools const& pools, std::span<AddressRange const> paneWindow )
 {
-  std::span<AddressRange const> const pool =
-      candidate.placement == PlacementClass::ZEROPAGE ? pools.zeroPage : pools.general;
+  std::span<AddressRange const> pool = candidate.placement == PlacementClass::ZEROPAGE ? pools.zeroPage : pools.general;
+  if ( candidate.inRom )
+  {
+    pool = pools.readOnly;
+  }
   std::vector<AddressRange> starts;
   if ( candidate.pane.has_value() )
   {
@@ -730,7 +791,8 @@ std::uint32_t Layout::addressOf( SectionRef where ) const
   return 0;
 }
 
-Layout placeSections( Sized const& build, Storage const& storage, bool explain, diag::DiagnosticSink& sink )
+Layout placeSections(
+    Sized const& build, Storage const& storage, ReadOnly const& readOnly, bool explain, diag::DiagnosticSink& sink )
 {
   PhaseGraph const& phases = build.phases();
   Target const& target = build.target();
@@ -740,7 +802,7 @@ Layout placeSections( Sized const& build, Storage const& storage, bool explain, 
     std::span<Residency const> const across = build.freezes().of( candidate.where );
     return std::vector<Residency>( across.begin(), across.end() );
   };
-  std::vector<Candidate> candidates = candidatesOf( build, storage, sink );
+  std::vector<Candidate> candidates = candidatesOf( build, storage, readOnly, sink );
   Pools const& pools = target.pools;
   Problem problem;
   std::vector<std::optional<std::size_t>> const paneClaimOf = paneClaimsOf( target, candidates, layout, problem.panes );
@@ -907,6 +969,14 @@ Layout placeSections( Sized const& build, Storage const& storage, bool explain, 
       if ( region.property == RegionProperty::REGISTER )
       {
         sink.add( inRegion( diag::DiagnosticId::PIN_IN_REGISTER ) );
+        continue;
+      }
+      if ( region.property == RegionProperty::ROM && !candidate.readOnly )
+      {
+        // Refused and not warned about: the bytes would be read back as
+        // whatever the ROM holds, and there is no author's knowledge that
+        // could make that right.
+        sink.add( inRegion( diag::DiagnosticId::PIN_IN_ROM ) );
         continue;
       }
       if ( region.property == RegionProperty::RESERVED )

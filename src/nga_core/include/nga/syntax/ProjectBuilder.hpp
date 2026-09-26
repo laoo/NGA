@@ -108,10 +108,11 @@ public:
   /// where the first one was kept.
   virtual void setEntry( Token phase ) = 0;
 
-  /// The `container` statement: what the program is. Whether the word names a
-  /// container the tool writes, and whether one was given before, belong to
-  /// the implementation.
-  virtual void setContainer( Token name ) = 0;
+  /// The `container` statement: what the program is, and the cartridge board
+  /// after it where one was written. Whether the word names a container the
+  /// tool writes, whether that container takes a board, and whether one was
+  /// given before, belong to the implementation.
+  virtual void setContainer( Token name, std::optional<Token> board ) = 0;
 
   /// One name of a `containers` entry of a `target` block: what the machine
   /// takes.

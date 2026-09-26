@@ -323,11 +323,11 @@ public:
   Interference run( diag::DiagnosticSink& sink )
   {
     mSink = &sink;
-    // The Transition routine jumps through the entry the Frame hands it: the
+    // The routine's tail jumps through the entry the Frame hands it: the
     // `.transition` statements are its takings, and it their follower, by
-    // construction and whether or not one of them is reachable.
-    if ( std::optional<SymbolRef> const routine = mBuild->symbols().find( TRANSITION_ROUTINE_NAME );
-         routine.has_value() )
+    // construction and whether or not one of them is reachable. The cold start
+    // is one more taking of the same jump.
+    if ( std::optional<SymbolRef> const routine = mBuild->symbols().find( TRANSITION_ENTER_NAME ); routine.has_value() )
     {
       if ( std::optional<Position> const position = positionOf( mBuild->symbols(), *routine ); position.has_value() )
       {

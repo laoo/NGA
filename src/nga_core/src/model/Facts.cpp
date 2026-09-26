@@ -282,6 +282,12 @@ void appendMap( std::string& out, MemoryMap const& map )
   appendField( out, "unit", map.unitWord );
   out.append( ",\n    " );
   appendNumber( out, "unitSize", map.bankSize );
+  out.append( ",\n    " );
+  // One number and not one per Phase: nothing loads ROM, so what stands there
+  // stands there for the whole run.
+  appendNumber( out, "romUsed", map.romUsed );
+  out.append( ",\n    " );
+  appendNumber( out, "romSize", map.pools.readOnlySize() );
 
   out.append( ",\n    \"phases\": [\n" );
   for ( std::size_t i = 0; i < map.phases.size(); ++i )

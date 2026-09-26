@@ -60,6 +60,12 @@ struct SectionAttributes
   /// Written `, temporary`: a Temporary, whose bytes are another's while no
   /// Section naming it is active — see docs/decisions/0058-temporary-is-an-attribute.md.
   bool temporary = false;
+
+  /// Written `, readonly`: the Section's bytes never change at run time, and
+  /// the pointers its address is taken into are read through. What the tool
+  /// cannot see for itself, said where it can be held to — see
+  /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  bool readOnly = false;
 };
 
 /// The names an argument list is matched against: the parameters of a

@@ -30,7 +30,7 @@ An error stops the build at the next gate. A warning does not stop anything. A
 note never stands alone and always explains the finding above it.
 
 The severity in the tables is the default. A Project changes it in its
-[`diagnostics` block](14-project-file.md#diagnostics), and the command line
+[`diagnostics` block](15-project-file.md#diagnostics), and the command line
 changes it with `--deny`, `--allow` and `--off`. The command line wins.
 
 ## What the message shows here
@@ -42,7 +42,7 @@ braces. A real finding has values there instead. So `` `{section}` is pinned at
 Some findings have more to say than the message has room for. Those carry a
 note below the tables, and their identifier is a link to it.
 
-<!-- catalogue 17-diagnostics/notes.md -->
+<!-- catalogue 18-diagnostics/notes.md -->
 ### Source lexing
 
 | Code | Severity | Message |
@@ -148,6 +148,8 @@ note below the tables, and their identifier is a link to it.
 | `NGA0189` | error | this `.declare` keeps every byte in a register, and a `.ztemp` or `.temp` stands below it |
 | `NGA0190` | error | `{register}` already carries an argument of this proc |
 | `NGA0191` | error | `{place}` names one register for two bytes |
+| `NGA0192` | error | `readonly` does not go with `{other}` |
+| `NGA0193` | warning | a `.proc` holds code, which nothing writes unless a statement says so, and `readonly` changes nothing |
 
 ### Project file and run configuration
 
@@ -205,7 +207,7 @@ note below the tables, and their identifier is a link to it.
 | `NGA1151` | error | a transform entry names a section as `module.section`, found `{token}` |
 | `NGA1152` | note | the processor was already set here |
 | `NGA1155` | error | a region's range is followed by `ram`, `register` or `reserved`, not by `{token}` |
-| `NGA1156` | error | `{word}` is not a region property; write `ram`, `register` or `reserved` |
+| `NGA1156` | error | `{word}` is not a region property; write `ram`, `rom`, `register` or `reserved` |
 | `NGA1157` | error | a region runs from a lower address to a higher one inside the address space, and this one does not |
 | `NGA1158` | error | a region named `{name}` is already declared |
 | `NGA1159` | note | `{name}` was declared here |
@@ -264,6 +266,12 @@ note below the tables, and their identifier is a link to it.
 | `NGA1213` | warning | {module}: {message} |
 | `NGA1214` | note | the generator said so at {where} |
 | `NGA1215` | error | `{name}` names no set of facts; the sets are {sets} |
+| `NGA1216` | error | a `{name}` is one thing and takes no format; only `car` names a board |
+| `NGA1217` | error | a `.car` is an image of one board and this says none; write `container car "8k"`, and the boards are {known} |
+| `NGA1218` | error | `{name}` names no cartridge board; the boards are {known} |
+| `NGA1219` | error | a `{name}` cartridge is ROM at {range} and this machine has {found} |
+| `NGA1220` | error | a `{name}` cartridge switches banks into {range} and this machine declares no window of that one range |
+| `NGA1221` | error | a `{name}` cartridge has {units:n} banks of storage and window `{window}` shows a set of {found:n} |
 
 ### Symbols, Merge, duplicates and Slots
 
@@ -406,7 +414,6 @@ note below the tables, and their identifier is a link to it.
 | `NGA3001` | error | `.with` applies to the instruction or macro use on the line below, and this is not one |
 | `NGA3002` | error | `{name}` is a {kind}, and `.with` takes a pane, a family with `, x`, a window with `, x` or a window `= STATE` |
 | [`NGA3003`](#nga3003) | error | `{state}` is not a named state of window `{window}` |
-| `NGA3004` | error | window `{window}` has no base, so nothing can be shown again after the statement |
 | `NGA3005` | warning | `{window}` shows this state already, so this `.with` changes nothing |
 | `NGA3006` | error | `{window}` is shown by a `.with` on this statement already, and a window shows one state at a time |
 | [`NGA3007`](#nga3007) | error | a statement under `.with` may not `{mnemonic}`: it would leave the window as shown |
@@ -472,6 +479,11 @@ note below the tables, and their identifier is a link to it.
 | `NGA5227` | error | `{section}` has bytes and is in pane `{pane}`, which is pinned to a named state: no Container fills one, so a pane pinned to a state holds only sections that reserve |
 | `NGA5228` | error | `{section}` is pinned at {address:hex}, inside window `{window}`, which code reached under a `.with` on it would not see |
 | `NGA5229` | error | family `{pane}` needs {count} banks in a row, and `{set}` has {banks} |
+| `NGA5230` | error | `{section}` says `readonly` and this writes it |
+| `NGA5231` | note | `readonly` is declared here |
+| `NGA5232` | warning | `{section}` reserves space and emits no bytes, so `readonly` says nothing about it |
+| `NGA5233` | error | `{section}` is pinned at {address:hex} in `{region}`, which is ROM, and something writes it |
+| `NGA5234` | error | the sections nothing writes come to {required:n} bytes and this machine has {available:n} of ROM |
 | `NGA5250` | error | the layout gives `{section}` an address, and nothing reaches it |
 | `NGA5251` | error | the layout ends `{section}` at {address:hex} in phase `{phase}`, and `{next}`, which follows it, starts at {other:hex} |
 | `NGA5252` | error | the layout puts `{section}` at {address:hex}, inside window `{window}`, which it runs under a `.with` on |
@@ -515,6 +527,9 @@ note below the tables, and their identifier is a link to it.
 | `NGA6225` | error | `{section}` stands at {address:hex}, inside the boot record the .atr loads over {begin:hex} to {end:hex}, which is still loading the program when those bytes are written |
 | `NGA6226` | error | an .atr is booted by its first sectors, and none were made |
 | `NGA6227` | error | the boot record holds {available:n} bytes and its loader came to {required:n} |
+| `NGA6231` | error | storage comes to {required:n} bytes and a `{name}` cartridge holds {available:n} |
+| `NGA6232` | error | `{section}` holds bytes at {address:hex}, and a `{name}` cartridge is ROM at {range} and nothing else, so nothing would ever put them there |
+| `NGA6233` | error | a cartridge is started through the six bytes at its top, and none were made |
 
 ### Lexing a `.ngc` Module
 

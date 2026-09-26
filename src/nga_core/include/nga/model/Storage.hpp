@@ -3,6 +3,7 @@
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/model/Build.hpp"
 #include "nga/model/Merge.hpp"
+#include "nga/model/ReadOnly.hpp"
 #include "nga/model/Size.hpp"
 #include "nga/model/Types.hpp"
 
@@ -70,8 +71,13 @@ public:
   /// load and every Cell it may have to write, from which its size follows
   /// before a byte of it exists — placed by that size, and written to
   /// exactly it later.
+  ///
+  /// `from` is absent for the **cold start**, the edge into the entry Phase
+  /// from nowhere, which a Container with no loader takes to put the entry
+  /// Phase's own bytes where they belong — see
+  /// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
   void declareFrame( FrameIndex index,
-                     PhaseIndex from,
+                     std::optional<PhaseIndex> from,
                      PhaseIndex to,
                      std::vector<SectionRef> payloads,
                      std::uint32_t cellWrites,
@@ -86,12 +92,13 @@ public:
   [[nodiscard]] bool isFramePlaced( FrameIndex index ) const;
 
   /// The Frame of an edge, when some `.transition` takes it.
-  [[nodiscard]] std::optional<FrameIndex> frameOf( PhaseIndex from, PhaseIndex to ) const;
+  [[nodiscard]] std::optional<FrameIndex> frameOf( std::optional<PhaseIndex> from, PhaseIndex to ) const;
 
   [[nodiscard]] StorageAddress frameAddressOf( FrameIndex index ) const;
   [[nodiscard]] std::uint32_t frameSizeOf( FrameIndex index ) const;
   [[nodiscard]] std::span<std::uint8_t const> frameBytesOf( FrameIndex index ) const;
-  [[nodiscard]] PhaseIndex frameFrom( FrameIndex index ) const;
+  /// Nothing for the cold start, which comes from no Phase.
+  [[nodiscard]] std::optional<PhaseIndex> frameFrom( FrameIndex index ) const;
   [[nodiscard]] PhaseIndex frameTo( FrameIndex index ) const;
   [[nodiscard]] std::span<SectionRef const> framePayloadsOf( FrameIndex index ) const;
   [[nodiscard]] std::uint32_t frameCellWritesOf( FrameIndex index ) const;
@@ -131,7 +138,9 @@ private:
     bool placed = false;
     std::uint32_t size = 0;
     StorageAddress address;
-    PhaseIndex from;
+
+    /// Absent for the cold start, which comes from no Phase.
+    std::optional<PhaseIndex> from;
     PhaseIndex to;
     std::vector<SectionRef> payloads;
     std::uint32_t cellWrites = 0;
@@ -170,11 +179,24 @@ Residency liveAcross( PhaseGraph const& graph, Residency const& needed );
 /// not live in the Window, and that is decided before any size or address of
 /// it exists. See docs/decisions/0017-payloads-and-banks.md.
 ///
+/// A Section standing in ROM has no Payload and is no block of a Frame: its
+/// bytes are in the address space already, and a Transition copying them would
+/// be writing to ROM — see
+/// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+///
 /// The one thing reported here is the complement of a Payload: a `root`
 /// Section holding no bytes, evicted in a Phase from which a Phase needing it
 /// is reachable. Nothing restores it, and what reaches a Root knows no
 /// Phases — see docs/decisions/0040-root-evicted.md.
-Storage findPayloads( Pruned const& build, diag::DiagnosticSink& sink );
+Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, diag::DiagnosticSink& sink );
+
+/// Whether the Project's Container takes a **cold start**: an edge into the
+/// entry Phase from nowhere, which puts that Phase's own initialised bytes
+/// where they belong. A `.xex` and an `.atr` have a loader for that and take
+/// none; a cartridge loads nothing and takes one wherever it has a Phase to
+/// enter — see
+/// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+[[nodiscard]] bool takesColdStart( Project const& project );
 
 /// The second half: where each Payload waits, after the Frames.
 ///

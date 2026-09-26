@@ -63,6 +63,7 @@ struct GeneratedSection
   bool movable = false;
   bool root = false;
   bool temporary = false;
+  bool readOnly = false;
   std::vector<GeneratedItem> items{};
 };
 

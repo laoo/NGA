@@ -4,6 +4,7 @@
 #include "nga/model/Build.hpp"
 #include "nga/model/Evaluate.hpp"
 #include "nga/model/Merge.hpp"
+#include "nga/model/ReadOnly.hpp"
 #include "nga/model/Size.hpp"
 #include "nga/model/Storage.hpp"
 #include "nga/model/TypeCheck.hpp"
@@ -163,7 +164,8 @@ private:
 /// with the no-overlap made soft, and answers with the fewest pairs of
 /// Sections some layout has to let collide — unless the sums already refused
 /// a Phase, in which case a pair explains nothing the sum did not.
-Layout placeSections( Sized const& build, Storage const& storage, bool explain, diag::DiagnosticSink& sink );
+Layout placeSections(
+    Sized const& build, Storage const& storage, ReadOnly const& readOnly, bool explain, diag::DiagnosticSink& sink );
 
 /// The Assertions of every Module, which are checked **after** Place because
 /// that is the whole point of them: they guard assumptions the solver knows

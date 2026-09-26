@@ -1,6 +1,7 @@
 #include "nga/model/ProjectFile.hpp"
 
 #include "nga/model/Atr.hpp"
+#include "nga/model/Car.hpp"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -81,7 +82,7 @@ public:
   void groupMember( syntax::Token group, syntax::Token member ) override;
   void setSeverity( syntax::Token code, diag::SeverityOverride action ) override;
   void addConstant( syntax::Token name, syntax::Token value ) override;
-  void setContainer( syntax::Token name ) override;
+  void setContainer( syntax::Token name, std::optional<syntax::Token> board ) override;
   void addAcceptedContainer( syntax::Token keyword, syntax::Token name ) override;
   void setCpu( syntax::Token keyword, syntax::Token name ) override;
   void setIntent( syntax::Token name ) override;
@@ -125,6 +126,7 @@ public:
   void resolveTarget();
   void addConstantModule();
   void checkContainer() const;
+  void checkCartridge();
 
   [[nodiscard]] Project take() &&
   {
@@ -698,11 +700,14 @@ void Loader::addConstant( syntax::Token name, syntax::Token value )
 /// Every container the tool writes, as a finding lists them.
 std::string knownContainers()
 {
-  return fmt::format(
-      "`{}`, `{}` and `{}`", nameOf( Container::RAW_IMAGE ), nameOf( Container::XEX ), nameOf( Container::ATR ) );
+  return fmt::format( "`{}`, `{}`, `{}` and `{}`",
+                      nameOf( Container::RAW_IMAGE ),
+                      nameOf( Container::XEX ),
+                      nameOf( Container::ATR ),
+                      nameOf( Container::CAR ) );
 }
 
-void Loader::setContainer( syntax::Token name )
+void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> board )
 {
   std::string const text{ mSources->textOf( name.span() ) };
   std::optional<Container> const named = containerNamed( text );
@@ -712,6 +717,35 @@ void Loader::setContainer( syntax::Token name )
                 .at( name.location, name.length )
                 .arg( "name", text )
                 .arg( "known", knownContainers() ) );
+    return;
+  }
+
+  // A `.car` is an image of one board, and no other Container is of anything.
+  std::optional<std::string> spelled;
+  if ( board.has_value() )
+  {
+    spelled = pathTextOf( *board );
+    if ( *named != Container::CAR )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::CONTAINER_TAKES_NO_FORMAT )
+                  .at( board->location, board->length )
+                  .arg( "name", text ) );
+      return;
+    }
+    if ( spelled.has_value() && !cartridgeNamed( *spelled ).has_value() )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_CARTRIDGE )
+                  .at( board->location, board->length )
+                  .arg( "name", *spelled )
+                  .arg( "known", knownCartridges() ) );
+      return;
+    }
+  }
+  else if ( *named == Container::CAR )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_WITHOUT_FORMAT )
+                .at( name.location, name.length )
+                .arg( "known", knownCartridges() ) );
     return;
   }
 
@@ -728,6 +762,11 @@ void Loader::setContainer( syntax::Token name )
 
   mProject.container = *named;
   mProject.containerSite = name.span();
+  mProject.cartridge = std::move( spelled );
+  if ( board.has_value() )
+  {
+    mProject.cartridgeSite = board->span();
+  }
 }
 
 void Loader::addAcceptedContainer( syntax::Token keyword, syntax::Token name )
@@ -843,6 +882,24 @@ void Loader::checkContainer() const
               .arg( "taken", taken )
               .note( diag::diagnostic( diag::DiagnosticId::CONTAINERS_DECLARED_HERE )
                          .at( target.containersSite.begin, target.containersSite.length ) ) );
+}
+
+void Loader::checkCartridge()
+{
+  // The board the Project named against the memory the Variant declared. Two
+  // documents, each authoritative about its half, and neither derived from the
+  // other — see
+  // docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+  if ( !mProject.cartridge.has_value() || !mProject.cartridgeSite.has_value() )
+  {
+    return;
+  }
+  std::optional<Cartridge> const board = cartridgeNamed( *mProject.cartridge );
+  if ( !board.has_value() )
+  {
+    return;
+  }
+  checkCartridgeAgainstTarget( *board, mProject.target, *mProject.cartridgeSite, *mSink );
 }
 
 void Loader::includeDocument( syntax::Token path )
@@ -1158,6 +1215,10 @@ void Loader::addRegion( syntax::Token keyword,
   else if ( word == "reserved" )
   {
     kind = RegionProperty::RESERVED;
+  }
+  else if ( word == "rom" )
+  {
+    kind = RegionProperty::ROM;
   }
   if ( !kind.has_value() )
   {
@@ -1920,6 +1981,7 @@ Project loadProject( diag::SourceManager& sources,
   loader.resolveTarget();
   loader.addConstantModule();
   loader.checkContainer();
+  loader.checkCartridge();
 
   Project project = std::move( loader ).take();
   if ( project.modules.empty() && !sink.hasErrors() )
@@ -1937,6 +1999,13 @@ Project loadProject( diag::SourceManager& sources,
   if ( project.container == Container::ATR )
   {
     addBootRecord( project, sources );
+  }
+  // A cartridge is started through the six bytes at the top of it, which are
+  // the tool's to write — see
+  // docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+  if ( project.container == Container::CAR )
+  {
+    addCartHeader( project, sources );
   }
   // A Project of C is given the runtime its operators call — see
   // docs/decisions/0095-literals-and-the-runtime.md.

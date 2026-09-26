@@ -5,6 +5,7 @@
 #include "nga/model/Merge.hpp"
 #include "nga/model/Place.hpp"
 #include "nga/model/Project.hpp"
+#include "nga/model/ReadOnly.hpp"
 #include "nga/model/Size.hpp"
 #include "nga/model/Storage.hpp"
 
@@ -52,6 +53,6 @@ namespace nga::model
 /// Call it on a Layout that Place did not refuse: after an error, Sections are
 /// legitimately unplaced and every finding here would be that error again in
 /// another voice.
-void verifyLayout( Placed const& build, Storage const& storage, diag::DiagnosticSink& sink );
+void verifyLayout( Placed const& build, Storage const& storage, ReadOnly const& readOnly, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

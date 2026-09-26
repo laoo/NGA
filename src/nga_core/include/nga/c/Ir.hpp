@@ -494,6 +494,13 @@ struct Global
   /// A local array, whose bytes are its function's only while it runs.
   bool isTemporary = false;
 
+  /// What the source declared `const`, with the value kept in the Section
+  /// rather than written into it at run time: the emitter says `readonly` over
+  /// it, so that the solver may put it in a `rom` Region even where its address
+  /// is taken — see
+  /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  bool isConst = false;
+
   /// For an object of a function, the name the program wrote, where `name` is
   /// the one the compiler made of it. A finding says this one: nothing outside
   /// this file has ever seen the other, and a diagnostic that un-mangled a name

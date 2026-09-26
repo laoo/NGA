@@ -143,9 +143,17 @@ struct AddressRange
 /// one wins where two overlap: a Project declaring `reserved` over the
 /// variant's `ram` narrows the pool, and nothing a Project declares turns a
 /// register into RAM.
+///
+/// `ROM` is memory the solver places in and no code writes — a cartridge, and
+/// what makes it a property of the Region rather than of the Container is that
+/// it is true in every state of the hardware. It sits between `RAM` and
+/// `RESERVED` because a Project may narrow its machine's ROM to a range nothing
+/// may use, and nothing a Project writes turns ROM into RAM. See
+/// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
 enum class RegionProperty : std::uint8_t
 {
   RAM,
+  ROM,
   RESERVED,
   REGISTER,
 };
@@ -182,23 +190,32 @@ struct Region
 /// What a diagnostic calls a Region: its name, or its range where it has none.
 std::string displayNameOf( Region const& region );
 
-/// Where the solver may allocate from: the `ram` of the Regions with every
-/// more restrictive Region cut out, in two lists — below `$100` and above —
-/// because a PlacementClass names one of them. Derived from the Regions when
+/// Where the solver may allocate from: the Regions with every more restrictive
+/// Region cut out. The `ram` of them in two lists — below `$100` and above —
+/// because a PlacementClass names one of them, and the `rom` of them in a
+/// third, which a read-only Section is placed in. Derived from the Regions when
 /// the Project is read, and what Place, the layout verifier and the map read
 /// instead of the Regions themselves.
+///
+/// The ROM pool has **no zero-page half**: the class exists so that an
+/// instruction naming a variable can be a byte shorter, and a Section that is
+/// never written gains nothing from the scarcest memory the machine has, so
+/// `zeropage` and `rom` together are refused. A `rom` Region below `$100` is
+/// therefore in no pool, as a Window without a base is.
 struct Pools
 {
   /// Sorted and disjoint.
   std::vector<AddressRange> zeroPage;
   std::vector<AddressRange> general;
+  std::vector<AddressRange> readOnly;
 
   [[nodiscard]] std::uint32_t zeroPageSize() const;
   [[nodiscard]] std::uint32_t generalSize() const;
+  [[nodiscard]] std::uint32_t readOnlySize() const;
 };
 
-/// The pools the Regions leave: every address that some `ram` Region covers
-/// and no `reserved` or `register` Region does.
+/// The pools the Regions leave: every address that some `ram` Region covers and
+/// no more restrictive Region does, and, above `$100`, the same of `rom`.
 Pools poolsOf( std::span<Region const> regions );
 
 /// The Regions of a Target no document described. Only what stands in for
@@ -390,9 +407,11 @@ enum class Container : std::uint8_t
   RAW_IMAGE,
   XEX,
   ATR,
+  CAR,
 };
 
-/// `raw`, `xex` and `atr`, and nothing where the word names none of them.
+/// `raw`, `xex`, `atr` and `car`, and nothing where the word names none of
+/// them. `car` is the one that names a board beside it — see Car.hpp.
 std::optional<Container> containerNamed( std::string_view word );
 
 /// The word a Container is written as, which is what a finding lists.
@@ -643,6 +662,11 @@ struct Project
   /// document naming none is, which is what a program with no Payloads has
   /// always been written as.
   Container container = Container::RAW_IMAGE;
+
+  /// The cartridge board `container car "xegs128"` named, and where it was
+  /// written; absent for every other Container.
+  std::optional<std::string> cartridge{};
+  std::optional<diag::SourceSpan> cartridgeSite{};
 
   /// Where the `container` statement stood, and nothing where the document
   /// gave none — which is also what says the raw image was nobody's choice

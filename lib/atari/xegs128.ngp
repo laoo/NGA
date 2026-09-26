@@ -1,0 +1,40 @@
+; An Atari 800XL holding a 128 KB XEGS cartridge: sixteen banks of eight
+; kilobytes, of which the last is the fixed part the CPU always sees at
+; $A000-$BFFF and the other fifteen are storage, brought into $8000-$9FFF one at
+; a time by the byte written to $D5FF. A cartridge is ROM the CPU reads where it
+; lies, so nothing is loaded and there is no DOS: the machine's whole RAM below
+; the cartridge is the program's, $0700 included.
+target {
+  cpu "6502"
+
+  ; The one Container a machine holding a cartridge takes. A `.xex` needs a DOS
+  ; to load it, and this machine has none.
+  containers car
+
+  ; Fifteen and not sixteen: the sixteenth bank is the fixed part under another
+  ; name, and one set of bytes with two names is one too many.
+  units  banks 15
+  window switched $8000 .. $9FFF  views banks
+}
+storage { units banks }
+
+target {
+  region ram    $0000 .. $7FFF  ram
+  region stack  $0100 .. $01FF  reserved
+  region io     $D000 .. $D7FF  register
+
+  ; The part of the cartridge no switch takes away, which is where the solver
+  ; puts everything nothing writes. $8000-$9FFF is in no Region at all: it is
+  ; the window, it shows one Bank at a time, and only a Pane or storage stands
+  ; there — as the boot record's page is in no Region of the diskette's variant.
+  region cart   $A000 .. $BFFF  rom
+
+  ; What the driver writes. Any address of $D500-$D5FF is the same register.
+  register CARTSEL $D5FF
+}
+
+; The OS, the driver for this storage and the decoders the tool ships. Every
+; Transition calls the driver and the decoders, so they are resident; a decoder
+; nothing uses is dropped.
+modules { "atari/os.asm"  "atari/charsets.asm"  "atari/cart.asm"  "stream/zx0.asm" }
+resident { os, charsets, cart, zx0 }

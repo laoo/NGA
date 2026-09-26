@@ -2,7 +2,10 @@
 
 #include "nga/model/Prune.hpp"
 #include "nga/model/Slots.hpp"
+#include "nga/model/Storage.hpp"
 #include "nga/model/Transform.hpp"
+
+#include <spdlog/fmt/fmt.h>
 
 #include <algorithm>
 #include <string>
@@ -19,6 +22,42 @@ namespace
 /// knowing no hardware: what it reads it reads through the driver's stream,
 /// and what it switches it switches through the driver. What it does is the
 /// contract in docs/spec/transition.md.
+/// The cold start, for a Container that has no loader: the Frame of the edge
+/// into the entry Phase from nowhere, and the Proc the run vector points at,
+/// which hands that Frame to the routine's tail. Where the Frame waits is three
+/// bytes the Container patches, as it patches the run vector itself — nothing
+/// knows them until every Payload has been placed. See docs/spec/car.md and
+/// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+constexpr std::string_view COLD_START_SOURCE =
+    R"asm(
+; Where the cold start's Frame waits: a unit and an offset in it, which the
+; Container writes here once PlaceStorage has put it somewhere. `readonly`
+; because nothing writes it and it belongs in the ROM a cartridge is.
+.export ngaColdFrame
+.section absolute, readonly
+ngaColdFrame
+        .byte 0                 ; the unit
+        .word 0                 ; and where in it
+.ends
+
+; What a cartridge's run vector points at, and what the OS therefore jumps to:
+; the entry Phase is entered as any Phase is entered, by the routine, from a
+; Frame. `root`, since the hardware reaches it and no Chunk of the program does,
+; and exported because the Container writes its address into the run vector.
+.export ngaStart
+.proc ngaStart, root
+        lda #{}
+        sta ngaWanted
+        lda ngaColdFrame
+        sta ngaFrameUnit
+        lda ngaColdFrame+1
+        sta ngaFramePos
+        lda ngaColdFrame+2
+        sta ngaFramePos+1
+        jmp ngaEnter
+.endp
+)asm";
+
 constexpr std::string_view ROUTINE_SOURCE =
     R"asm(; The Transition routine. Called by `jsr` from a `.transition`, with the
 ; statement's list right behind the call: the Phase to enter, and per Phase
@@ -94,6 +133,14 @@ ngaUnit .ztemp 1
         iny
         lda (ngaPtr),y
         sta ngaFramePos+1       ; and where in it
+.endp then ngaEnter
+
+; The rest of it, and the way in for a Container that has no current Phase to
+; look one up by: ngaWanted holds the Phase to enter and ngaFrameUnit and
+; ngaFramePos where its Frame waits. The cold start comes here — see
+; docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+.export ngaEnter
+.proc ngaEnter
         jsr ngaFrameOpen
         nga.read
         sta ngaEntry
@@ -240,7 +287,11 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
 {
   PhaseGraph& graph = project.phases;
   bool const anyEdge = std::ranges::any_of( graph.phases, []( Phase const& phase ) { return !phase.then.empty(); } );
-  if ( !anyEdge )
+
+  // A Container with no loader enters its entry Phase the way any Phase is
+  // entered — by the routine, from a Frame — so the routine is here wherever
+  // it can be, edges or not. What that costs is in docs/spec/car.md.
+  if ( !anyEdge && !takesColdStart( project ) )
   {
     return;
   }
@@ -263,7 +314,14 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
   // The routine: the tool's own source, knowing no hardware. What it calls
   // is the driver's, under names the dispatcher defines at the end of
   // Assemble.
-  diag::FileId const routineFile = sources.addFile( "<nga>/transition.asm", std::string{ ROUTINE_SOURCE } );
+  std::string routineText{ ROUTINE_SOURCE };
+  if ( takesColdStart( project ) )
+  {
+    // The Phase to enter is known here; where its Frame waits is not, and is
+    // three bytes the Container writes.
+    routineText += fmt::format( COLD_START_SOURCE, graph.entry.value );
+  }
+  diag::FileId const routineFile = sources.addFile( "<nga>/transition.asm", routineText );
   ModuleIndex const routineModule = addModule( ProjectModule{ .name = "nga.transition",
                                                               .file = routineFile,
                                                               .residency = {},
@@ -319,13 +377,16 @@ Module buildGeneratedModule( diag::SourceManager const& sources, ProjectModule c
 }
 
 std::vector<SectionRef>
-loadSetOf( PhaseGraph const& graph, PhaseIndex from, PhaseIndex to, std::span<Module const> modules )
+loadSetOf( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to, std::span<Module const> modules )
 {
   std::vector<SectionRef> loaded;
-  Phase const& left = graph.phases[from.value];
   for ( ModuleIndex const module : graph.phases[to.value].needs )
   {
-    bool const kept = std::ranges::find( left.needs, module ) != left.needs.end();
+    // The cold start comes from no Phase, so nothing was kept: everything the
+    // entry Phase needs is the load set, and what stands in ROM is filtered
+    // out where Payloads are marked.
+    bool const kept = from.has_value() && std::ranges::find( graph.phases[from->value].needs, module ) !=
+                                              graph.phases[from->value].needs.end();
     Module const& one = modules[module.value];
     for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
     {
@@ -609,24 +670,32 @@ std::vector<WindowIndex> baseOrderOf( Project const& project )
 {
   std::vector<WindowIndex> order;
   std::optional<WindowIndex> const stream = project.driver.has_value() ? project.driver->stream : std::nullopt;
+  // A Window with no base is left switched, so there is nothing to put back
+  // and nothing for a Frame to say about it — see
+  // docs/decisions/0217-a-window-without-a-base-is-switched-and-never-restored.md.
+  auto const hasBase = [&project]( std::uint32_t index ) { return project.target.windows[index].base.has_value(); };
   for ( std::uint32_t index = 0; index < project.target.windows.size(); ++index )
   {
-    if ( stream != WindowIndex{ index } )
+    if ( stream != WindowIndex{ index } && hasBase( index ) )
     {
       order.push_back( WindowIndex{ index } );
     }
   }
-  if ( stream.has_value() )
+  if ( stream.has_value() && hasBase( stream->value ) )
   {
     order.push_back( *stream );
   }
   return order;
 }
 
-std::string nameOfFrame( PhaseGraph const& graph, PhaseIndex from, PhaseIndex to )
+std::string nameOfFrame( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to )
 {
-  return "frame " + graph.phases[from.value].name.value_or( "(implicit)" ) + " -> " +
-         graph.phases[to.value].name.value_or( "(implicit)" );
+  std::string const entered = graph.phases[to.value].name.value_or( "(implicit)" );
+  if ( !from.has_value() )
+  {
+    return "frame into " + entered;
+  }
+  return "frame " + graph.phases[from->value].name.value_or( "(implicit)" ) + " -> " + entered;
 }
 
 void writeTransition( TransitionContent const& content,
@@ -678,7 +747,7 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
   std::vector<std::uint8_t> bytes( storage.frameSizeOf( frame ), 0 );
   std::span<std::uint8_t> const into{ bytes };
   std::size_t at = 0;
-  PhaseIndex const from = storage.frameFrom( frame );
+  std::optional<PhaseIndex> const from = storage.frameFrom( frame );
   PhaseIndex const to = storage.frameTo( frame );
 
   // What the edge copies: everything it may have to, less a Movable Section
@@ -693,9 +762,11 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
       continue;
     }
     Section const& section = modules[payload.module.value].sectionAt( payload.section );
-    bool const held = section.isMovable() && modules[payload.module.value].residency().includes( from ) &&
-                      layout.isPlaced( payload ) &&
-                      layout.addressIn( payload, from ) == layout.addressIn( payload, to );
+    // The cold start comes from no Phase, so nothing is already held: every
+    // block of it is copied.
+    bool const held = from.has_value() && section.isMovable() &&
+                      modules[payload.module.value].residency().includes( *from ) && layout.isPlaced( payload ) &&
+                      layout.addressIn( payload, *from ) == layout.addressIn( payload, to );
     if ( !held )
     {
       copied.push_back( payload );

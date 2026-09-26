@@ -75,7 +75,7 @@ bool overlaps( AddressRange one, AddressRange other )
 
 } // namespace
 
-void verifyLayout( Placed const& build, Storage const& storage, diag::DiagnosticSink& sink )
+void verifyLayout( Placed const& build, Storage const& storage, ReadOnly const& readOnly, diag::DiagnosticSink& sink )
 {
   diag::SourceManager const& sources = build.sources();
   GlobalSymbols const& symbols = build.symbols();
@@ -315,6 +315,14 @@ void verifyLayout( Placed const& build, Storage const& storage, diag::Diagnostic
         if ( one.pane.has_value() )
         {
           pool = target.windows[target.panes[one.pane->value].window.value].ranges;
+        }
+        // A Section nothing writes is allocated from the ROM pool where the
+        // Target has one, so that is the pool it is held to — read here from
+        // the same answer Place read, and not from the address it was given,
+        // which would make the check ask itself.
+        else if ( !target.pools.readOnly.empty() && readOnly.includes( one.where ) )
+        {
+          pool = target.pools.readOnly;
         }
         bool const inside = std::ranges::any_of(
             pool, [&range]( AddressRange const& part ) { return range.begin >= part.begin && range.end <= part.end; } );

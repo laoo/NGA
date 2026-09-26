@@ -1,0 +1,13 @@
+include "atari/xegs128.ngp"
+
+modules { "print.asm" "shared.asm" "intro.asm" "level.asm" }
+
+panes in switched { level }
+
+resident { print, shared }
+
+phase intro { needs intro  then level  entry introStart }
+phase level { needs level             entry levelStart }
+entry intro
+
+container car "xegs128"

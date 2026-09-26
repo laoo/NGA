@@ -1285,7 +1285,17 @@ void ProjectParser::parseContainer( Token keyword )
                 .arg( "after", std::string{ textOf( keyword ) } ) );
     return;
   }
-  mBuilder->setContainer( mCursor->advance() );
+  Token const name = mCursor->advance();
+
+  // `container car "xegs128"`: the board is quoted for the reason a processor
+  // is — `8k` is no identifier of this language — and the arity is
+  // self-delimiting, since only `car` names one.
+  std::optional<Token> board;
+  if ( mCursor->at( TokenKind::STRING ) )
+  {
+    board = mCursor->advance();
+  }
+  mBuilder->setContainer( name, board );
 }
 
 void ProjectParser::parseIntent( Token keyword )

@@ -1,5 +1,7 @@
 #include "nga/model/ContainerFacts.hpp"
 
+#include "nga/model/Car.hpp"
+
 #include "nga/model/MemoryMap.hpp"
 #include "nga/model/Module.hpp"
 #include "nga/model/Segments.hpp"
@@ -23,7 +25,11 @@ std::uint32_t wordAt( std::span<std::uint8_t const> bytes, std::size_t at )
 
 /// The Section standing at an address in the Phase the program starts in,
 /// which is the Phase a `.xex` loads.
-MapEntry const* sectionAt( MemoryMap const& map, PhaseIndex entry, std::uint32_t address )
+/// The Section standing at an address, among those a Phase holds. Nothing for
+/// `entry` asks for **any** Phase's, which is what ROM wants: nothing loads it,
+/// so a Section standing there stands there for the whole run whatever Phase
+/// needs it.
+MapEntry const* sectionAt( MemoryMap const& map, std::optional<PhaseIndex> entry, std::uint32_t address )
 {
   for ( MapEntry const& held : map.entries )
   {
@@ -33,8 +39,8 @@ MapEntry const* sectionAt( MemoryMap const& map, PhaseIndex entry, std::uint32_t
     }
     // A Section in no Phase stands somewhere all the same, and a Section of
     // the entry Phase is what a loader puts in memory.
-    bool const live = !held.firstPhase.has_value() || !held.lastPhase.has_value() ||
-                      ( entry.value >= held.firstPhase.value().value && entry.value <= held.lastPhase.value().value );
+    bool const live = !entry.has_value() || !held.firstPhase.has_value() || !held.lastPhase.has_value() ||
+                      ( entry->value >= held.firstPhase.value().value && entry->value <= held.lastPhase.value().value );
     if ( live )
     {
       return &held;
@@ -156,10 +162,11 @@ void attribute( Patched const& build,
                 std::uint32_t address,
                 std::uint32_t length,
                 std::vector<ByteRun>& out,
-                std::uint32_t& accounted )
+                std::uint32_t& accounted,
+                std::optional<PhaseIndex> live = std::nullopt )
 {
   diag::SourceManager const& sources = build.sources();
-  PhaseIndex const entry = build.project().phases.entry;
+  std::optional<PhaseIndex> const entry = live.has_value() ? live : std::optional{ build.project().phases.entry };
   std::uint32_t const last = address + length;
 
   while ( address < last )
@@ -261,6 +268,171 @@ std::uint32_t readSegments( Patched const& build,
     facts.segments.push_back( std::move( segment ) );
   }
   return accounted;
+}
+
+/// A cartridge, read back: the sixteen-byte header, the part of the image the
+/// CPU always sees, and the banks.
+///
+/// Nothing is loaded, so there is no stream of segments to walk and no address
+/// to take a run's meaning from outside the fixed part: a bank holds stored
+/// forms, which have no address until something copies them. What no Section
+/// and no Payload accounts for is the `$FF` an erased device holds, named
+/// where it stands.
+ContainerFacts cartridge( Patched const& build,
+                          MemoryMap const& map,
+                          std::span<std::uint8_t const> bytes,
+                          ContainerFacts facts,
+                          Cartridge const& board )
+{
+  constexpr std::uint32_t header = 16;
+  std::uint32_t accounted = header;
+  facts.header.push_back( ByteRun{ .at = 0,
+                                   .length = header,
+                                   .address = 0,
+                                   .what = "container header",
+                                   .section = {},
+                                   .module = {},
+                                   .chunk = -1,
+                                   .source = {} } );
+
+  // The fixed part, at the addresses the CPU reads it at. Every Phase's
+  // Sections, not the entry Phase's alone: ROM has no Residency.
+  ContainerSegment fixed;
+  fixed.at = header + board.fixedOffset;
+  fixed.start = board.fixed.begin;
+  fixed.end = board.fixed.end - 1;
+  attribute( build, map, fixed.at, board.fixed.begin, board.fixed.size(), fixed.runs, accounted, std::nullopt );
+  facts.segments.push_back( std::move( fixed ) );
+
+  // The banks: every Payload, every Frame and every Pane's Section with bytes,
+  // at the position storage gave it, which on this board is the offset in the
+  // image. No addresses, because a stored form has none.
+  std::vector<ByteRun> stored;
+  Target const& target = build.target();
+  std::optional<std::uint32_t> const firstState =
+      target.storageUnits.has_value() && build.project().driver.has_value() &&
+              build.project().driver->stream.has_value()
+          ? target.windows[build.project().driver->stream->value].firstStateOf( *target.storageUnits, target.unitSets )
+          : std::optional<std::uint32_t>{};
+  for ( MapEntry const& held : map.entries )
+  {
+    if ( held.waits.has_value() && held.storedSize > 0 )
+    {
+      stored.push_back( ByteRun{ .at = header + ( held.waits->bank.value * map.bankSize ) + held.waits->offset,
+                                 .length = held.storedSize,
+                                 .address = 0,
+                                 .what = held.transform.empty() ? "payload" : "payload, " + held.transform,
+                                 .section = held.name,
+                                 .module = held.module,
+                                 .chunk = -1,
+                                 .source = {} } );
+      continue;
+    }
+    // A Pane's Section stands in its Bank at its own offset within the Window,
+    // which is where the Container wrote it and where it is read from.
+    if ( !held.pane.empty() && firstState.has_value() && held.paneState >= *firstState )
+    {
+      std::uint32_t const bank = held.paneState - *firstState;
+      std::uint32_t const window = target.windows[target.panes[0].window.value].ranges.front().begin;
+      stored.push_back( ByteRun{ .at = header + ( bank * map.bankSize ) + ( held.begin - window ),
+                                 .length = held.end - held.begin,
+                                 .address = held.begin,
+                                 .what = "pane",
+                                 .section = held.name,
+                                 .module = held.module,
+                                 .chunk = -1,
+                                 .source = {} } );
+    }
+  }
+  for ( MapFrame const& frame : map.frames )
+  {
+    stored.push_back( ByteRun{ .at = header + ( frame.waits.bank.value * map.bankSize ) + frame.waits.offset,
+                               .length = frame.size,
+                               .address = 0,
+                               .what = "frame",
+                               .section = frame.name,
+                               .module = {},
+                               .chunk = -1,
+                               .source = {} } );
+  }
+  std::ranges::sort( stored, []( ByteRun const& a, ByteRun const& b ) { return a.at < b.at; } );
+  if ( !stored.empty() )
+  {
+    ContainerSegment banks;
+    banks.at = stored.front().at;
+    banks.start = 0;
+    banks.end = 0;
+    for ( ByteRun const& run : stored )
+    {
+      accounted += run.length;
+    }
+    banks.runs = std::move( stored );
+    facts.segments.push_back( std::move( banks ) );
+  }
+
+  // What is left is what an erased device holds, named where it stands: a
+  // cartridge is exactly as large as its board, so the emptiness is in the
+  // middle of it as often as at the end.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> taken;
+  std::size_t runs = facts.header.size();
+  for ( ContainerSegment const& segment : facts.segments )
+  {
+    runs += segment.runs.size();
+  }
+  taken.reserve( runs );
+  for ( ByteRun const& run : facts.header )
+  {
+    taken.emplace_back( run.at, run.length );
+  }
+  for ( ContainerSegment const& segment : facts.segments )
+  {
+    for ( ByteRun const& run : segment.runs )
+    {
+      taken.emplace_back( run.at, run.length );
+    }
+  }
+  std::ranges::sort( taken );
+
+  std::vector<ByteRun> erased;
+  std::uint32_t reached = 0;
+  for ( auto const& [at, length] : taken )
+  {
+    if ( at > reached )
+    {
+      erased.push_back( ByteRun{ .at = reached,
+                                 .length = at - reached,
+                                 .address = 0,
+                                 .what = "erased",
+                                 .section = {},
+                                 .module = {},
+                                 .chunk = -1,
+                                 .source = {} } );
+      accounted += at - reached;
+    }
+    reached = std::max( reached, at + length );
+  }
+  if ( reached < bytes.size() )
+  {
+    erased.push_back( ByteRun{ .at = reached,
+                               .length = static_cast<std::uint32_t>( bytes.size() ) - reached,
+                               .address = 0,
+                               .what = "erased",
+                               .section = {},
+                               .module = {},
+                               .chunk = -1,
+                               .source = {} } );
+    accounted += static_cast<std::uint32_t>( bytes.size() ) - reached;
+  }
+  facts.header.insert( facts.header.end(), erased.begin(), erased.end() );
+  std::ranges::sort( facts.header, []( ByteRun const& a, ByteRun const& b ) { return a.at < b.at; } );
+
+  // In the order they stand in the file: the banks come first on every board,
+  // since the fixed part is the last of them.
+  std::ranges::sort( facts.segments,
+                     []( ContainerSegment const& a, ContainerSegment const& b ) { return a.at < b.at; } );
+
+  facts.unaccounted = facts.size - std::min( accounted, facts.size );
+  return facts;
 }
 
 /// A diskette, read back: the boot record the tool wrote, the sectors storage
@@ -458,6 +630,16 @@ ContainerFacts containerFactsOf( Patched const& build,
   if ( container == "atr" )
   {
     return diskette( build, map, bytes, std::move( facts ) );
+  }
+
+  if ( container == "car" )
+  {
+    std::optional<Cartridge> const board =
+        build.project().cartridge.has_value() ? cartridgeNamed( *build.project().cartridge ) : std::nullopt;
+    if ( board.has_value() )
+    {
+      return cartridge( build, map, bytes, std::move( facts ), *board );
+    }
   }
 
   facts.unaccounted = facts.size;

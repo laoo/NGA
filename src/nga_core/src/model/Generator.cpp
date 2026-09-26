@@ -111,6 +111,10 @@ void emitSectionHeader( std::string& text, GeneratedSection const& section )
   {
     text += ", in " + *section.pane;
   }
+  if ( section.readOnly )
+  {
+    text += ", readonly";
+  }
   if ( section.movable )
   {
     text += ", movable";
@@ -387,7 +391,7 @@ struct Parameter
 
 /// `binary`: the file, and the attributes of the Section it becomes. The order
 /// is the order a message lists them in.
-constexpr std::array<Parameter, 10> BINARY_PARAMETERS{
+constexpr std::array<Parameter, 11> BINARY_PARAMETERS{
   {
       { .name = "section", .takes = Takes::WORD },
       { .name = "namespace", .takes = Takes::WORD },
@@ -399,6 +403,7 @@ constexpr std::array<Parameter, 10> BINARY_PARAMETERS{
       { .name = "movable", .takes = Takes::FLAG },
       { .name = "root", .takes = Takes::FLAG },
       { .name = "temporary", .takes = Takes::FLAG },
+      { .name = "readonly", .takes = Takes::FLAG },
   },
 };
 
@@ -544,6 +549,7 @@ runBinary( GeneratorCall const& call, GeneratorFiles const& files, diag::Diagnos
   section.movable = arguments.flag( "movable" );
   section.root = arguments.flag( "root" );
   section.temporary = arguments.flag( "temporary" );
+  section.readOnly = arguments.flag( "readonly" );
 
   if ( std::optional<std::string> const placement = arguments.word( "placement" ) )
   {

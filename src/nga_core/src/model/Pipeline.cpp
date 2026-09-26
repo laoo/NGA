@@ -7,6 +7,7 @@
 #include "nga/model/Patch.hpp"
 #include "nga/model/Place.hpp"
 #include "nga/model/Prune.hpp"
+#include "nga/model/ReadOnly.hpp"
 #include "nga/model/Size.hpp"
 #include "nga/model/Storage.hpp"
 #include "nga/model/Suppressions.hpp"
@@ -73,6 +74,13 @@ void buildFrom( diag::SourceManager const& sources,
   Interference const interference = trace( pruned, sink );
   Traced const traced{ pruned, interference };
 
+  // Which Sections nothing writes, and which of those therefore stand in a
+  // `rom` Region: after Trace, the last Step that reads what a Chunk does to
+  // the memory it names, and before Size, since what it needs of a Section is
+  // whether any Chunk of it emits — see
+  // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  ReadOnly const readOnly = readOnlySections( pruned, sink );
+
   Freezes const freezes = checkTypes( pruned, sink );
   Sizes const sizes = computeSizes( pruned, sink );
   if ( sink.hasErrors() )
@@ -84,9 +92,9 @@ void buildFrom( diag::SourceManager const& sources,
   // Which Sections have a Payload, before anything is given a runtime address:
   // Place needs that much to keep them out of the Window, and needs nothing
   // else of storage — see docs/decisions/0017-payloads-and-banks.md.
-  Storage storage = findPayloads( pruned, sink );
+  Storage storage = findPayloads( pruned, readOnly, sink );
 
-  Layout const layout = placeSections( sized, storage, options.explain, sink );
+  Layout const layout = placeSections( sized, storage, readOnly, options.explain, sink );
   Placed const placed{ sized, layout };
   checkAssertions( placed, sink );
 
@@ -95,7 +103,7 @@ void buildFrom( diag::SourceManager const& sources,
   // docs/decisions/0005-test-strategy.md.
   if ( options.verifyLayout && !sink.hasErrors() )
   {
-    verifyLayout( placed, storage, sink );
+    verifyLayout( placed, storage, readOnly, sink );
   }
 
   Bytes bytes = patch( placed, storage, sink );
@@ -126,6 +134,10 @@ void buildFrom( diag::SourceManager const& sources,
   else if ( project.container == Container::ATR )
   {
     emitted.bytes = emitAtr( patched, sink ).bytes;
+  }
+  else if ( project.container == Container::CAR )
+  {
+    emitted.bytes = emitCar( patched, sink ).bytes;
   }
   else
   {

@@ -408,6 +408,7 @@ private:
     read.boundary = numberAt( section, "within", where + ".within" );
     read.pane = stringAt( section, "in", where + ".in" );
     read.movable = flagAt( section, "movable", where + ".movable" );
+    read.readOnly = flagAt( section, "readonly", where + ".readonly" );
     read.root = flagAt( section, "root", where + ".root" );
     read.temporary = flagAt( section, "temporary", where + ".temporary" );
     if ( !mFault.empty() )

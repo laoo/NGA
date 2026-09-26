@@ -506,6 +506,10 @@ void ModuleBuilder::beginSection( syntax::SectionAttributes attributes, diag::So
                                     attributes.temporary ? SectionKind::TEMPORARY : SectionKind::PLAIN,
                                     span } );
   mModule->sectionAt( index ).setScope( currentScope() );
+  if ( attributes.readOnly )
+  {
+    mModule->sectionAt( index ).declareReadOnly();
+  }
   if ( attributes.pane.has_value() )
   {
     mModule->sectionAt( index ).setPaneName( *attributes.pane );

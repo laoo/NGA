@@ -48,8 +48,10 @@ void resolveTransitions( diag::SourceManager const& sources,
 /// order. The one definition of it: PlaceStorage reads it for what waits in a
 /// Bank, Size for how long a table may be, and a table lists of it what the
 /// Layout then says moved — see docs/decisions/0030-movable-sections.md.
+/// `from` absent is the **cold start**: no Phase was left, so nothing was kept
+/// and everything the entered Phase needs that emits bytes is in the set.
 std::vector<SectionRef>
-loadSetOf( PhaseGraph const& graph, PhaseIndex from, PhaseIndex to, std::span<Module const> modules );
+loadSetOf( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to, std::span<Module const> modules );
 
 /// A Phase's entry Label, resolved against the Modules it needs — private or
 /// exported, since the Project stands above privacy. Nothing where there is
@@ -85,6 +87,17 @@ bool isEnteredByAnEdge( PhaseGraph const& graph, PhaseIndex phase );
 
 /// The exported Label the routine starts at, which a `.transition` jumps to.
 constexpr std::string_view TRANSITION_ROUTINE_NAME = "ngaTransition";
+
+/// The Label of its tail, which the routine falls through into and which the
+/// cold start jumps to: everything from the Frame's address onward, and where
+/// the jump through the entry the Frame hands it stands — see
+/// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+constexpr std::string_view TRANSITION_ENTER_NAME = "ngaEnter";
+
+/// The Proc a Container with no loader points its run vector at, and the three
+/// bytes it reads the cold start's Frame from, which that Container patches.
+constexpr std::string_view COLD_START_NAME = "ngaStart";
+constexpr std::string_view COLD_FRAME_NAME = "ngaColdFrame";
 
 /// What a Container that loads through memory writes and calls: the cell it
 /// names a unit in, and the glue that hands the cell to the driver's `map`.
@@ -135,7 +148,9 @@ std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std
 std::vector<WindowIndex> baseOrderOf( Project const& project );
 
 /// What a diagnostic calls a Frame: the edge it belongs to.
-std::string nameOfFrame( PhaseGraph const& graph, PhaseIndex from, PhaseIndex to );
+/// What a finding and the map call a Frame. The cold start comes from no
+/// Phase and is named for what it is.
+std::string nameOfFrame( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to );
 
 /// The Frame of one edge, as the routine reads it from its Bank: the entered
 /// Phase's entry, a block per Payload the edge copies, and the Cell writes.

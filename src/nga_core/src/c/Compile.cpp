@@ -7340,13 +7340,15 @@ public:
         if ( std::optional<Meaning> const named = mTyping.lookupName( mTyping.spellingOf( declarator ) );
              named.has_value() && named->isStriped && array.isArray )
         {
-          lowered.definitions.emplace_back( stripedObject( mTyping.spellingOf( declarator ),
-                                                           object.isStatic,
-                                                           declarator.location,
-                                                           *named,
-                                                           array,
-                                                           array.hasList,
-                                                           fileScope ) );
+          ir::Global striped = stripedObject( mTyping.spellingOf( declarator ),
+                                              object.isStatic,
+                                              declarator.location,
+                                              *named,
+                                              array,
+                                              array.hasList,
+                                              fileScope );
+          striped.isConst = object.isConst && !object.isVolatile;
+          lowered.definitions.emplace_back( std::move( striped ) );
           continue;
         }
         if ( std::optional<Meaning> const named = mTyping.lookupName( mTyping.spellingOf( declarator ) );
@@ -7366,6 +7368,7 @@ public:
                           .elements = array.hasList ? blockConstants( array, element, count, fileScope )
                                                     : std::vector<ir::Constant>{},
                           .isTemporary = false,
+                          .isConst = object.isConst && !object.isVolatile,
                           .placement = wanted } );
           continue;
         }
@@ -7381,6 +7384,7 @@ public:
                                                         .count = count,
                                                         .elements = elementsOf( array, type, count, fileScope ),
                                                         .isTemporary = false,
+                                                        .isConst = object.isConst && !object.isVolatile,
                                                         .placement = wanted } );
           continue;
         }
@@ -7412,6 +7416,7 @@ public:
             .isStatic = object.isStatic,
             .at = declarator.location,
             .value = value != nullptr ? std::optional{ constantOf( *value, objectType, fileScope ) } : std::nullopt,
+            .isConst = object.isConst && !object.isVolatile,
             .placement = wanted } );
       }
     }
@@ -8016,7 +8021,8 @@ private:
                                        .count = count * mTyping.bytes( ir::Type::BLOCK, local.aggregate ),
                                        .elements = kept && array.hasList ? blockConstants( array, element, count, site )
                                                                          : std::vector<ir::Constant>{},
-                                       .isTemporary = !kept && !addressedBlock } );
+                                       .isTemporary = !kept && !addressedBlock,
+                                       .isConst = declared.isConst && !declared.isVolatile && kept } );
       if ( !kept && array.hasList )
       {
         storeList( nameOf( local, declarator, site ), array, element, count, site );
@@ -8040,7 +8046,8 @@ private:
                     .value = std::nullopt,
                     .count = count,
                     .elements = kept ? elementsOf( array, local.type, count, site ) : std::vector<ir::Constant>{},
-                    .isTemporary = !kept && !addressed } );
+                    .isTemporary = !kept && !addressed,
+                    .isConst = declared.isConst && !declared.isVolatile && kept } );
     if ( kept || !array.hasList )
     {
       return;
@@ -8082,6 +8089,7 @@ private:
     ir::Global striped =
         stripedObject( local.byte, true, declarator.location, local, array, kept && array.hasList, site );
     striped.isTemporary = !kept;
+    striped.isConst = declared.isConst && !declared.isVolatile && kept;
     mSections.push_back( std::move( striped ) );
     if ( kept || !array.hasList )
     {
@@ -12454,14 +12462,26 @@ private:
     // does an object `[[placement(zeropage)]]` asked for — see
     // docs/decisions/0210-placement-is-declared-in-c-too.md.
     std::string attributes;
-    if ( ( object.type == ir::Type::POINTER && !object.count.has_value() ) ||
-         object.placement == model::PlacementClass::ZEROPAGE )
+    bool const onPageZero = ( object.type == ir::Type::POINTER && !object.count.has_value() ) ||
+                            object.placement == model::PlacementClass::ZEROPAGE;
+    if ( onPageZero )
     {
       attributes = "zeropage";
     }
     if ( !object.pane.empty() )
     {
       attributes += ( attributes.empty() ? "" : ", " ) + ( "in " + object.pane );
+    }
+    // What `const` becomes where it is bytes rather than a Constant: the word
+    // that lets the solver put it in ROM although its address is taken, which
+    // `.own` alone never says — see
+    // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+    // Not over the zero page, which the word does not go with, and not over a
+    // Section of reservations, which has no bytes for it to be about.
+    if ( object.isConst && !onPageZero && ( !object.elements.empty() || object.value.has_value() ) )
+    {
+      attributes += ( attributes.empty() ? "" : ", " );
+      attributes += "readonly";
     }
     mText.append( ".section" )
         .append( attributes.empty() ? "" : " " + attributes )
@@ -12541,7 +12561,13 @@ private:
             .append( "\n.endns\n" );
         continue;
       }
-      mText.append( object.pane.empty() ? "\n.section\n" : "\n.section in " + object.pane + "\n" )
+      std::string attributes = object.pane.empty() ? "" : "in " + object.pane;
+      if ( object.isConst && !elements.empty() )
+      {
+        attributes += ( attributes.empty() ? "" : ", " );
+        attributes += "readonly";
+      }
+      mText.append( attributes.empty() ? "\n.section\n" : "\n.section " + attributes + "\n" )
           .append( path.back() )
           .append( "\n" );
       if ( !object.isStatic )

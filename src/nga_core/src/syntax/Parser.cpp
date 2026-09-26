@@ -1352,6 +1352,33 @@ void Parser::parseSection( Token directive )
                 .arg( "other", "root" ) );
     attributes.root = false;
   }
+  // A Temporary holds reservations alone, so it has no bytes for `readonly` to
+  // be about; a Movable Section is copied from its Payload at every edge it
+  // survives at a different address, which is a write; and the zero page is
+  // the scarcest memory the machine has, which a Section nothing writes gains
+  // nothing from — see
+  // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
+  if ( attributes.readOnly && attributes.temporary )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::TEMPORARY_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "readonly" ) );
+    attributes.readOnly = false;
+  }
+  if ( attributes.readOnly && attributes.movable )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::READONLY_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "movable" ) );
+    attributes.readOnly = false;
+  }
+  if ( attributes.readOnly && attributes.placement == model::PlacementClass::ZEROPAGE )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::READONLY_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "zeropage" ) );
+    attributes.readOnly = false;
+  }
 
   mOpenSection = directive;
   mBuilder->beginSection( std::move( attributes ), directive.span() );
@@ -1404,6 +1431,19 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
                     .arg( "name", std::string{ word } ) );
       }
       attributes.temporary = true;
+      continue;
+    }
+
+    // `readonly` likewise: whether the bytes ever change, not where they are.
+    if ( word == "readonly" )
+    {
+      if ( attributes.readOnly )
+      {
+        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
+                    .at( attribute.location, attribute.length )
+                    .arg( "name", std::string{ word } ) );
+      }
+      attributes.readOnly = true;
       continue;
     }
 
@@ -1614,6 +1654,13 @@ void Parser::parseProc( Token directive )
   {
     report( diag::diagnostic( diag::DiagnosticId::PROC_NOT_TEMPORARY ).at( directive.location, directive.length ) );
     attributes.temporary = false;
+  }
+  // An address of code taken is a jump and never a write — `.own` says so — so
+  // a Proc needs no word to say its bytes do not change.
+  if ( attributes.readOnly )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::PROC_IS_READONLY ).at( directive.location, directive.length ) );
+    attributes.readOnly = false;
   }
   // A Proc that declares what is shown stands in `fixed`: in the Pane it names
   // it would be the Pane's own code, and would vanish with a switch it makes.

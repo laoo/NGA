@@ -27,6 +27,10 @@ std::optional<Container> containerNamed( std::string_view word )
   {
     return Container::ATR;
   }
+  if ( word == "car" )
+  {
+    return Container::CAR;
+  }
   return std::nullopt;
 }
 
@@ -38,6 +42,8 @@ std::string_view nameOf( Container container )
     return "xex";
   case Container::ATR:
     return "atr";
+  case Container::CAR:
+    return "car";
   case Container::RAW_IMAGE:
     break;
   }
@@ -99,6 +105,8 @@ std::string_view nameOf( RegionProperty property )
   {
   case RegionProperty::RAM:
     return "ram";
+  case RegionProperty::ROM:
+    return "rom";
   case RegionProperty::RESERVED:
     return "reserved";
   case RegionProperty::REGISTER:
@@ -141,6 +149,11 @@ std::uint32_t Pools::generalSize() const
   return sumOf( general );
 }
 
+std::uint32_t Pools::readOnlySize() const
+{
+  return sumOf( readOnly );
+}
+
 Pools poolsOf( std::span<Region const> regions )
 {
   // One entry per address, holding the most restrictive property declared
@@ -161,25 +174,30 @@ Pools poolsOf( std::span<Region const> regions )
   }
 
   Pools pools;
-  auto const runsOf = [&covered]( std::uint32_t from, std::uint32_t to, std::vector<AddressRange>& into )
+  auto const runsOf =
+      [&covered]( RegionProperty property, std::uint32_t from, std::uint32_t to, std::vector<AddressRange>& into )
   {
     std::optional<std::uint32_t> start;
     for ( std::uint32_t address = from; address <= to; ++address )
     {
-      bool const ram = address < to && covered[address] == RegionProperty::RAM;
-      if ( ram && !start.has_value() )
+      bool const in = address < to && covered[address] == property;
+      if ( in && !start.has_value() )
       {
         start = address;
       }
-      else if ( !ram && start.has_value() )
+      else if ( !in && start.has_value() )
       {
         into.push_back( AddressRange{ .begin = *start, .end = address } );
         start.reset();
       }
     }
   };
-  runsOf( 0, 0x100, pools.zeroPage );
-  runsOf( 0x100, ADDRESS_SPACE_END, pools.general );
+  runsOf( RegionProperty::RAM, 0, 0x100, pools.zeroPage );
+  runsOf( RegionProperty::RAM, 0x100, ADDRESS_SPACE_END, pools.general );
+  // No zero-page half: a Section that is never written gains nothing from the
+  // zero page, so the two are refused together and a `rom` Region below `$100`
+  // is in no pool.
+  runsOf( RegionProperty::ROM, 0x100, ADDRESS_SPACE_END, pools.readOnly );
   return pools;
 }
 

@@ -1544,6 +1544,7 @@ std::optional<std::uint32_t> Expander::baseIfOneAcrossResidency( ModuleIndex mod
 std::optional<std::uint32_t>
 Expander::baseAcrossResidency( ModuleIndex module, WindowIndex window, diag::SourceSpan at )
 {
+  (void)at;
   Window const& shown = mProject->target.windows[window.value];
   Residency const& residency = mSymbols->moduleAt( module ).residency();
   std::optional<std::uint32_t> one;
@@ -1585,13 +1586,11 @@ Expander::baseAcrossResidency( ModuleIndex module, WindowIndex window, diag::Sou
       one = here;
     }
   }
-  std::optional<std::uint32_t> const base = first.has_value() ? one : shown.base;
-  if ( !base.has_value() )
-  {
-    reportWith(
-        diag::diagnostic( diag::DiagnosticId::WITH_NO_BASE ).at( at.begin, at.length ).arg( "window", shown.name ) );
-  }
-  return base;
+  // Nothing where the Window has no base: what it shows outside a `.with` is
+  // undefined, so there is nothing to show again and the exit is no
+  // instructions at all — see
+  // docs/decisions/0217-a-window-without-a-base-is-switched-and-never-restored.md.
+  return first.has_value() ? one : shown.base;
 }
 
 void Expander::checkWithReturns( ModuleIndex module, SectionIndex index )
@@ -1604,7 +1603,10 @@ void Expander::checkWithReturns( ModuleIndex module, SectionIndex index )
     auto const* const use = std::get_if<MacroUseContent>( &chunk.content );
     if ( use != nullptr && use->side == WithSide::ENTER )
     {
-      underWith = true;
+      // A `.with` on a Window with no base emits no exit, so a return under it
+      // skips nothing and leaves the Window exactly as the model says it is:
+      // switched, and whatever the last `.with` made it.
+      underWith = use->window.has_value() && mProject->target.windows[use->window->value].base.has_value();
       continue;
     }
     if ( use != nullptr && use->side == WithSide::LEAVE )
