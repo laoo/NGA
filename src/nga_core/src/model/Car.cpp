@@ -143,7 +143,7 @@ std::span<Cartridge const> cartridges()
 
 std::optional<Cartridge> cartridgeNamed( std::string_view name )
 {
-  auto const* const found = std::ranges::find( CARTRIDGES, name, &Cartridge::name );
+  auto const found = std::ranges::find( CARTRIDGES, name, &Cartridge::name );
   if ( found == CARTRIDGES.end() )
   {
     return std::nullopt;

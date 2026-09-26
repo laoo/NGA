@@ -36,8 +36,9 @@ static_assert( std::is_copy_constructible_v<std::vector<std::unique_ptr<int>>>,
 // A standard container's iterator is a pointer on libc++ and a class type on
 // MSVC, so `auto*` deduces from one and not from the other. Nothing can be
 // asserted either way, since both are conforming — which is exactly why it is
-// written down: never deduce a raw pointer from an iterator, whatever a linter
-// suggests it should be spelled.
+// written down: never deduce a raw pointer from an iterator. It is `auto const`
+// at every such site, and readability-qualified-auto, which asks for the other
+// spelling, is off in `.clang-tidy` for that reason.
 
 // Character sets map Unicode code points, so `char32_t` and `U'x'` are now
 // load-bearing. Both are portable; what is not is the encoding a compiler

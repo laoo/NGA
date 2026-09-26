@@ -14,6 +14,7 @@ Checks: >
   -readability-function-cognitive-complexity,
   -readability-trailing-comma,
   -readability-redundant-member-init,
+  -readability-qualified-auto,
   -bugprone-signed-bitwise
 
 # modernize-use-std-print is off because std::print is part of the C++23 subset
@@ -32,6 +33,13 @@ Checks: >
 # opinion under -Wextra, which CI builds with -Werror. This codebase
 # initialises aggregates by designator throughout, so obeying the check trades
 # 36 tidy warnings for 18 compiler ones: tried, measured, reverted.
+#
+# readability-qualified-auto is off because it asks for the one spelling that
+# does not compile everywhere. A standard container's iterator is a raw pointer
+# on libc++ and a class type on MSVC, so at every `std::ranges::find` over a
+# `std::array` the check reads the libc++ type and demands `auto const* const`,
+# which then fails to deduce on MSVC. See PortabilityChecks.cpp, where the
+# difference is written down; the check would argue with it at every new site.
 #
 # bugprone-signed-bitwise is off because the model's Integer is `std::int64_t`
 # by design — an assembler for a machine with signed arithmetic has signed
