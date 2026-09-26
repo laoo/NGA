@@ -1,7 +1,7 @@
 cmake_minimum_required( VERSION 3.25 )
 
 project( NGA
-  VERSION     0.9.2
+  VERSION     0.9.3
   DESCRIPTION "Resource-aware 6502 assembler with static memory-layout verification"
   LANGUAGES   C CXX )
 
