@@ -316,16 +316,26 @@ ContainerFacts cartridge( Patched const& build,
           : std::optional<std::uint32_t>{};
   for ( MapEntry const& held : map.entries )
   {
-    if ( held.waits.has_value() && held.storedSize > 0 )
+    // A run for each form the Payload came to: one unless no unit of storage
+    // held the whole of it, and then they are placed apart.
+    for ( MapPlacement const& piece : held.waits )
     {
-      stored.push_back( ByteRun{ .at = header + ( held.waits->bank.value * map.bankSize ) + held.waits->offset,
-                                 .length = held.storedSize,
+      if ( piece.size == 0 )
+      {
+        continue;
+      }
+      stored.push_back( ByteRun{ .at = header + ( piece.at.bank.value * map.bankSize ) + piece.at.offset,
+                                 .length = piece.size,
                                  .address = 0,
                                  .what = held.transform.empty() ? "payload" : "payload, " + held.transform,
                                  .section = held.name,
                                  .module = held.module,
                                  .chunk = -1,
                                  .source = {} } );
+    }
+    if ( !held.waits.empty() )
+    {
+      // It waits in storage, so it is not also a Pane's.
       continue;
     }
     // A Pane's Section stands in its Bank at its own offset within the Window,
@@ -489,19 +499,24 @@ diskette( Patched const& build, MemoryMap const& map, std::span<std::uint8_t con
   std::vector<ByteRun> stored;
   for ( MapEntry const& held : map.entries )
   {
-    if ( !held.waits.has_value() || held.storedSize == 0 )
+    // A run for each form the Payload came to: one unless no unit of storage
+    // held the whole of it, and then they are placed apart.
+    for ( MapPlacement const& piece : held.waits )
     {
-      continue;
+      if ( piece.size == 0 )
+      {
+        continue;
+      }
+      std::uint32_t const at = storageAt + ( piece.at.bank.value * map.bankSize ) + piece.at.offset;
+      stored.push_back( ByteRun{ .at = at,
+                                 .length = piece.size,
+                                 .address = held.begin,
+                                 .what = held.transform.empty() ? "payload" : "payload, " + held.transform,
+                                 .section = held.name,
+                                 .module = held.module,
+                                 .chunk = -1,
+                                 .source = {} } );
     }
-    std::uint32_t const at = storageAt + ( held.waits->bank.value * map.bankSize ) + held.waits->offset;
-    stored.push_back( ByteRun{ .at = at,
-                               .length = held.storedSize,
-                               .address = held.begin,
-                               .what = held.transform.empty() ? "payload" : "payload, " + held.transform,
-                               .section = held.name,
-                               .module = held.module,
-                               .chunk = -1,
-                               .source = {} } );
   }
   for ( MapFrame const& frame : map.frames )
   {

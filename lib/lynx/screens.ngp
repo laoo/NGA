@@ -1,0 +1,4 @@
+; Two display buffers to switch between, under the same name one is under, so
+; that a Project changes how many it has by changing which document it includes
+; and nothing else. Include this or `lynx/screen.ngp`, never both.
+modules screens { "lynx/screen.asm"  "lynx/screen2.asm" }

@@ -92,7 +92,7 @@ void buildFrom( diag::SourceManager const& sources,
   // Which Sections have a Payload, before anything is given a runtime address:
   // Place needs that much to keep them out of the Window, and needs nothing
   // else of storage — see docs/decisions/0017-payloads-and-banks.md.
-  Storage storage = findPayloads( pruned, readOnly, sink );
+  Storage storage = findPayloads( pruned, readOnly, sizes, sink );
 
   Layout const layout = placeSections( sized, storage, readOnly, options.explain, sink );
   Placed const placed{ sized, layout };
@@ -138,6 +138,22 @@ void buildFrom( diag::SourceManager const& sources,
   else if ( project.container == Container::CAR )
   {
     emitted.bytes = emitCar( patched, sink ).bytes;
+  }
+  else if ( project.container == Container::BS93 )
+  {
+    emitted.bytes = emitBs93( patched, sink ).bytes;
+  }
+  else if ( project.container == Container::LNX || project.container == Container::LYX )
+  {
+    emitted.bytes = emitLnx( patched, sink ).bytes;
+  }
+  else if ( project.container == Container::PRG )
+  {
+    emitted.bytes = emitPrg( patched, sink ).bytes;
+  }
+  else if ( CbmGeometry const* const disk = cbmGeometryOf( project.container ); disk != nullptr )
+  {
+    emitted.bytes = emitCbmDisk( patched, *disk, sink ).bytes;
   }
   else
   {

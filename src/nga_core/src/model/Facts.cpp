@@ -340,21 +340,29 @@ void appendMap( std::string& out, MemoryMap const& map )
       appendNumber( out, "paneState", entry.paneState );
     }
 
-    if ( entry.waits.has_value() )
+    if ( !entry.waits.empty() )
     {
       out.append( ", \"waits\": { " );
-      appendNumber( out, "unit", entry.waits->bank.value );
-      out.append( ", " );
-      appendNumber( out, "offset", entry.waits->offset );
-      out.append( ", " );
-      appendNumber( out, "size", entry.storedSize );
-      out.append( ", " );
       appendField( out, "as", entry.transform );
       out.append( ", " );
       appendPhase( out, "liveFirst", entry.liveFirst );
       out.append( ", " );
       appendPhase( out, "liveLast", entry.liveLast );
-      out.append( " }" );
+      // One piece unless no unit of storage held the whole of it: they are
+      // placed apart, so a single unit and offset would name a run of the
+      // medium that is not all the Payload's.
+      out.append( ", \"pieces\": [ " );
+      for ( std::size_t piece = 0; piece < entry.waits.size(); ++piece )
+      {
+        out.append( "{ " );
+        appendNumber( out, "unit", entry.waits[piece].at.bank.value );
+        out.append( ", " );
+        appendNumber( out, "offset", entry.waits[piece].at.offset );
+        out.append( ", " );
+        appendNumber( out, "size", entry.waits[piece].size );
+        out.append( piece + 1 < entry.waits.size() ? " }, " : " }" );
+      }
+      out.append( " ] }" );
     }
 
     out.append( " }" );

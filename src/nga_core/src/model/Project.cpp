@@ -31,6 +31,34 @@ std::optional<Container> containerNamed( std::string_view word )
   {
     return Container::CAR;
   }
+  if ( word == "bs93" )
+  {
+    return Container::BS93;
+  }
+  if ( word == "lnx" )
+  {
+    return Container::LNX;
+  }
+  if ( word == "lyx" )
+  {
+    return Container::LYX;
+  }
+  if ( word == "prg" )
+  {
+    return Container::PRG;
+  }
+  if ( word == "d64" )
+  {
+    return Container::D64;
+  }
+  if ( word == "d80" )
+  {
+    return Container::D80;
+  }
+  if ( word == "d82" )
+  {
+    return Container::D82;
+  }
   return std::nullopt;
 }
 
@@ -44,6 +72,20 @@ std::string_view nameOf( Container container )
     return "atr";
   case Container::CAR:
     return "car";
+  case Container::BS93:
+    return "bs93";
+  case Container::LNX:
+    return "lnx";
+  case Container::LYX:
+    return "lyx";
+  case Container::PRG:
+    return "prg";
+  case Container::D64:
+    return "d64";
+  case Container::D80:
+    return "d80";
+  case Container::D82:
+    return "d82";
   case Container::RAW_IMAGE:
     break;
   }

@@ -85,6 +85,11 @@ void ProjectParser::parseDocument()
       parseIntent( name );
       continue;
     }
+    if ( word == "frames" )
+    {
+      parseFrames( name );
+      continue;
+    }
     parseBlock( name );
   }
 }
@@ -138,6 +143,11 @@ void ProjectParser::parseBlock( Token name )
   if ( word == "constants" )
   {
     parseConstants( name );
+    return;
+  }
+  if ( word == "cartridge" )
+  {
+    parseCartridge( name );
     return;
   }
   if ( word == "phase" )
@@ -390,6 +400,46 @@ void ProjectParser::parseConstants( Token name )
     }
 
     mBuilder->addConstant( declared, mCursor->advance() );
+  }
+}
+
+void ProjectParser::parseCartridge( Token name )
+{
+  if ( !openBody( name ) )
+  {
+    return;
+  }
+
+  // An entry is a field and a value, and what a value may be is the field's:
+  // a quoted string for the two the reader shows, a word for the rotation.
+  bool reported = false;
+  while ( !bodyEnded( name ) )
+  {
+    Token const here = mCursor->current();
+    if ( here.kind != TokenKind::IDENTIFIER )
+    {
+      skipUnreadable( diag::diagnostic( diag::DiagnosticId::EXPECTED_CARTRIDGE_ENTRY )
+                          .at( here.location, here.length )
+                          .arg( "token", describe( here ) ),
+                      reported );
+      continue;
+    }
+    reported = false;
+    Token const field = mCursor->advance();
+
+    if ( !mCursor->at( TokenKind::STRING ) && !mCursor->at( TokenKind::IDENTIFIER ) )
+    {
+      Token const missing = mCursor->current();
+      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_CARTRIDGE_ENTRY )
+                  .at( missing.location, missing.length )
+                  .arg( "token", describe( missing ) ) );
+      if ( !mCursor->at( TokenKind::RIGHT_BRACE ) )
+      {
+        mCursor->advance();
+      }
+      continue;
+    }
+    mBuilder->setCartridgeField( name, field, mCursor->advance() );
   }
 }
 
@@ -1308,6 +1358,18 @@ void ProjectParser::parseIntent( Token keyword )
     return;
   }
   mBuilder->setIntent( mCursor->advance() );
+}
+
+void ProjectParser::parseFrames( Token keyword )
+{
+  if ( !mCursor->at( TokenKind::IDENTIFIER ) )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME_IN_LIST )
+                .at( keyword.location, keyword.length )
+                .arg( "after", std::string{ textOf( keyword ) } ) );
+    return;
+  }
+  mBuilder->setFrames( mCursor->advance() );
 }
 
 void ProjectParser::parseInclude( Token keyword )

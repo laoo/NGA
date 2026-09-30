@@ -6,6 +6,7 @@
 
 #include "nga/model/Evaluate.hpp"
 #include "nga/model/Isa.hpp"
+#include "nga/model/References.hpp"
 #include "nga/syntax/Literal.hpp"
 
 #include <algorithm>
@@ -19,6 +20,34 @@ namespace nga::model
 
 namespace
 {
+
+/// The Sections an expression names, which is what tells an operand reaching a
+/// `foreign` Section from one reaching any other.
+class Named : public ReferenceVisitor
+{
+public:
+  Named( GlobalSymbols const& symbols, ModuleIndex from ) : mSymbols( &symbols ), mFrom( from ) {}
+
+  void reference( SymbolRef target ) override
+  {
+    Symbol const& symbol = mSymbols->at( target );
+    if ( auto const* const label = std::get_if<LabelPosition>( &symbol.value ); label != nullptr )
+    {
+      reached.push_back( SectionRef{ .module = target.module, .section = label->section } );
+    }
+  }
+
+  void localReference( LabelPosition target ) override
+  {
+    reached.push_back( SectionRef{ .module = mFrom, .section = target.section } );
+  }
+
+  std::vector<SectionRef> reached;
+
+private:
+  GlobalSymbols const* mSymbols;
+  ModuleIndex mFrom;
+};
 
 /// Writes one Section's bytes.
 class Patcher
@@ -139,6 +168,41 @@ void Patcher::patchInstruction( SectionRef where,
     // Whatever stopped this has been reported: an undefined name, a character
     // set that does not exist, a Section that was never placed.
     return;
+  }
+
+  // An operand naming a `foreign` Section may still be read or written by the
+  // CPU where the CPU reaches the address: the low part of a display buffer is
+  // ordinary memory. Where it does not, the store goes to whatever the other
+  // master's page decodes — on a Lynx, Suzy's registers — and this is the half
+  // of that rule a constant offset makes decidable. An address taken says
+  // nothing, which is how the buffer's address reaches the hardware at all.
+  // See docs/decisions/0220-a-foreign-section.md.
+  if ( ReferenceKind const kind = referenceKindOf( mBuild->sources(), chunk );
+       kind == ReferenceKind::READ || kind == ReferenceKind::WRITE || kind == ReferenceKind::READ_WRITE )
+  {
+    Target const& target = mBuild->target();
+    if ( std::optional<RegionIndex> const over = target.mostRestrictiveOver( AddressRange{
+             .begin = static_cast<std::uint32_t>( *value ), .end = static_cast<std::uint32_t>( *value ) + 1 } );
+         over.has_value() && target.regions[over->value].property != RegionProperty::RAM )
+    {
+      Named named{ mBuild->symbols(), where.module };
+      walkReferences( mBuild->symbols(), mBuild->sources(), where.module, *items.front(), named );
+      for ( SectionRef const reached : named.reached )
+      {
+        if ( mBuild->symbols().moduleAt( reached.module ).sectionAt( reached.section ).saysForeign() )
+        {
+          report(
+              diag::diagnostic( diag::DiagnosticId::FOREIGN_OPERAND )
+                  .at( chunk.span.begin, chunk.span.length )
+                  .arg( "address", *value )
+                  .arg(
+                      "section",
+                      mBuild->symbols().moduleAt( reached.module ).displayNameOf( reached.section, mBuild->sources() ) )
+                  .arg( "region", displayNameOf( target.regions[over->value] ) ) );
+          break;
+        }
+      }
+    }
   }
 
   if ( *mode == AddressingMode::RELATIVE )

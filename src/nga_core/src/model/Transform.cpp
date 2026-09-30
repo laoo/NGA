@@ -76,6 +76,61 @@ std::vector<std::uint8_t> encodeRle( std::span<std::uint8_t const> from )
   return out;
 }
 
+/// A stored form: its own size in two bytes, which the decoder reads before the
+/// data, and then the bytes as the encoder left them — see
+/// docs/spec/transition.md.
+std::vector<std::uint8_t> formOf( std::span<std::uint8_t const> encoded )
+{
+  std::vector<std::uint8_t> form{ static_cast<std::uint8_t>( encoded.size() & 0xFF ),
+                                  static_cast<std::uint8_t>( ( encoded.size() >> 8 ) & 0xFF ) };
+  form.insert( form.end(), encoded.begin(), encoded.end() );
+  return form;
+}
+
+/// The forms a Payload comes to. One, unless no unit of storage holds the whole
+/// of it: then the **input** is cut and each part encoded on its own, so that
+/// every piece is a form a decoder reads from its first byte, and the Frame
+/// carries a block for each. Cutting the output instead would give a second
+/// piece no decoder could start in the middle of.
+///
+/// Where to cut is found by asking the encoder rather than by knowing anything
+/// about it: the whole is encoded, and where it does not fit, the input is
+/// scaled by how much it overshot and encoded again, until it does. That
+/// terminates because the length falls every time, and it is right for any
+/// format because nothing here assumes one. A cut read off an optimal parse's
+/// own arithmetic would be exact and take one encode rather than a few, and is
+/// in the queue.
+std::vector<Storage::StoredPiece> piecesOf( Format const& format,
+                                            std::span<std::uint8_t const> initialised,
+                                            std::uint32_t landing,
+                                            std::uint32_t ceiling )
+{
+  std::vector<Storage::StoredPiece> pieces;
+  std::size_t at = 0;
+  while ( at < initialised.size() || pieces.empty() )
+  {
+    std::size_t take = initialised.size() - at;
+    std::vector<std::uint8_t> encoded = format.encode( initialised.subspan( at, take ) );
+    while ( ceiling > 0 && formOf( encoded ).size() > ceiling && take > 1 )
+    {
+      // Scaled by what it came to against what there is room for, and never by
+      // less than one byte, so that a format which does not shrink at all still
+      // gets there.
+      std::size_t const wanted = ( take * ceiling ) / ( encoded.size() + 2 );
+      take = std::min( take - 1, std::max<std::size_t>( wanted, 1 ) );
+      encoded = format.encode( initialised.subspan( at, take ) );
+    }
+    pieces.push_back(
+        Storage::StoredPiece{ .form = formOf( encoded ), .landing = landing + static_cast<std::uint32_t>( at ) } );
+    at += take;
+    if ( take == 0 )
+    {
+      break;
+    }
+  }
+  return pieces;
+}
+
 /// The formats the tool encodes, by name. The number a block carries is not
 /// here: it is the position of the format's decoder in the Project's list,
 /// which the end of Assemble decides.
@@ -307,6 +362,20 @@ void transformPayloads( Sized const& build, Storage& storage, Bytes const& bytes
 {
   Sizes const& sizes = build.sizes();
   std::span<Module const> const modules = build.modules();
+
+  // What one form may come to, where a driver is promised that nothing crosses
+  // a unit: the widest unit there is, since that is the ceiling an author is
+  // held to and the placement will find it. Zero where images may cross, and
+  // then nothing is ever cut.
+  Target const& target = build.project().target;
+  std::uint32_t ceiling = 0;
+  if ( build.project().driver.has_value() && build.project().driver->spansNothing )
+  {
+    for ( std::uint32_t unit = 0; target.bankSize() > 0 && unit * target.bankSize() < target.storageSize(); ++unit )
+    {
+      ceiling = std::max( ceiling, target.usableInUnit( unit ) );
+    }
+  }
   for ( std::uint32_t module = 0; module < modules.size(); ++module )
   {
     Module const& one = modules[module];
@@ -328,14 +397,7 @@ void transformPayloads( Sized const& build, Storage& storage, Bytes const& bytes
       std::span<std::uint8_t const> const initialised =
           content.subspan( std::min<std::size_t>( extent.begin, content.size() ),
                            std::min<std::size_t>( extent.size(), content.size() - extent.begin ) );
-      // The stored form begins with its own size, two bytes the decoder reads
-      // before the data, so that a block of a Frame names only where the
-      // form waits — see docs/spec/transition.md.
-      std::vector<std::uint8_t> encoded = format.encode( initialised );
-      std::vector<std::uint8_t> form{ static_cast<std::uint8_t>( encoded.size() & 0xFF ),
-                                      static_cast<std::uint8_t>( ( encoded.size() >> 8 ) & 0xFF ) };
-      form.insert( form.end(), encoded.begin(), encoded.end() );
-      storage.store( where, id, std::move( form ), extent.begin );
+      storage.store( where, id, piecesOf( format, initialised, extent.begin, ceiling ) );
     }
   }
 }
@@ -443,6 +505,51 @@ void addTransformDispatcher( diag::SourceManager& sources,
   sink.merge( std::move( found ) );
 
   project.modules.push_back( ProjectModule{ .name = "nga.transforms",
+                                            .file = file,
+                                            .residency = Residency::all( phaseCount ),
+                                            .generated = Generated::NONE,
+                                            .outsideWindow = true } );
+  for ( Phase& phase : project.phases.phases )
+  {
+    if ( std::ranges::find( phase.needs, index ) == phase.needs.end() )
+    {
+      phase.needs.push_back( index );
+    }
+  }
+}
+
+void addDriverInit( diag::SourceManager& sources,
+                    Project& project,
+                    std::vector<Module>& modules,
+                    diag::DiagnosticSink& sink )
+{
+  if ( !project.driver.has_value() || !project.driver->init.has_value() )
+  {
+    return;
+  }
+
+  // A Module of its own and not the dispatcher's, because the dispatcher is
+  // built only for a Project with Transitions and this is wanted without
+  // one: a program that draws a frame and loops has no edge to take and still
+  // has to reach the hardware before its first `.with`. A Root, since nothing
+  // in the program names it — the Container calls it by address — and outside
+  // the Window, as every generated Proc that the driver's macros land in is.
+  std::size_t const phaseCount = project.phases.phases.size();
+  std::string source = "; The driver's `init`, wrapped so that a Container has an address to call.\n"
+                       "; See docs/spec/transition.md and docs/spec/xex.md.\n"
+                       ".export ngaInit\n"
+                       ".proc ngaInit, root\n"
+                       "        nga.init\n"
+                       "        rts\n"
+                       ".endp\n";
+  diag::FileId const file = sources.addFile( "<nga>/init.asm", std::move( source ) );
+  ModuleIndex const index{ static_cast<std::uint32_t>( modules.size() ) };
+  diag::DiagnosticSink found{ sink.policy() };
+  modules.push_back( assembleModule( sources, file, "nga.init", Residency::all( phaseCount ), found ) );
+  modules.back().keepOutsideWindow();
+  sink.merge( std::move( found ) );
+
+  project.modules.push_back( ProjectModule{ .name = "nga.init",
                                             .file = file,
                                             .residency = Residency::all( phaseCount ),
                                             .generated = Generated::NONE,

@@ -54,7 +54,14 @@ jobs:
             dir: build/windows
 
     steps:
+      # The whole history, because the binary's version is `git describe`'s
+      # answer and a shallow checkout has no tag for it to describe. A run from
+      # the Actions tab stands past the last tag, so the commits between the two
+      # have to be there as well -- `fetch-tags` over a depth of one would
+      # answer a tag push and nothing else.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install toolchain (Linux)
         if: runner.os == 'Linux'

@@ -54,6 +54,17 @@ void addTransformDispatcher( diag::SourceManager& sources,
                              std::vector<Module>& modules,
                              diag::DiagnosticSink& sink );
 
+/// The end of Assemble for a driver that declares `init`: `ngaInit`, a Module
+/// of its own holding that one macro, so that a Container has an address to
+/// call before it uses the driver. A Module of its own and not the
+/// dispatcher's, since a Project without Transitions has no dispatcher and
+/// still needs the hardware reached. Resident, outside the Window, named in
+/// every Phase's needs, and nothing at all where the role is not declared.
+void addDriverInit( diag::SourceManager& sources,
+                    Project& project,
+                    std::vector<Module>& modules,
+                    diag::DiagnosticSink& sink );
+
 /// The end of Assemble for the decoders and the requests: numbers every
 /// `.transform` the Modules declared — `copy` first and required where a
 /// Transition exists, then Project and declaration order — holds a format to

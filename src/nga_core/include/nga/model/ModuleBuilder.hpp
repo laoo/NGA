@@ -44,7 +44,7 @@ public:
                          syntax::ExpressionPtr size,
                          PlacementClass placement,
                          diag::SourceSpan span ) override;
-  void transition( syntax::Token phase, diag::SourceSpan span ) override;
+  void transition( syntax::Token phase, diag::SourceSpan span, bool fast ) override;
   void dispatch( std::vector<syntax::ExpressionPtr> targets, diag::SourceSpan span ) override;
   void beginMacro( syntax::Token name, syntax::Pattern parameters, diag::SourceSpan span ) override;
   void endMacro( diag::SourceSpan span ) override;

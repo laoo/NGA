@@ -31,32 +31,56 @@ public:
 
   void markPayload( SectionRef where );
 
+  /// That some edge which must be quick opens this image, so it begins where a
+  /// unit does and the driver never reads its way up to an offset. Set by the
+  /// first half of PlaceStorage and read by the second — see
+  /// docs/decisions/0221-an-edge-that-must-be-quick.md.
+  void alignImage( SectionRef where );
+  [[nodiscard]] bool isImageAligned( SectionRef where ) const;
+
+  void alignFrame( FrameIndex index );
+  [[nodiscard]] bool isFrameAligned( FrameIndex index ) const;
+
   /// The Phases the image is live in — see liveAcross — recorded by the
   /// first half, which knows the edges, and read by the second, which packs
   /// by it, and by the memory map.
   void live( SectionRef where, Residency live );
   [[nodiscard]] Residency const& liveOf( SectionRef where ) const;
 
-  /// The Payload's stored form, which transform made it, and how far into its
-  /// Section it lands once turned back. Recorded by the Transform Step, before
-  /// the Banks are packed by what the forms came to.
-  void store( SectionRef where, std::uint8_t transform, std::vector<std::uint8_t> form, std::uint32_t landing );
+  /// One of the stored forms a Payload comes to: its bytes, and how far into
+  /// its Section they land once turned back. There is one of these unless no
+  /// unit holds the whole — then the input is cut and each part encoded on its
+  /// own, so that each is a form a decoder can read from its first byte. See
+  /// docs/spec/cbm-disk.md for the medium that asks for it.
+  struct StoredPiece
+  {
+    std::vector<std::uint8_t> form;
+    std::uint32_t landing = 0;
+  };
 
-  void place( SectionRef where, StorageAddress at );
+  /// The Payload's stored forms and which transform made them. Recorded by the
+  /// Transform Step, before the Banks are packed by what the forms came to.
+  void store( SectionRef where, std::uint8_t transform, std::vector<StoredPiece> pieces );
+
+  void place( SectionRef where, std::uint32_t piece, StorageAddress at );
 
   [[nodiscard]] bool hasPayload( SectionRef where ) const;
-  [[nodiscard]] bool isPlaced( SectionRef where ) const;
-  [[nodiscard]] StorageAddress addressOf( SectionRef where ) const;
+
+  /// How many forms the Payload came to: one unless it had to be cut.
+  [[nodiscard]] std::uint32_t pieceCountOf( SectionRef where ) const;
+
+  [[nodiscard]] bool isPlaced( SectionRef where, std::uint32_t piece ) const;
+  [[nodiscard]] StorageAddress addressOf( SectionRef where, std::uint32_t piece ) const;
 
   /// The Payload's bytes **as they wait**, which is what the Container writes
   /// into a Bank and what a transform reads at run time. The Section's own
   /// bytes where the transform is `copy`, and something else otherwise — which
   /// is why this is answered here and not by Patch.
-  [[nodiscard]] std::span<std::uint8_t const> formOf( SectionRef where ) const;
+  [[nodiscard]] std::span<std::uint8_t const> formOf( SectionRef where, std::uint32_t piece ) const;
 
   /// How many bytes that comes to: the length of the stored form, and never
   /// the Section's size, which is what it occupies once loaded.
-  [[nodiscard]] std::uint32_t sizeOf( SectionRef where ) const;
+  [[nodiscard]] std::uint32_t sizeOf( SectionRef where, std::uint32_t piece ) const;
 
   /// Which transform turns the stored form back into the Section.
   [[nodiscard]] std::uint8_t transformOf( SectionRef where ) const;
@@ -65,7 +89,7 @@ public:
   /// runtime address: the start of its initialised extent, since reserved
   /// space in front of the first byte that emits is neither stored nor
   /// written. See docs/decisions/0026-a-payload-is-the-initialised-extent.md.
-  [[nodiscard]] std::uint32_t landingOf( SectionRef where ) const;
+  [[nodiscard]] std::uint32_t landingOf( SectionRef where, std::uint32_t piece ) const;
 
   /// A Frame: the edge it belongs to, every Section the edge may have to
   /// load and every Cell it may have to write, from which its size follows
@@ -76,12 +100,19 @@ public:
   /// from nowhere, which a Container with no loader takes to put the entry
   /// Phase's own bytes where they belong — see
   /// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+  /// `blocks` is what the Frame is **sized** for, which is not the number of
+  /// Payloads where one of them may be cut into several: see
+  /// blocksForPayload. The Frame's address is in the bytes of a
+  /// `.transition`, so Patch has to know it before a form exists, and it is
+  /// therefore sized here for the most it could come to.
   void declareFrame( FrameIndex index,
                      std::optional<PhaseIndex> from,
                      PhaseIndex to,
                      std::vector<SectionRef> payloads,
+                     std::uint32_t blocks,
                      std::uint32_t cellWrites,
-                     std::uint32_t windows );
+                     std::uint32_t windows,
+                     bool held );
   void placeFrame( FrameIndex index, StorageAddress at );
   void liveFrame( FrameIndex index, Residency live );
   [[nodiscard]] Residency const& frameLiveOf( FrameIndex index ) const;
@@ -121,20 +152,27 @@ public:
   }
 
 private:
+  struct Piece
+  {
+    bool placed = false;
+    StorageAddress address;
+    std::uint32_t landing = 0;
+    std::vector<std::uint8_t> form;
+  };
+
   struct Entry
   {
     bool payload = false;
-    bool placed = false;
-    StorageAddress address;
+    bool aligned = false;
     std::uint8_t transform = 0;
-    std::uint32_t landing = 0;
-    std::vector<std::uint8_t> form;
+    std::vector<Piece> pieces;
     Residency live;
   };
 
   struct Frame
   {
     bool declared = false;
+    bool aligned = false;
     bool placed = false;
     std::uint32_t size = 0;
     StorageAddress address;
@@ -188,7 +226,15 @@ Residency liveAcross( PhaseGraph const& graph, Residency const& needed );
 /// Section holding no bytes, evicted in a Phase from which a Phase needing it
 /// is reachable. Nothing restores it, and what reaches a Root knows no
 /// Phases — see docs/decisions/0040-root-evicted.md.
-Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, diag::DiagnosticSink& sink );
+Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const& sizes, diag::DiagnosticSink& sink );
+
+/// How many blocks a Payload may come to: one, unless no unit of storage holds
+/// the whole of it and the Transform Step has to cut it. A Frame is sized for
+/// this before the cutting happens — the address it waits at is in the bytes of
+/// a `.transition`, so Patch has to know it before a form exists — and a Frame
+/// sized for more blocks than are used leaves the rest unread, as it does for a
+/// Movable Section that did not move.
+std::uint32_t blocksForPayload( std::uint32_t storedCeiling, std::uint32_t extent );
 
 /// Whether the Project's Container takes a **cold start**: an edge into the
 /// entry Phase from nowhere, which puts that Phase's own initialised bytes

@@ -48,6 +48,12 @@ struct Candidate
   /// allows — see docs/decisions/0034-trace.md.
   bool temporary = false;
 
+  /// What the source said with `foreign`: another master of the address space
+  /// reads the bytes, so the extent may cross a `register` or a `reserved`
+  /// Region and nothing else about the Section changes — see
+  /// docs/decisions/0220-a-foreign-section.md.
+  bool foreign = false;
+
   /// What the ReadOnly Step said: nothing writes this Section.
   bool readOnly = false;
 
@@ -213,6 +219,7 @@ candidatesOf( Sized const& build, Storage const& storage, ReadOnly const& readOn
         }
       }
       candidate.temporary = section.isTemporary();
+      candidate.foreign = section.saysForeign();
       candidate.readOnly = readOnly.includes( where );
       if ( std::optional<SectionIndex> const next = section.next(); next.has_value() )
       {
@@ -966,7 +973,21 @@ Layout placeSections(
         }
         return finding;
       };
-      if ( region.property == RegionProperty::REGISTER )
+      // A `foreign` Section is the one thing that may lie over a register or a
+      // reservation: those are truths about the address for the CPU, and its
+      // bytes are another master's. Nothing else is skipped — the alignment
+      // below is exactly what a display buffer needs. What it may not do is
+      // hold bytes there: the routine copies with the CPU, and so does a
+      // loader, so bytes past what the CPU reaches have nobody to write them.
+      // A pin is the only way here, every pool being RAM. See
+      // docs/decisions/0220-a-foreign-section.md.
+      if ( candidate.foreign && region.property != RegionProperty::RAM &&
+           build.symbols().moduleAt( candidate.where.module ).sectionAt( candidate.where.section ).emitsBytes() )
+      {
+        sink.add( inRegion( diag::DiagnosticId::FOREIGN_HOLDS_BYTES ).arg( "last", range.end - 1 ) );
+        continue;
+      }
+      if ( region.property == RegionProperty::REGISTER && !candidate.foreign )
       {
         sink.add( inRegion( diag::DiagnosticId::PIN_IN_REGISTER ) );
         continue;
@@ -979,7 +1000,7 @@ Layout placeSections(
         sink.add( inRegion( diag::DiagnosticId::PIN_IN_ROM ) );
         continue;
       }
-      if ( region.property == RegionProperty::RESERVED )
+      if ( region.property == RegionProperty::RESERVED && !candidate.foreign )
       {
         sink.add( inRegion( diag::DiagnosticId::PIN_IN_RESERVED ) );
       }

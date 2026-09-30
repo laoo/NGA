@@ -138,7 +138,13 @@ void resolveDriver( diag::SourceManager const& /*sources*/,
   }
 
   Target& target = project.target;
-  Driver resolved{ .module = *driver, .open = {}, .read = {}, .windows = {}, .stream = std::nullopt };
+  Driver resolved{ .module = *driver,
+                   .open = {},
+                   .read = {},
+                   .init = std::nullopt,
+                   .windows = {},
+                   .stream = std::nullopt,
+                   .seeksForward = false };
   resolved.windows.resize( target.windows.size() );
   bool complete = true;
 
@@ -163,6 +169,74 @@ void resolveDriver( diag::SourceManager const& /*sources*/,
       continue;
     }
     *into = *macro;
+  }
+
+  // `init` is what the hardware takes before the driver can be used at all —
+  // a cartridge on the Atari's PBI answers on the bus only once it has been
+  // selected, and until then a write to the register that switches its window
+  // is a write to nothing. Optional, because every other medium this tool
+  // ships a driver for takes nothing: where it is absent no call is emitted
+  // and no Container segment is written. Only the `.xex` calls it, so a
+  // Container that cannot is refused here rather than silently leaving the
+  // hardware unreached — see
+  // docs/decisions/0227-a-driver-may-need-the-hardware-reached-first.md.
+  if ( DriverRole const* const role = roleOf( module, "init", {} ); role != nullptr )
+  {
+    if ( project.container != Container::XEX )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::CONTAINER_CANNOT_INIT )
+                    .at( role->roleSpan.begin, role->roleSpan.length )
+                    .arg( "container", std::string{ nameOf( project.container ) } ) );
+      complete = false;
+    }
+    else if ( std::optional<MacroIndex> const macro = macroOf( module, *role ); macro.has_value() )
+    {
+      resolved.init = *macro;
+    }
+    else
+    {
+      // Reported by the Module.
+      complete = false;
+    }
+  }
+
+  // `seek` says what the medium can do about an offset, and `forward` is the
+  // one word there is: a driver that reaches an offset by reading up to it.
+  for ( DriverRole const& role : module.driverRoles() )
+  {
+    if ( role.role != "seek" )
+    {
+      continue;
+    }
+    if ( role.label != "forward" )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::DRIVER_SEEK_UNKNOWN )
+                    .at( role.labelSpan.begin, role.labelSpan.length )
+                    .arg( "word", std::string{ role.label } ) );
+      complete = false;
+      continue;
+    }
+    resolved.seeksForward = true;
+  }
+
+  // `span` says whether an image may cross from one unit into the next, and
+  // `none` is the one word there is: a driver that is promised none does, and
+  // may then know nothing of which unit follows which or of where one ends.
+  for ( DriverRole const& role : module.driverRoles() )
+  {
+    if ( role.role != "span" )
+    {
+      continue;
+    }
+    if ( role.label != "none" )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::DRIVER_SPAN_UNKNOWN )
+                    .at( role.labelSpan.begin, role.labelSpan.length )
+                    .arg( "word", std::string{ role.label } ) );
+      complete = false;
+      continue;
+    }
+    resolved.spansNothing = true;
   }
 
   // The roles that name a Window: each names one the Target declares, and

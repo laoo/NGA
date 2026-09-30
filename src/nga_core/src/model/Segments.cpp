@@ -75,11 +75,20 @@ std::vector<Stored> storedImages( Patched const& build )
       SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
       // The Payload's size is Storage's: what waits in a unit is the stored
       // form, and the Section's own size is what it occupies once loaded.
-      if ( !storage.hasPayload( where ) || !storage.isPlaced( where ) || storage.sizeOf( where ) == 0 )
+      if ( !storage.hasPayload( where ) )
       {
         continue;
       }
-      stored.push_back( Stored{ .at = storage.addressOf( where ), .form = storage.formOf( where ) } );
+      // One form unless no unit held the whole of it, and then several, each
+      // waiting where it was placed.
+      for ( std::uint32_t piece = 0; piece < storage.pieceCountOf( where ); ++piece )
+      {
+        if ( !storage.isPlaced( where, piece ) || storage.sizeOf( where, piece ) == 0 )
+        {
+          continue;
+        }
+        stored.push_back( Stored{ .at = storage.addressOf( where, piece ), .form = storage.formOf( where, piece ) } );
+      }
     }
   }
   // And every Pane's Section with bytes, which a load writes into the Pane's

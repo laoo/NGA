@@ -136,6 +136,12 @@ struct TransitionContent
 {
   syntax::Token name;
   std::optional<PhaseIndex> target;
+
+  /// Written `.transition NAME, fast`: every image this edge opens begins at a
+  /// unit boundary, so that a driver which reaches an offset by reading up to
+  /// it never has to. Silence is the Intent's to fill. See
+  /// docs/decisions/0221-an-edge-that-must-be-quick.md.
+  bool fast = false;
 };
 
 /// Which Frame, across the whole program: the edges some `.transition`

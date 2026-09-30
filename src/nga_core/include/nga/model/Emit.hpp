@@ -2,6 +2,7 @@
 
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/model/Build.hpp"
+#include "nga/model/CbmDisk.hpp"
 #include "nga/model/Merge.hpp"
 #include "nga/model/Patch.hpp"
 #include "nga/model/Place.hpp"
@@ -100,5 +101,112 @@ struct CarFile
 /// image reaches, and when the entry Phase has no entry Label defined exactly
 /// once among the Modules it needs.
 CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink );
+
+/// The ten bytes in front of a `bs93` image: two of magic, the address it is
+/// both loaded at and entered at, the whole file's length, and the four letters
+/// every reader knows the format by. The two numbers are **big endian**, which
+/// is the one thing about this format a 6502 programmer does not expect.
+constexpr std::uint32_t BS93_HEADER_SIZE = 10;
+
+/// One block, as bytes: the ten above and then memory from the program's lowest
+/// byte to its highest. The CLI writes them; `nga_core` does no I/O.
+struct Bs93File
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the `bs93` Container, the one an emulator boots with no ROM
+/// of the machine's own: it copies the block to the address in the header and
+/// enters it there. So the image is the raw one, and the two things that make it
+/// this Container are the header and the rule the single address forces — the
+/// entry Label is the image's **lowest byte**. The layout is the contract in
+/// docs/spec/bs93.md.
+///
+/// Refused, with nothing emitted, when the entry is not the lowest byte, when a
+/// Section waits in storage — there is no loader to read it — and when the entry
+/// Phase has no entry Label defined exactly once among the Modules it needs.
+Bs93File emitBs93( Patched const& build, diag::DiagnosticSink& sink );
+
+/// Where a Commodore PET's BASIC begins, which is where `LOAD "NAME",8` puts a
+/// program whatever its own header says, and so where a `prg` image begins.
+constexpr std::uint32_t PRG_LOAD_ADDRESS = 0x0401;
+
+/// The BASIC line the tool writes in front of the program: a link, a line
+/// number, the `SYS` token, the entry's address as **five** decimal digits, the
+/// line's terminator and the two zero bytes that end the program. Five digits
+/// and not as many as the number needs, so that the stub is one length and the
+/// code behind it always begins at PRG_ENTRY_FLOOR — the pad byte a
+/// four-digit stub needs, and whose absence enters one byte into the first
+/// instruction, cannot then be forgotten because there is none.
+constexpr std::uint32_t PRG_STUB_SIZE = 13;
+
+/// The lowest address a program in a `prg` may emit at: the byte after the
+/// stub, which the `SYS` enters.
+constexpr std::uint32_t PRG_ENTRY_FLOOR = PRG_LOAD_ADDRESS + PRG_STUB_SIZE;
+
+/// A Commodore PET program file, as bytes: two of load address, the BASIC stub
+/// and then memory up to the program's highest byte. The CLI writes them;
+/// `nga_core` does no I/O.
+struct PrgFile
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the `prg` Container, the one a PET loads from a disk by
+/// hand. There is no boot and no loader: `LOAD` puts one contiguous block at
+/// BASIC's own start and `RUN` executes the line the tool wrote, which `SYS`es
+/// into the code behind it. So the image is the raw one with the stub in front,
+/// and what makes it this Container is that its first byte is not the program's
+/// but BASIC's. The layout is the contract in docs/spec/prg.md.
+///
+/// Refused, with nothing emitted, when a Section emits below PRG_ENTRY_FLOOR —
+/// the stub stands there and `LOAD` would write the program over BASIC's own
+/// pointers — when a Section waits in storage, there being no loader to read
+/// it, and when the entry Phase has no entry Label defined exactly once among
+/// the Modules it needs.
+PrgFile emitPrg( Patched const& build, diag::DiagnosticSink& sink );
+
+/// The block and the line of BASIC in front of it, without the refusal of a
+/// Payload: a `.d64` has somewhere for one to wait and a `.prg` alone has not,
+/// so the rule belongs to the Container and the bytes are shared.
+PrgFile prgWith( Patched const& build, diag::DiagnosticSink& sink );
+
+/// A Commodore diskette, as bytes: the sectors of a 1541's, an 8050's or an
+/// 8250's surface, with a file system a DOS can read, the program as the one
+/// file in it, and the Phases waiting in the sectors neither of those took. The
+/// CLI writes them; `nga_core` does no I/O.
+struct CbmDiskFile
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the `d64`, `d80` and `d82` Containers, which differ in
+/// nothing a driver can see: the `prg` above, put on a diskette of the geometry
+/// given beside the storage a Transition reads. The layout is
+/// docs/spec/cbm-disk.md.
+///
+/// Refused, with nothing emitted, for everything a `prg` is refused for, and
+/// when the sectors the Phases left are too few to hold the program.
+CbmDiskFile emitCbmDisk( Patched const& build, CbmGeometry const& disk, diag::DiagnosticSink& sink );
+
+/// A Lynx cartridge, as bytes: the sixty-four-byte header a `.lnx` carries and a
+/// `.lyx` does not, and then the image, 256 pages of whatever the board's page
+/// size is. The CLI writes them; `nga_core` does no I/O.
+struct LnxFile
+{
+  std::vector<std::uint8_t> bytes;
+};
+
+/// The Emit Step in the two Lynx cartridge Containers, the ones a machine boots
+/// by itself: fifty bytes of encrypted loader at the very front, the loader those
+/// read in behind them, storage from page one, and the load image — the segments
+/// a `.xex` is made of — on the first page after the storage the program came to
+/// use. The layout is the contract in docs/spec/lnx.md.
+///
+/// Refused, with nothing emitted, when the bootstrap does not fit in page zero,
+/// when the whole comes to more than the board holds, when the loader's fifty
+/// bytes are not where the ROM decrypts them, and when the entry Phase has no
+/// entry Label defined exactly once among the Modules it needs.
+LnxFile emitLnx( Patched const& build, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

@@ -114,6 +114,11 @@ public:
   /// given before, belong to the implementation.
   virtual void setContainer( Token name, std::optional<Token> board ) = 0;
 
+  /// One entry of the `cartridge` block: what a reader shows about the cartridge
+  /// — its name, its manufacturer, how the screen is held — which only a format
+  /// with somewhere to put them carries.
+  virtual void setCartridgeField( Token block, Token field, Token value ) = 0;
+
   /// One name of a `containers` entry of a `target` block: what the machine
   /// takes.
   virtual void addAcceptedContainer( Token keyword, Token name ) = 0;
@@ -125,6 +130,12 @@ public:
   /// word is one of the three, and whether one was given before, belong to the
   /// implementation.
   virtual void setIntent( Token name ) = 0;
+
+  /// `frames held`: whether an edge's block descriptors are read once into
+  /// memory or read again from storage for every block. A word about what the
+  /// program is willing to spend, as `optimize` is — see
+  /// docs/spec/project-file.md.
+  virtual void setFrames( Token name ) = 0;
 
   /// `units NAME` of a `storage` block: the units are the Banks of the unit
   /// set named. Whether the set exists is not a question the text settles.

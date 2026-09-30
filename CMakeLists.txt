@@ -1,11 +1,15 @@
 cmake_minimum_required( VERSION 3.25 )
 
 project( NGA
-  VERSION     0.9.3
   DESCRIPTION "Resource-aware 6502 assembler with static memory-layout verification"
   LANGUAGES   C CXX )
 
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
+
+# No `VERSION` above: the version is the tag, and cmake/Version.cmake says why.
+include( Version )
+ngaResolveVersion( NGA_VERSION_STRING )
+message( STATUS "NGA version: ${NGA_VERSION_STRING}" )
 
 set( CMAKE_CXX_STANDARD          23 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )

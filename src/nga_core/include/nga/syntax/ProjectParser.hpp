@@ -38,8 +38,10 @@ private:
   void parseModules( Token name );
   void parseDiagnostics( Token name );
   void parseConstants( Token name );
+  void parseCartridge( Token name );
   void parseContainer( Token keyword );
   void parseIntent( Token keyword );
+  void parseFrames( Token keyword );
   void parsePhase( Token keyword );
   void parseResident( Token name );
   void parseGroup( Token keyword );

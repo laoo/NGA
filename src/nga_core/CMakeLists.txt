@@ -29,6 +29,7 @@ add_library( nga_core
   src/model/Assemble.cpp
   src/model/Boot.cpp
   src/model/Atr.cpp
+  src/model/Bs93.cpp
   src/model/Car.cpp
   src/model/Charsets.cpp
   src/model/Emit.cpp
@@ -37,6 +38,7 @@ add_library( nga_core
   src/model/Script.cpp
   src/model/MemoryMap.cpp
   src/model/Evaluate.cpp
+  src/model/Lnx.cpp
   src/model/Isa.cpp
   src/model/Expand.cpp
   src/model/Merge.cpp
@@ -45,6 +47,7 @@ add_library( nga_core
   src/model/Patch.cpp
   src/model/Pipeline.cpp
   src/model/Place.cpp
+  src/model/Prg.cpp
   src/model/PlaceStorage.cpp
   src/model/Transform.cpp
   src/model/Dispatch.cpp
@@ -58,6 +61,8 @@ add_library( nga_core
   src/model/Panes.cpp
   src/model/With.cpp
   src/model/Constants.cpp
+  src/model/CbmDisk.cpp
+  src/model/CbmImage.cpp
   src/model/Regions.cpp
   src/model/Runtime.cpp
   src/model/Suppressions.cpp
@@ -92,7 +97,7 @@ add_library( nga::core ALIAS nga_core )
 
 target_include_directories( nga_core PUBLIC include )
 
-target_compile_definitions( nga_core PRIVATE NGA_VERSION="${PROJECT_VERSION}" )
+target_compile_definitions( nga_core PRIVATE NGA_VERSION="${NGA_VERSION_STRING}" )
 
 # ortools::ortools is PRIVATE because no NGA header includes an OR-Tools header,
 # and keeping it that way is what makes the solver replaceable later: the model

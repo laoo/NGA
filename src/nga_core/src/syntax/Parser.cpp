@@ -1380,6 +1380,42 @@ void Parser::parseSection( Token directive )
     attributes.readOnly = false;
   }
 
+  // What another master reads is not a Temporary, whose bytes are somebody
+  // else's between two visits; not Movable, since the routine rewrites one at
+  // every edge it survives at a new address; and not `readonly`, which asks to
+  // stand in ROM, where no master writes anything. Each of the three is a
+  // contradiction rather than a combination nobody wanted — see
+  // docs/decisions/0220-a-foreign-section.md.
+  if ( attributes.foreign && attributes.temporary )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::FOREIGN_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "temporary" ) );
+    attributes.foreign = false;
+  }
+  if ( attributes.foreign && attributes.movable )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::FOREIGN_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "movable" ) );
+    attributes.foreign = false;
+  }
+  if ( attributes.foreign && attributes.readOnly )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::FOREIGN_EXCLUDES )
+                .at( directive.location, directive.length )
+                .arg( "other", "readonly" ) );
+    attributes.foreign = false;
+  }
+  // And it is a Root, required rather than implied: the address is handed to
+  // the hardware, so 0061 would make it one at the taking anyway, and one that
+  // is not is a Section nothing reaches and Prune would drop.
+  if ( attributes.foreign && !attributes.root )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::FOREIGN_NEEDS_ROOT ).at( directive.location, directive.length ) );
+    attributes.foreign = false;
+  }
+
   mOpenSection = directive;
   mBuilder->beginSection( std::move( attributes ), directive.span() );
   endStatement( quiet );
@@ -1444,6 +1480,20 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
                     .arg( "name", std::string{ word } ) );
       }
       attributes.readOnly = true;
+      continue;
+    }
+
+    // `foreign` likewise: which master of the address space reads the bytes,
+    // not where they are — see docs/decisions/0220-a-foreign-section.md.
+    if ( word == "foreign" )
+    {
+      if ( attributes.foreign )
+      {
+        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
+                    .at( attribute.location, attribute.length )
+                    .arg( "name", std::string{ word } ) );
+      }
+      attributes.foreign = true;
       continue;
     }
 
@@ -1661,6 +1711,12 @@ void Parser::parseProc( Token directive )
   {
     report( diag::diagnostic( diag::DiagnosticId::PROC_IS_READONLY ).at( directive.location, directive.length ) );
     attributes.readOnly = false;
+  }
+  // And the CPU is what runs a Proc, so nothing of one is another master's.
+  if ( attributes.foreign )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::PROC_NOT_FOREIGN ).at( directive.location, directive.length ) );
+    attributes.foreign = false;
   }
   // A Proc that declares what is shown stands in `fixed`: in the Pane it names
   // it would be the Pane's own code, and would vanish with a switch it makes.
@@ -2606,7 +2662,27 @@ void Parser::parseTransition( Token directive )
   }
 
   Token const name = mCursor->advance();
-  mBuilder->transition( name, spanning( directive.span(), name.span() ) );
+
+  // `, fast` and nothing else: what the edge asks of storage, not of the Phase
+  // it enters — see docs/decisions/0221-an-edge-that-must-be-quick.md.
+  bool fast = false;
+  diag::SourceSpan span = spanning( directive.span(), name.span() );
+  if ( mCursor->match( TokenKind::COMMA ) )
+  {
+    if ( !mCursor->at( TokenKind::IDENTIFIER ) || textOf( mCursor->current() ) != "fast" )
+    {
+      Token const here = mCursor->current();
+      report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_TRANSITION_ATTRIBUTE )
+                  .at( here.location, here.length )
+                  .arg( "name", describe( here ) ) );
+      recover();
+      return;
+    }
+    Token const attribute = mCursor->advance();
+    fast = true;
+    span = spanning( span, attribute.span() );
+  }
+  mBuilder->transition( name, span, fast );
   expectLineEnd();
 }
 

@@ -33,6 +33,23 @@ XexFile emitXex( Patched const& build, diag::DiagnosticSink& sink )
   // base again.
   writeResidentSegments( build, out, {} );
 
+  // What the hardware takes before the driver can be used at all: INITAD at
+  // the Proc that holds the driver's `init`, once, after the bytes that Proc
+  // is among and before anything that calls the driver — the units among
+  // them, which is why this cannot wait for `ngaRestore`. Written only where
+  // the driver declares the role, and then whether or not a unit is filled: a
+  // program with no Payload still reaches the hardware through a `.with`.
+  if ( project.driver.has_value() && project.driver->init.has_value() )
+  {
+    std::optional<std::uint32_t> const init = addressOfExported( symbols, INIT_NAME, sizes, layout );
+    if ( !init.has_value() )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::XEX_INIT_NOT_PLACED ).sortedBy( "init" ) );
+      return {};
+    }
+    out.word( INITAD, *init );
+  }
+
   if ( !stored.empty() )
   {
     // The units are filled through the driver: a byte naming the unit's

@@ -555,6 +555,14 @@ std::optional<MacroRef> Expander::resolve( ModuleIndex from,
   {
     role = driver.has_value() ? std::optional{ driver->read } : std::nullopt;
   }
+  else if ( text == "init" )
+  {
+    // The one role a driver may not declare, and then `nga.init` is a name
+    // the tool holds and the driver has nothing for. Only the Proc the tool
+    // generates uses it, so the finding below reports it against a driver
+    // that has no `init` rather than against a program.
+    role = driver.has_value() ? driver->init : std::nullopt;
+  }
   else if ( text == "show" || text == "showAt" )
   {
     // The Window first, a Symbol of the Target's in scope everywhere, which

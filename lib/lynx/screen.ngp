@@ -1,0 +1,4 @@
+; One display buffer, under the name `screens`, which is what a Project lists in
+; `resident`: the display reads it in every Phase. Include this or
+; `lynx/screens.ngp`, never both — they declare the same Module.
+modules screens { "lynx/screen.asm" }

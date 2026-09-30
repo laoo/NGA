@@ -1,0 +1,15 @@
+; Storage on a 8250, double-sided diskette, for a Project whose Container is
+; the `d82`. The same shape as `pet/d64.ngp` and the same driver: a unit is a
+; **track** and its number is the track's, `size` is the widest track and
+; therefore a stride, and what a narrower one does not have is held against
+; every image. Unit zero is no track, and this surface keeps two for itself —
+; the directory's and the one the map has of its own — so those are zero too.
+;
+; 1 051 648 bytes of sectors are left for a program, against the 169 984 of a
+; `d64`. The two numbers are checked against the Container (`NGA1238`).
+;
+; A Project includes this beside `pet/3032.ngp`.
+storage { units 155  size 7424 }
+
+modules { "pet/disk.asm"  "stream/zx0.asm" }
+resident { disk, zx0 }

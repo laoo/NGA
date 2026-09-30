@@ -1,0 +1,7 @@
+; Storage on a 64k cartridge: 255 pages of 256 bytes, page zero being the
+; bootstrap's. A Project includes the one document whose geometry is the board it
+; names in `container`, and the two are checked against each other.
+storage { units 255  size 256 }
+constants { LYNX_PAGE_SIZE = 256 }
+modules { "lynx/cart.asm"  "stream/zx0.asm" }
+resident { cart, zx0 }

@@ -745,6 +745,7 @@ std::vector<Module> assembleProject( diag::SourceManager& sources, Project& proj
   {
     addTransformDispatcher( sources, project, modules, sink );
   }
+  addDriverInit( sources, project, modules, sink );
 
   return modules;
 }

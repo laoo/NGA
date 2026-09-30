@@ -66,6 +66,11 @@ struct SectionAttributes
   /// cannot see for itself, said where it can be held to — see
   /// docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
   bool readOnly = false;
+
+  /// Written `, foreign`: the bytes are another master of the address space's,
+  /// and the CPU does not read them, so the extent may cross a `register` or a
+  /// `reserved` Region — see docs/decisions/0220-a-foreign-section.md.
+  bool foreign = false;
 };
 
 /// The names an argument list is matched against: the parameters of a
@@ -153,7 +158,7 @@ public:
   /// `.transition NAME`: enters the Phase named, and never returns. Whether the
   /// name is a Phase is the Project's to say, at the end of Assemble — see
   /// docs/decisions/0019-transition-mechanism.md.
-  virtual void transition( Token phase, diag::SourceSpan span ) = 0;
+  virtual void transition( Token phase, diag::SourceSpan span, bool fast ) = 0;
 
   /// `.dispatch TARGET [, TARGET]...`: control goes to one of the positions
   /// named, chosen by the value in `A`. Written over several lines it is one

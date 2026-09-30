@@ -106,6 +106,11 @@ constexpr std::string_view LOAD_UNIT_NAME = "ngaLoadUnit";
 constexpr std::string_view LOAD_MAP_NAME = "ngaLoadMap";
 constexpr std::string_view RESTORE_NAME = "ngaRestore";
 
+/// The driver's `init`, wrapped in a Proc so that a Container has an address
+/// to call: what the hardware takes before the driver can be used at all.
+/// Present only where the driver declares the role.
+constexpr std::string_view INIT_NAME = "ngaInit";
+
 /// The runtime address of a Label, or nothing where it is not one or has no
 /// address yet.
 std::optional<std::uint32_t>
@@ -130,6 +135,24 @@ std::uint32_t sizeOfTransition( Residency const& residency );
 /// counting the Cell writes and this many bytes each.
 constexpr std::uint32_t FRAME_HEADER_SIZE = 3;
 constexpr std::uint32_t FRAME_BLOCK_SIZE = 6;
+
+/// Two bytes in front of that where the Project said `frames held`: the
+/// address the descriptors are read into, or **zero** for an edge whose
+/// entered Phase had no room to lend. A program that did not ask for it has
+/// no such bytes at all — the routine is generated knowing the answer, so
+/// there is nothing for it to read past, and the cheap case stays exactly the
+/// size it was.
+constexpr std::uint32_t FRAME_HELD_SIZE = 2;
+
+/// The header a Frame of this Project has.
+constexpr std::uint32_t frameHeaderSize( bool held )
+{
+  return held ? FRAME_HEADER_SIZE + FRAME_HELD_SIZE : FRAME_HEADER_SIZE;
+}
+
+/// The two bytes a stored form begins with: its own size, which the decoder
+/// reads before the data — see docs/spec/transition.md.
+constexpr std::uint32_t FORM_HEADER_SIZE = 2;
 constexpr std::uint32_t CELL_WRITE_SIZE = 4;
 
 /// A Frame counts its blocks and its Cell writes in a byte each.
@@ -139,7 +162,7 @@ constexpr std::uint32_t MOST_BLOCKS = 255;
 /// to load and every Slot it may have to write, since a shorter list leaves
 /// the rest unread, and one byte per Window of the Target for the base the
 /// entered Phase gives it — see docs/decisions/0056-a-phase-chooses-a-base.md.
-std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows );
+std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows, bool held );
 
 /// The order the routine shows the entered Phase's bases in, and the Frame
 /// lists them in: every Window of the Target in its order, the one the
@@ -151,6 +174,25 @@ std::vector<WindowIndex> baseOrderOf( Project const& project );
 /// What a finding and the map call a Frame. The cold start comes from no
 /// Phase and is named for what it is.
 std::string nameOfFrame( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to );
+
+/// One block of an edge: a stored form of a Payload, and which of them.
+struct EdgeBlock
+{
+  SectionRef payload;
+  std::uint32_t piece = 0;
+};
+
+/// The blocks an edge loads, **in the order the routine loads them**: the
+/// edge's load set less a Movable Section the Phase left already holds where
+/// the entered one wants it, one block per stored form, and — where the
+/// Project said `frames held` — the largest of them moved to the end, since
+/// that is the block whose memory lends the routine its list of descriptors
+/// and it has to arrive after the rest. PlaceStorage packs the images in this
+/// order and Patch writes the Frame in it, so the two cannot drift apart.
+///
+/// Answered from Layout and from the sizes of the stored forms, which are
+/// known before an image is placed: nothing here may ask where one waits.
+std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Storage const& storage );
 
 /// The Frame of one edge, as the routine reads it from its Bank: the entered
 /// Phase's entry, a block per Payload the edge copies, and the Cell writes.

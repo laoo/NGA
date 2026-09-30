@@ -1,5 +1,9 @@
 #include "nga/model/ProjectFile.hpp"
 
+#include "nga/model/CbmDisk.hpp"
+
+#include "nga/model/Lnx.hpp"
+
 #include "nga/model/Atr.hpp"
 #include "nga/model/Car.hpp"
 
@@ -83,9 +87,11 @@ public:
   void setSeverity( syntax::Token code, diag::SeverityOverride action ) override;
   void addConstant( syntax::Token name, syntax::Token value ) override;
   void setContainer( syntax::Token name, std::optional<syntax::Token> board ) override;
+  void setCartridgeField( syntax::Token block, syntax::Token field, syntax::Token value ) override;
   void addAcceptedContainer( syntax::Token keyword, syntax::Token name ) override;
   void setCpu( syntax::Token keyword, syntax::Token name ) override;
   void setIntent( syntax::Token name ) override;
+  void setFrames( syntax::Token name ) override;
   void includeDocument( syntax::Token path ) override;
   void declarePhase( syntax::Token name ) override;
   void phaseNeeds( syntax::Token phase, syntax::Token module ) override;
@@ -127,6 +133,7 @@ public:
   void addConstantModule();
   void checkContainer() const;
   void checkCartridge();
+  void checkDiskette();
 
   [[nodiscard]] Project take() &&
   {
@@ -697,14 +704,38 @@ void Loader::addConstant( syntax::Token name, syntax::Token value )
   mProject.constants.push_back( ProjectConstant{ .nameSpan = name.span(), .valueSpan = value.span() } );
 }
 
+/// The four geometries a Lynx board is wired for, as a finding lists them.
+std::string knownLynxBoards()
+{
+  std::string out;
+  for ( LynxBoard const& board : lynxBoards() )
+  {
+    if ( !out.empty() )
+    {
+      out += &board == &lynxBoards().back() ? " and " : ", ";
+    }
+    out += '`';
+    out += board.name;
+    out += '`';
+  }
+  return out;
+}
+
 /// Every container the tool writes, as a finding lists them.
 std::string knownContainers()
 {
-  return fmt::format( "`{}`, `{}`, `{}` and `{}`",
+  return fmt::format( "`{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}` and `{}`",
                       nameOf( Container::RAW_IMAGE ),
                       nameOf( Container::XEX ),
                       nameOf( Container::ATR ),
-                      nameOf( Container::CAR ) );
+                      nameOf( Container::CAR ),
+                      nameOf( Container::BS93 ),
+                      nameOf( Container::LNX ),
+                      nameOf( Container::LYX ),
+                      nameOf( Container::PRG ),
+                      nameOf( Container::D64 ),
+                      nameOf( Container::D80 ),
+                      nameOf( Container::D82 ) );
 }
 
 void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> board )
@@ -720,32 +751,38 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
     return;
   }
 
-  // A `.car` is an image of one board, and no other Container is of anything.
+  // A cartridge is an image of one board, and no other Container is of
+  // anything: the Atari's boards are `.car`'s, and a Lynx's geometry is one of
+  // four page sizes, which `.lnx` and `.lyx` name the same way.
+  bool const lynx = *named == Container::LNX || *named == Container::LYX;
+  bool const cartridge = *named == Container::CAR || lynx;
   std::optional<std::string> spelled;
   if ( board.has_value() )
   {
     spelled = pathTextOf( *board );
-    if ( *named != Container::CAR )
+    if ( !cartridge )
     {
       report( diag::diagnostic( diag::DiagnosticId::CONTAINER_TAKES_NO_FORMAT )
                   .at( board->location, board->length )
                   .arg( "name", text ) );
       return;
     }
-    if ( spelled.has_value() && !cartridgeNamed( *spelled ).has_value() )
+    bool const known = lynx ? lynxBoardNamed( spelled.value_or( "" ) ).has_value()
+                            : cartridgeNamed( spelled.value_or( "" ) ).has_value();
+    if ( spelled.has_value() && !known )
     {
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_CARTRIDGE )
                   .at( board->location, board->length )
                   .arg( "name", *spelled )
-                  .arg( "known", knownCartridges() ) );
+                  .arg( "known", lynx ? knownLynxBoards() : knownCartridges() ) );
       return;
     }
   }
-  else if ( *named == Container::CAR )
+  else if ( cartridge )
   {
     report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_WITHOUT_FORMAT )
                 .at( name.location, name.length )
-                .arg( "known", knownCartridges() ) );
+                .arg( "known", lynx ? knownLynxBoards() : knownCartridges() ) );
     return;
   }
 
@@ -767,6 +804,83 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
   {
     mProject.cartridgeSite = board->span();
   }
+}
+
+void Loader::setCartridgeField( syntax::Token block, syntax::Token field, syntax::Token value )
+{
+  std::string const which{ mSources->textOf( field.span() ) };
+  mProject.cartridgeBlockSite = block.span();
+
+  // `rotation` takes a word and the other two a quoted string, so what the value
+  // may be is the field's and a mismatch is one finding about the field.
+  bool const quoted = value.kind == syntax::TokenKind::STRING;
+  auto const wrong = [&]
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_VALUE )
+                .at( value.location, value.length )
+                .arg( "field", which ) );
+  };
+
+  if ( which == "name" || which == "manufacturer" )
+  {
+    if ( !quoted )
+    {
+      wrong();
+      return;
+    }
+    std::optional<std::string> const text = pathTextOf( value );
+    if ( !text.has_value() )
+    {
+      return;
+    }
+    // One byte of the field is the terminator a reader writes over whatever
+    // stands there, so what fits is one less than the field is wide. A longer
+    // one is refused rather than cut: a name cut in half is a name nobody chose.
+    std::size_t const room = which == "name" ? LNX_NAME_SIZE - 1 : LNX_MAKER_SIZE - 1;
+    if ( text->size() > room )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_TOO_LONG )
+                  .at( value.location, value.length )
+                  .arg( "field", which )
+                  .arg( "available", static_cast<std::int64_t>( room ) )
+                  .arg( "given", static_cast<std::int64_t>( text->size() ) ) );
+      return;
+    }
+    std::string& into = which == "name" ? mProject.cartridgeName : mProject.cartridgeMaker;
+    if ( !into.empty() )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_REPEATED )
+                  .at( field.location, field.length )
+                  .arg( "field", which ) );
+      return;
+    }
+    into = *text;
+    return;
+  }
+
+  if ( which == "rotation" )
+  {
+    if ( quoted )
+    {
+      wrong();
+      return;
+    }
+    std::string const word{ mSources->textOf( value.span() ) };
+    std::optional<std::uint8_t> const turned = lynxRotationNamed( word );
+    if ( !turned.has_value() )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_ROTATION_UNKNOWN )
+                  .at( value.location, value.length )
+                  .arg( "name", word ) );
+      return;
+    }
+    mProject.cartridgeRotation = *turned;
+    return;
+  }
+
+  report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_UNKNOWN )
+              .at( field.location, field.length )
+              .arg( "field", which ) );
 }
 
 void Loader::addAcceptedContainer( syntax::Token keyword, syntax::Token name )
@@ -855,6 +969,32 @@ void Loader::setIntent( syntax::Token name )
   mProject.intentSite = name.span();
 }
 
+void Loader::setFrames( syntax::Token name )
+{
+  // `held` is the one word there is: an edge's descriptors are read once into
+  // memory rather than read again from storage for every block. Silence is the
+  // other answer and needs no word, since it is what every program did before
+  // there was one.
+  std::string const text{ mSources->textOf( name.span() ) };
+  if ( text != "held" )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_FRAMES_WORD )
+                .at( name.location, name.length )
+                .arg( "name", text ) );
+    return;
+  }
+  if ( mProject.framesSite.has_value() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::FRAMES_ALREADY_SET )
+                .at( name.location, name.length )
+                .note( diag::diagnostic( diag::DiagnosticId::PREVIOUS_FRAMES )
+                           .at( mProject.framesSite->begin, mProject.framesSite->length ) ) );
+    return;
+  }
+  mProject.framesHeld = true;
+  mProject.framesSite = name.span();
+}
+
 void Loader::checkContainer() const
 {
   Target const& target = mProject.target;
@@ -884,8 +1024,52 @@ void Loader::checkContainer() const
                          .at( target.containersSite.begin, target.containersSite.length ) ) );
 }
 
+void Loader::checkDiskette()
+{
+  // A diskette's geometry is the Container's and not the Variant's: a `.d64`
+  // is a 1541's surface and nothing about it is a choice. What the Variant
+  // says is that it has storage and how much, and the two are checked against
+  // each other as a Lynx's board is against its pages — neither derived from
+  // the other, each authoritative about its half.
+  CbmGeometry const* const disk = cbmGeometryOf( mProject.container );
+  if ( disk == nullptr || !mProject.containerSite.has_value() )
+  {
+    return;
+  }
+  Target& target = mProject.target;
+  if ( target.unitCount == 0 )
+  {
+    return;
+  }
+  if ( target.unitCount != disk->tracks + 1 || target.unitSize != cbmWidestTrack( *disk ) )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::D64_STORAGE_GEOMETRY )
+                .at( mProject.containerSite->begin, mProject.containerSite->length )
+                .arg( "name", std::string{ disk->name } )
+                .arg( "tracks", disk->tracks )
+                .arg( "expected", cbmWidestTrack( *disk ) )
+                .arg( "count", target.unitCount )
+                .arg( "size", target.unitSize ) );
+    return;
+  }
+  // The stride is the widest track, so what a narrower one does not have is
+  // held against every image from here on — and so are the units that are no
+  // track at all, the directory's and, where the disk has one, the map's.
+  target.unitUsable = cbmUsableUnits( *disk );
+}
+
 void Loader::checkCartridge()
 {
+  // What a header shows is said in a block, and only a Container with a header
+  // has anywhere to show it: a `.lyx` is the same image without one, so a name
+  // written for it would be a name nothing ever reads.
+  if ( mProject.cartridgeBlockSite.has_value() && mProject.container != Container::LNX )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_BLOCK_WITHOUT_HEADER )
+                .at( mProject.cartridgeBlockSite->begin, mProject.cartridgeBlockSite->length )
+                .arg( "name", std::string{ nameOf( mProject.container ) } ) );
+  }
+
   // The board the Project named against the memory the Variant declared. Two
   // documents, each authoritative about its half, and neither derived from the
   // other — see
@@ -894,6 +1078,26 @@ void Loader::checkCartridge()
   {
     return;
   }
+  // A Lynx's geometry is not in the address space at all, so there is no memory
+  // to check a board against — but storage is the pages the board has, and a
+  // driver that reached a unit of the wrong width would read the wrong bytes with
+  // nothing to say so. The two documents are checked against each other, as the
+  // Atari's board is against its Variant's memory.
+  if ( std::optional<LynxBoard> const lynx = lynxBoardNamed( *mProject.cartridge ); lynx.has_value() )
+  {
+    Target const& target = mProject.target;
+    if ( target.unitCount != 0 && ( target.unitSize != lynx->pageSize || target.unitCount != LYNX_PAGES - 1 ) )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::LNX_STORAGE_GEOMETRY )
+                  .at( mProject.cartridgeSite->begin, mProject.cartridgeSite->length )
+                  .arg( "name", std::string{ lynx->name } )
+                  .arg( "expected", lynx->pageSize )
+                  .arg( "count", target.unitCount )
+                  .arg( "size", target.unitSize ) );
+    }
+    return;
+  }
+
   std::optional<Cartridge> const board = cartridgeNamed( *mProject.cartridge );
   if ( !board.has_value() )
   {
@@ -1982,6 +2186,7 @@ Project loadProject( diag::SourceManager& sources,
   loader.addConstantModule();
   loader.checkContainer();
   loader.checkCartridge();
+  loader.checkDiskette();
 
   Project project = std::move( loader ).take();
   if ( project.modules.empty() && !sink.hasErrors() )
@@ -1999,6 +2204,12 @@ Project loadProject( diag::SourceManager& sources,
   if ( project.container == Container::ATR )
   {
     addBootRecord( project, sources );
+  }
+  // A Lynx cartridge is booted by fifty bytes its ROM decrypts, and the loader
+  // those read in is the tool's to write as well — see docs/spec/lnx.md.
+  if ( project.container == Container::LNX || project.container == Container::LYX )
+  {
+    addLynxLoader( project, sources );
   }
   // A cartridge is started through the six bytes at the top of it, which are
   // the tool's to write — see

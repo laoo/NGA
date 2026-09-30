@@ -13,7 +13,7 @@
 ; This is the OS as an XL or XE ships it. A machine whose OS lives elsewhere
 ; declares a Module of its own; the variant is what chooses.
 
-.export RTCLOK, SDMCTL, SDLSTL, SDLSTH, CH, SETVBV, XITVBV
+.export RTCLOK, SDMCTL, SDLSTL, SDLSTH, SHPDVS, CH, SETVBV, XITVBV
 
 ; The OS's half of the zero page. The program's own variables live above it,
 ; in the half the variant leaves to the solver.
@@ -35,7 +35,9 @@ osRam
 SDMCTL  .res 1                          ; $022F: shadows DMACTL
 SDLSTL  .res 1                          ; $0230: the display list address, low
 SDLSTH  .res 1                          ; $0231: and high
-        .res $CA
+        .res $16
+SHPDVS  .res 1                          ; $0248: which device on the parallel bus is selected
+        .res $B3
 CH      .res 1                          ; $02FC: the last key pressed, $FF for none
         .res $403
 .ends

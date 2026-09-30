@@ -188,6 +188,23 @@ public:
     mReadOnly = true;
   }
 
+  /// Whether the source said `foreign`: the bytes are another master of the
+  /// address space's — the Lynx's display DMA and its sprite engine read the
+  /// whole of it as RAM, where the CPU sees registers and ROM — so the extent
+  /// may cross a `register` or a `reserved` Region, and nothing else about the
+  /// Section changes. Declared, never derived: which master reads a buffer is
+  /// not something the tool can see. See
+  /// docs/decisions/0220-a-foreign-section.md.
+  [[nodiscard]] bool saysForeign() const
+  {
+    return mForeign;
+  }
+
+  void declareForeign()
+  {
+    mForeign = true;
+  }
+
   /// Whether the Section is a Temporary: its value is not needed while no
   /// Section that names it is running or waiting for a call to return, so
   /// it may share addresses with another Temporary never active at the same
@@ -457,6 +474,7 @@ private:
   bool mMovable = false;
   bool mRoot = false;
   bool mReadOnly = false;
+  bool mForeign = false;
   SectionKind mKind = SectionKind::PLAIN;
   std::uint8_t mFormat = 0;
   PlacementClass mPlacement = PlacementClass::ABSOLUTE;

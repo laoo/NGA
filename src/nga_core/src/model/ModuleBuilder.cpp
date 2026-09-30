@@ -510,6 +510,10 @@ void ModuleBuilder::beginSection( syntax::SectionAttributes attributes, diag::So
   {
     mModule->sectionAt( index ).declareReadOnly();
   }
+  if ( attributes.foreign )
+  {
+    mModule->sectionAt( index ).declareForeign();
+  }
   if ( attributes.pane.has_value() )
   {
     mModule->sectionAt( index ).setPaneName( *attributes.pane );
@@ -1242,7 +1246,7 @@ void ModuleBuilder::reserveTemporary( syntax::Token name,
   }
 }
 
-void ModuleBuilder::transition( syntax::Token phase, diag::SourceSpan span )
+void ModuleBuilder::transition( syntax::Token phase, diag::SourceSpan span, bool fast )
 {
   // The name is kept as written; which Phase it is, and whether every Phase
   // this code is present in has the edge, is settled once the whole Project
@@ -1252,7 +1256,7 @@ void ModuleBuilder::transition( syntax::Token phase, diag::SourceSpan span )
     return;
   }
   mModule->sectionAt( currentSection( span ) )
-      .appendChunk( TransitionContent{ .name = phase, .target = std::nullopt }, span, {} );
+      .appendChunk( TransitionContent{ .name = phase, .target = std::nullopt, .fast = fast }, span, {} );
 }
 
 void ModuleBuilder::dispatch( std::vector<syntax::ExpressionPtr> targets, diag::SourceSpan span )
@@ -1646,13 +1650,13 @@ void ModuleBuilder::applyTransforms()
 
 void ModuleBuilder::declareDriverRole( syntax::Token role, std::vector<syntax::Token> names, diag::SourceSpan span )
 {
-  // How many names a role takes is the role's: `open` and `read` a macro,
-  // `show` and `showAt` a Window and a macro, `stream` a Window. A role
+  // How many names a role takes is the role's: `open`, `read` and `init` a
+  // macro, `show` and `showAt` a Window and a macro, `stream` a Window. A role
   // nobody knows is refused once the Module is read, with the rest.
   std::string_view const text = textOf( role );
   bool const windowed = text == "show" || text == "showAt" || text == "stream";
   std::size_t const wanted = text == "show" || text == "showAt" ? 2 : 1;
-  bool const known = windowed || text == "open" || text == "read";
+  bool const known = windowed || text == "open" || text == "read" || text == "init" || text == "seek" || text == "span";
   if ( known && names.size() != wanted )
   {
     report( diag::diagnostic( diag::DiagnosticId::DRIVER_ROLE_NAMES )
@@ -1663,15 +1667,19 @@ void ModuleBuilder::declareDriverRole( syntax::Token role, std::vector<syntax::T
     return;
   }
   syntax::Token const last = names.back();
-  bool const hasMacro = text != "stream";
-  mModule->addDriverRole( DriverRole{ .role = text,
-                                      .window = windowed ? textOf( names.front() ) : std::string_view{},
-                                      .windowSpan = windowed ? names.front().span() : role.span(),
-                                      .label = hasMacro ? textOf( last ) : std::string_view{},
-                                      .roleSpan = role.span(),
-                                      .labelSpan = hasMacro ? last.span() : role.span(),
-                                      .span = span,
-                                      .scope = currentScope() } );
+
+  // `stream` names a Window, and `seek` and `span` a word about the medium;
+  // every other role names a macro of this Module.
+  bool const hasMacro = text != "stream" && text != "seek" && text != "span";
+  mModule->addDriverRole(
+      DriverRole{ .role = text,
+                  .window = windowed ? textOf( names.front() ) : std::string_view{},
+                  .windowSpan = windowed ? names.front().span() : role.span(),
+                  .label = hasMacro || text == "seek" || text == "span" ? textOf( last ) : std::string_view{},
+                  .roleSpan = role.span(),
+                  .labelSpan = hasMacro ? last.span() : role.span(),
+                  .span = span,
+                  .scope = currentScope() } );
 }
 
 void ModuleBuilder::applyDriverRoles()
@@ -1690,8 +1698,8 @@ void ModuleBuilder::applyDriverRoles()
     }
     seen.push_back( key );
 
-    if ( role.role != "open" && role.role != "read" && role.role != "show" && role.role != "showAt" &&
-         role.role != "stream" )
+    if ( role.role != "open" && role.role != "read" && role.role != "init" && role.role != "show" &&
+         role.role != "showAt" && role.role != "stream" && role.role != "seek" && role.role != "span" )
     {
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_DRIVER_ROLE )
                   .at( role.roleSpan.begin, role.roleSpan.length )
@@ -1702,6 +1710,13 @@ void ModuleBuilder::applyDriverRoles()
     {
       // Whether the Window exists is the Target's question, asked at the end
       // of Assemble where the driver is resolved.
+      continue;
+    }
+    // `seek forward` says the medium reaches an offset by reading up to it, so
+    // that an image an edge opens is worth beginning at a unit boundary. The
+    // word is checked where the driver is resolved, with the Windows.
+    if ( role.role == "seek" || role.role == "span" )
+    {
       continue;
     }
     Symbol const* const found = findScoped( role.scope, role.label );

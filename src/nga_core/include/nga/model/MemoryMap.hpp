@@ -16,6 +16,13 @@
 namespace nga::model
 {
 
+/// Where one stored form waits, and how long it is.
+struct MapPlacement
+{
+  StorageAddress at;
+  std::uint32_t size = 0;
+};
+
 /// One Section as it stands across a run of consecutive Phases at one
 /// address: a Section present in Phases 0 to 2 is one of these, a Movable
 /// one standing elsewhere in Phase 1 is three.
@@ -41,8 +48,12 @@ struct MapEntry
 
   /// Where the Section's Payload waits, when it has one, and how it waits,
   /// and the first and last Phase it is live in — see the glossary.
-  std::optional<StorageAddress> waits;
-  std::uint32_t storedSize = 0;
+  ///
+  /// **One entry unless no unit of storage held the whole of it**, and then one
+  /// for each form it was cut into: they are placed apart and a run from the
+  /// first to the last would be a stretch of the medium that is not the
+  /// Payload's at all.
+  std::vector<MapPlacement> waits;
   std::optional<PhaseIndex> liveFirst;
   std::optional<PhaseIndex> liveLast;
   /// The format the Payload waits as, by name; empty where it waits nowhere.

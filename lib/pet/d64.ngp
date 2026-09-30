@@ -1,0 +1,17 @@
+; Storage on a diskette, for a Project whose Container is the `d64`: the tracks
+; of a 1541's surface as units, the driver that reads them, and the decoders the
+; tool ships.
+;
+; A unit is a **track** and its number is the track's, so unit zero is no track
+; and unit 18 is the directory; neither is ever allocated. `size` is the widest
+; track and therefore a **stride**, not a size — what a narrower track does not
+; have is held against every image, which is safe because the driver is promised
+; that nothing crosses a unit. The two numbers are checked against the Container
+; (`NGA1238`), since a driver handed a unit of the wrong width would read the
+; wrong bytes with nothing to say so. See docs/spec/d64.md.
+;
+; A Project includes this beside `pet/3032.ngp`.
+storage { units 36  size 5376 }
+
+modules { "pet/disk.asm"  "stream/zx0.asm" }
+resident { disk, zx0 }

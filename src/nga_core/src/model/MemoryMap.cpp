@@ -191,8 +191,7 @@ MemoryMap memoryMapOf( Patched const& build )
                         .kind = kindOfSection( section ),
                         .root = section.isRoot(),
                         .movable = section.isMovable(),
-                        .waits = std::nullopt,
-                        .storedSize = 0,
+                        .waits = {},
                         .liveFirst = std::nullopt,
                         .liveLast = std::nullopt,
                         .transform = {},
@@ -204,10 +203,15 @@ MemoryMap memoryMapOf( Patched const& build )
           entry.pane = target.panes[section.pane()->value].name;
           entry.paneState = layout.stateOfPane( *section.pane() ).value_or( 0 );
         }
-        if ( storage.hasPayload( where ) && storage.isPlaced( where ) )
+        if ( storage.hasPayload( where ) && storage.isPlaced( where, 0 ) )
         {
-          entry.waits = storage.addressOf( where );
-          entry.storedSize = storage.sizeOf( where );
+          // One for each form: a Payload is one unless no unit held the whole
+          // of it, and then the pieces are placed apart.
+          for ( std::uint32_t piece = 0; piece < storage.pieceCountOf( where ); ++piece )
+          {
+            entry.waits.push_back(
+                MapPlacement{ .at = storage.addressOf( where, piece ), .size = storage.sizeOf( where, piece ) } );
+          }
           std::tie( entry.liveFirst, entry.liveLast ) = spanOf( storage.liveOf( where ) );
           std::uint8_t const transform = storage.transformOf( where );
           entry.transform = transform < build.project().decoders.size() ? build.project().decoders[transform].format
@@ -378,9 +382,9 @@ MemoryMap memoryMapOf( Patched const& build )
   }
   for ( MapEntry const& entry : map.entries )
   {
-    if ( entry.waits.has_value() )
+    for ( MapPlacement const& held : entry.waits )
     {
-      account( entry.waits.value_or( StorageAddress{} ), entry.storedSize );
+      account( held.at, held.size );
     }
   }
   return map;
@@ -433,14 +437,20 @@ std::string renderMapText( MemoryMap const& map )
                                       width,
                                       kindOf( *entry ),
                                       phasesOf( map, *entry ) );
-      if ( entry->waits.has_value() )
+      if ( !entry->waits.empty() )
       {
         line += fmt::format( "  waits in {} {} at {} ({}, {} bytes)",
                              map.unitWord,
-                             entry->waits.value_or( StorageAddress{} ).bank.value,
-                             hexOf( entry->waits.value_or( StorageAddress{} ).offset ),
+                             entry->waits.front().at.bank.value,
+                             hexOf( entry->waits.front().at.offset ),
                              entry->transform,
-                             entry->storedSize );
+                             entry->waits.front().size );
+        if ( entry->waits.size() > 1 )
+        {
+          // No unit held the whole of it, so it was cut: the rest wait
+          // elsewhere and the storage listing below has each of them.
+          line += fmt::format( " and {} more", entry->waits.size() - 1 );
+        }
       }
       if ( !entry->pane.empty() )
       {
@@ -502,23 +512,24 @@ std::string renderMapText( MemoryMap const& map )
       }
       for ( MapEntry const& entry : map.entries )
       {
-        // A Section's Payload waits once, however many runs the Section has.
-        if ( entry.waits.has_value() && entry.waits.value_or( StorageAddress{} ).bank.value == bank &&
-             entry.firstPhase.has_value() &&
-             std::ranges::none_of( lines,
-                                   [&entry]( auto const& line )
-                                   { return line.first == entry.waits.value_or( StorageAddress{} ).offset; } ) )
+        // A Section's Payload waits once for each form it came to, however
+        // many runs the Section itself has.
+        for ( MapPlacement const& held : entry.waits )
         {
-          lines.emplace_back(
-              entry.waits.value_or( StorageAddress{} ).offset,
-              fmt::format( "    {}-{}  {:<{}} {} ({} bytes){}",
-                           hexOf( entry.waits.value_or( StorageAddress{} ).offset ),
-                           hexOf( entry.waits.value_or( StorageAddress{} ).offset + entry.storedSize - 1 ),
-                           entry.module + "." + entry.name,
-                           width,
-                           entry.transform,
-                           entry.storedSize,
-                           liveText( map, entry.liveFirst, entry.liveLast ) ) );
+          if ( held.at.bank.value != bank || !entry.firstPhase.has_value() ||
+               std::ranges::any_of( lines, [&held]( auto const& line ) { return line.first == held.at.offset; } ) )
+          {
+            continue;
+          }
+          lines.emplace_back( held.at.offset,
+                              fmt::format( "    {}-{}  {:<{}} {} ({} bytes){}",
+                                           hexOf( held.at.offset ),
+                                           hexOf( held.at.offset + held.size - 1 ),
+                                           entry.module + "." + entry.name,
+                                           width,
+                                           entry.transform,
+                                           held.size,
+                                           liveText( map, entry.liveFirst, entry.liveLast ) ) );
         }
       }
       std::ranges::stable_sort( lines, []( auto const& a, auto const& b ) { return a.first < b.first; } );

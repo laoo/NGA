@@ -1,0 +1,230 @@
+; An Atari Lynx: 64 KB of RAM the CPU reads in part, since the top kilobyte is
+; Suzy, Mikey, a 512-byte boot ROM and the vectors — while the sprite engine and
+; the display read the whole of it as memory. A Region carries one truth per
+; address and that truth is the CPU's, so this file describes the machine as the
+; CPU sees it and the map control register is taken to hold one value for the
+; whole run: the hardware and the ROM mapped, RAM under the vectors. What the
+; other master reads is a Section's to say with `foreign`. See 0219 and 0220.
+;
+; There is no Window here. Nothing of this machine is switched while it runs,
+; and its storage is not in the address space at all: a cartridge is a shift
+; register and a counter behind two of Suzy's addresses.
+
+target {
+  cpu "65sc02"
+
+  ; What this machine takes. `bs93` is one block an emulator copies into memory
+  ; and enters, which needs no ROM of the machine's own and no loader of ours —
+  ; see docs/spec/bs93.md; `lnx` and `lyx` are the cartridge it boots from, with
+  ; and without the header a reader takes its geometry from — see
+  ; docs/spec/lnx.md.
+  containers bs93, lnx, lyx
+
+  region        $0000 .. $FBFF  ram
+  region stack  $0100 .. $01FF  reserved
+
+  ; What the CPU reads as hardware. The named registers below narrow these two
+  ; further; what neither names is still a register, so nothing is placed in a
+  ; gap between them.
+  region suzy   $FC00 .. $FCFF  register
+  region mikey  $FD00 .. $FDFF  register
+
+  ; The boot ROM, and the byte above it that is RAM on every machine. Not a
+  ; Module whose reservation occupies it, as the Atari's OS is: the map is fixed
+  ; here, so these 504 bytes are never the program's, which is what `reserved`
+  ; says. A display buffer runs through them for the other master, and two
+  ; Sections at one address would collide.
+  region rom    $FE00 .. $FFF8  reserved
+
+  ; Nothing reads these four bytes. The NMI has no source in a production
+  ; machine, and a reset is taken from ROM whatever the map says, since the reset
+  ; clears the map control register itself — so `CPU_NMI` and `CPU_RESET` are not
+  ; among the registers below, and the solver has the memory instead.
+  region        $FFFA .. $FFFD  ram
+
+  register TMPADR           $FC00, 2
+  register TILTACUM         $FC02, 2
+  register HOFF             $FC04, 2
+  register VOFF             $FC06, 2
+  register VIDBAS           $FC08, 2
+  register COLLBAS          $FC0A, 2
+  register VIDADR           $FC0C, 2
+  register COLLADR          $FC0E, 2
+  register SCBNEXT          $FC10, 2
+  register SPRDLINE         $FC12, 2
+  register HPOSSTRT         $FC14, 2
+  register VPOSSTRT         $FC16, 2
+  register SPRHSIZ          $FC18, 2
+  register SPRVSIZ          $FC1A, 2
+  register STRETCH          $FC1C, 2
+  register TILT             $FC1E, 2
+  register SPRDOFF          $FC20, 2
+  register SCVPOS           $FC22, 2
+  register COLLOFF          $FC24, 2
+  register VSIZACUM         $FC26, 2
+  register HSIZOFF          $FC28, 2
+  register VSIZOFF          $FC2A, 2
+  register SCBADR           $FC2C, 2
+  register PROCADR          $FC2E
+  register MATHD            $FC52
+  register MATHC            $FC53
+  register MATHB            $FC54
+  register MATHA            $FC55
+  register MATHP            $FC56
+  register MATHN            $FC57
+  register MATHH            $FC60
+  register MATHG            $FC61
+  register MATHF            $FC62
+  register MATHE            $FC63
+  register MATHM            $FC6C
+  register MATHL            $FC6D
+  register MATHK            $FC6E
+  register MATHJ            $FC6F
+  register SPRCTL0          $FC80
+  register SPRCTL1          $FC81
+  register SPRCOLL          $FC82
+  register SPRINIT          $FC83
+  register SUZYHREV         $FC88
+  register SUZYSREV         $FC89
+  register SUZYBUSEN        $FC90
+  register SPRGO            $FC91
+  register SPRSYS           $FC92
+  register JOYSTICK         $FCB0
+  register SWITCHES         $FCB1
+  register RCART0           $FCB2
+  register RCART1           $FCB3
+  register LEDS             $FCC0
+  register IOSTATUS         $FCC2
+  register IODATA           $FCC3
+  register HOWIE            $FCC4
+  register HCOUNT_BACKUP    $FD00
+  register HCOUNT_CONTROLA  $FD01
+  register HCOUNT_COUNT     $FD02
+  register HCOUNT_CONTROLB  $FD03
+  register TIMER1_BACKUP    $FD04
+  register TIMER1_CONTROLA  $FD05
+  register TIMER1_COUNT     $FD06
+  register TIMER1_CONTROLB  $FD07
+  register VCOUNT_BACKUP    $FD08
+  register VCOUNT_CONTROLA  $FD09
+  register VCOUNT_COUNT     $FD0A
+  register VCOUNT_CONTROLB  $FD0B
+  register TIMER3_BACKUP    $FD0C
+  register TIMER3_CONTROLA  $FD0D
+  register TIMER3_COUNT     $FD0E
+  register TIMER3_CONTROLB  $FD0F
+  register SERIALRATE_BACKUP $FD10
+  register SERIALRATE_CONTROLA $FD11
+  register SERIALRATE_COUNT $FD12
+  register SERIALRATE_CONTROLB $FD13
+  register TIMER5_BACKUP    $FD14
+  register TIMER5_CONTROLA  $FD15
+  register TIMER5_COUNT     $FD16
+  register TIMER5_CONTROLB  $FD17
+  register TIMER6_BACKUP    $FD18
+  register TIMER6_CONTROLA  $FD19
+  register TIMER6_COUNT     $FD1A
+  register TIMER6_CONTROLB  $FD1B
+  register TIMER7_BACKUP    $FD1C
+  register TIMER7_CONTROLA  $FD1D
+  register TIMER7_COUNT     $FD1E
+  register TIMER7_CONTROLB  $FD1F
+  register AUDIO0_VOLCNTRL  $FD20
+  register AUDIO0_FEEDBACK  $FD21
+  register AUDIO0_OUTPUT    $FD22
+  register AUDIO0_SHIFT     $FD23
+  register AUDIO0_BACKUP    $FD24
+  register AUDIO0_CONTROL   $FD25
+  register AUDIO0_COUNTER   $FD26
+  register AUDIO0_OTHER     $FD27
+  register AUDIO1_VOLCNTRL  $FD28
+  register AUDIO1_FEEDBACK  $FD29
+  register AUDIO1_OUTPUT    $FD2A
+  register AUDIO1_SHIFT     $FD2B
+  register AUDIO1_BACKUP    $FD2C
+  register AUDIO1_CONTROL   $FD2D
+  register AUDIO1_COUNTER   $FD2E
+  register AUDIO1_OTHER     $FD2F
+  register AUDIO2_VOLCNTRL  $FD30
+  register AUDIO2_FEEDBACK  $FD31
+  register AUDIO2_OUTPUT    $FD32
+  register AUDIO2_SHIFT     $FD33
+  register AUDIO2_BACKUP    $FD34
+  register AUDIO2_CONTROL   $FD35
+  register AUDIO2_COUNTER   $FD36
+  register AUDIO2_OTHER     $FD37
+  register AUDIO3_VOLCNTRL  $FD38
+  register AUDIO3_FEEDBACK  $FD39
+  register AUDIO3_OUTPUT    $FD3A
+  register AUDIO3_SHIFT     $FD3B
+  register AUDIO3_BACKUP    $FD3C
+  register AUDIO3_CONTROL   $FD3D
+  register AUDIO3_COUNTER   $FD3E
+  register AUDIO3_OTHER     $FD3F
+  register ATTENREG0        $FD40
+  register ATTENREG1        $FD41
+  register ATTENREG2        $FD42
+  register ATTENREG3        $FD43
+  register MPAN             $FD44
+  register STEREO           $FD50
+  register INTRST           $FD80
+  register INTSET           $FD81
+  register AUDIN            $FD86
+  register SYSCTL1          $FD87
+  register MIKEYHREV        $FD88
+  register MIKEYSREV        $FD89
+  register IODIR            $FD8A
+  register IODAT            $FD8B
+  register SERCTL           $FD8C
+  register SERDAT           $FD8D
+  register SDONEACK         $FD90
+  register CPUSLEEP         $FD91
+  register DISPCTL          $FD92
+  register PBKUP            $FD93
+  register DISPADR          $FD94, 2
+  register MTEST0           $FD9C
+  register MTEST1           $FD9D
+  register MTEST2           $FD9E
+  register GREEN0           $FDA0
+  register GREEN1           $FDA1
+  register GREEN2           $FDA2
+  register GREEN3           $FDA3
+  register GREEN4           $FDA4
+  register GREEN5           $FDA5
+  register GREEN6           $FDA6
+  register GREEN7           $FDA7
+  register GREEN8           $FDA8
+  register GREEN9           $FDA9
+  register GREENA           $FDAA
+  register GREENB           $FDAB
+  register GREENC           $FDAC
+  register GREEND           $FDAD
+  register GREENE           $FDAE
+  register GREENF           $FDAF
+  register BLUERED0         $FDB0
+  register BLUERED1         $FDB1
+  register BLUERED2         $FDB2
+  register BLUERED3         $FDB3
+  register BLUERED4         $FDB4
+  register BLUERED5         $FDB5
+  register BLUERED6         $FDB6
+  register BLUERED7         $FDB7
+  register BLUERED8         $FDB8
+  register BLUERED9         $FDB9
+  register BLUEREDA         $FDBA
+  register BLUEREDB         $FDBB
+  register BLUEREDC         $FDBC
+  register BLUEREDD         $FDBD
+  register BLUEREDE         $FDBE
+  register BLUEREDF         $FDBF
+  register MAPCTL           $FFF9
+  register CPU_IRQ          $FFFE, 2
+}
+
+; The one entry of the boot ROM a program of this tool wants, and the ROM has no
+; other this tool knows about.
+modules { "lynx/rom.asm" }
+
+; It emits nothing — a name and an address — so being resident costs no memory,
+; as `atari/charsets.asm` costs none.
+resident { rom }

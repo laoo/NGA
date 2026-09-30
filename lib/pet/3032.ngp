@@ -1,0 +1,87 @@
+; A Commodore PET 3032: a 6502 at one megahertz, thirty-two kilobytes of RAM,
+; forty columns by twenty-five rows of memory the video circuit reads, and an
+; IEEE-488 port for a drive. The ROMs are BASIC 2 at $C000, the screen editor at
+; $E000 and `kernal-2.901465-03` at $F000, and every address pet/kernal.asm
+; names was verified against that set — a 4032 runs BASIC 4 from $B000 with a
+; kernal of its own and is a second document, not an option in this one.
+;
+; This is the machine as a program that has taken it over sees it: the interrupt
+; handler is the program's, so what the ROM keeps is what its disk path touches
+; and little else. A Project gets all of it with `include "pet/3032.ngp"`.
+target {
+  cpu "6502"
+
+  ; One contiguous block a PET loads from a disk by hand and a line of BASIC
+  ; enters. A Project naming any other is refused here rather than at the
+  ; writer; the diskette whose sectors a Transition reads comes later.
+  containers prg, d64, d80, d82
+}
+
+target {
+  region zero   $0000 .. $00FF  ram
+  region stack  $0100 .. $01FF  reserved
+
+  ; $0200 to $040D stands in **no Region**, so the solver never allocates there
+  ; and only a pin reaches it. It is good RAM — BASIC's input buffer and the two
+  ; cassette buffers, which nothing reads once the program has the machine — but
+  ; it is RAM a `prg` cannot **carry**: `LOAD` puts the block at $0401 and the
+  ; line of BASIC that enters the program stands at $0401 to $040D, so a Section
+  ; holding bytes below $040E is one this Container would have to refuse. Left
+  ; out rather than offered and then taken back, which is how atari/800xl.ngp
+  ; treats the sectors its boot record is read into. A Section holding no bytes
+  ; may still be pinned here, and 526 bytes is what that costs a program that
+  ; does not bother.
+  region ram    $040E .. $7FFF  ram
+  region display $8000 .. $83FF  ram
+
+  ; $8400 to $BFFF is the display's own mirrors and two empty ROM sockets, and
+  ; $E900 to $EFFF answers nothing at all. None of them stands in a Region, so
+  ; the solver never allocates there and only a pin reaches them.
+  ; The ROMs are **reserved** and not `rom`: `rom` is where a Section of ours may
+  ; stand, which is true of a cartridge whose bytes we wrote and false of a
+  ; machine whose ROM was in it before the program was. Nothing of a Project
+  ; goes here; what a program wants from these addresses it calls, by the names
+  ; pet/kernal.asm gives them.
+  region rom    $C000 .. $E7FF  reserved
+  region io     $E800 .. $E8FF  register
+  region kernal $F000 .. $FFFF  reserved
+
+  ; The three chips the machine answers at. The IEEE-488 port is split across
+  ; all of them, which is why driving the bus by hand looks as odd as it does:
+  ; DAV and NRFD are bits of the VIA's port B, NDAC is PIA 2's CA2 and is
+  ; reached through its control register, the data is PIA 2's port A and arrives
+  ; **inverted**, and EOI is a bit of PIA 1.
+  ;
+  ; Two more are worth knowing by name. Bit 7 of PIA 1's control register B is
+  ; the retrace flag, and reading port B is what clears it — three instructions
+  ; for an exact vertical sync, and the read is not optional. And the VIA's
+  ; timer 2 is free, the ROM touching it only in the cassette routines and never
+  ; writing the auxiliary control register at all, so it is a 1 MHz sixteen-bit
+  ; counter a program may have. Timer 1 is **not** free: the kernal arms it as
+  ; the bus timeout on every byte.
+  register PIA1PA  $E810            ; the keyboard row, and EOI in bit 6
+  register PIA1CRA $E811
+  register PIA1PB  $E812            ; the keyboard columns; reading clears the retrace
+  register PIA1CRB $E813            ; bit 7 is the retrace flag
+  register PIA2PA  $E820            ; the bus data, inverted
+  register PIA2CRA $E821            ; bits 5-3 drive NDAC
+  register PIA2PB  $E822
+  register PIA2CRB $E823
+  register VIAPB   $E840            ; bit 7 is DAV in, bit 1 is NRFD out
+  register VIAPA   $E841
+  register VIADDRB $E842
+  register VIADDRA $E843
+  register VIAT2L  $E848            ; timer 2, which the ROM leaves alone
+  register VIAT2H  $E849
+  register VIAACR  $E84B
+  register VIAPCR  $E84C
+  register VIAIFR  $E84D
+  register VIAIER  $E84E
+}
+
+; What the ROM keeps, the display's memory and the two codes for the letters,
+; listed as a file of the Project's own would be. All three hold no bytes or
+; emit none, so nothing here is loaded by anything; a Charset nothing uses is
+; dropped.
+modules { "pet/kernal.asm"  "pet/screen.asm"  "pet/charsets.asm" }
+resident { kernal, screen, charsets }

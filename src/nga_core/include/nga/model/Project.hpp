@@ -408,10 +408,18 @@ enum class Container : std::uint8_t
   XEX,
   ATR,
   CAR,
+  BS93,
+  LNX,
+  LYX,
+  PRG,
+  D64,
+  D80,
+  D82,
 };
 
-/// `raw`, `xex`, `atr` and `car`, and nothing where the word names none of
-/// them. `car` is the one that names a board beside it — see Car.hpp.
+/// `raw`, `xex`, `atr`, `car`, `bs93`, `lnx`, `lyx`, `prg`, `d64`, `d80` and
+/// `d82`, and nothing where the word names none of them. `car` and the two Lynx cartridges name a board
+/// beside them — see Car.hpp and Lnx.hpp.
 std::optional<Container> containerNamed( std::string_view word );
 
 /// The word a Container is written as, which is what a finding lists.
@@ -466,10 +474,30 @@ struct Target
   /// since the stream shows a Bank there while it is open.
   std::vector<AddressRange> streamRanges{};
 
-  /// What one unit holds.
+  /// How much of each unit a program may use, indexed by the unit, where a
+  /// unit is not usable to its end. Empty where every one is, which is every
+  /// medium but a diskette whose tracks hold different numbers of sectors:
+  /// there `unitSize` is the **widest** track and so a stride and not a size,
+  /// and what a narrower track does not have is held against every image. What
+  /// makes that safe is that nothing crosses a unit — see `span` in
+  /// docs/spec/transition.md — so no image ever runs through the gap.
+  std::vector<std::uint32_t> unitUsable{};
+
+  /// What one unit holds: the stride, which is what a position is divided by.
   [[nodiscard]] std::uint32_t bankSize() const
   {
     return unitSize;
+  }
+
+  /// How much of unit `unit` a program may use, which is all of it unless the
+  /// units are unequal.
+  [[nodiscard]] std::uint32_t usableInUnit( std::uint32_t unit ) const
+  {
+    if ( unitUsable.empty() )
+    {
+      return unitSize;
+    }
+    return unit < unitUsable.size() ? unitUsable[unit] : 0;
   }
 
   /// The whole of storage, end to end.
@@ -603,11 +631,35 @@ struct Driver
   MacroIndex open;
   MacroIndex read;
 
+  /// Declared `.driver init`: what the hardware takes before the driver can
+  /// be used at all, which the Container calls once before it uses the driver
+  /// and before the entry. Absent for the hardware that takes nothing, which
+  /// is every medium this tool shipped a driver for before MariaCEL — and
+  /// where it is absent nothing is emitted and no Container segment is
+  /// written. See docs/decisions/0227-a-driver-may-need-the-hardware-reached-first.md.
+  std::optional<MacroIndex> init{};
+
   /// One entry per Window of the Target, in the Target's order.
   std::vector<WindowRoles> windows{};
 
   /// Absent for a driver whose medium has no Window.
   std::optional<WindowIndex> stream{};
+
+  /// Declared `.driver seek forward`: the medium reaches an offset by reading
+  /// up to it, so an image an edge opens is worth beginning where a unit does.
+  /// Silence means an offset costs the driver nothing, which is true of a
+  /// sector in a buffer and of a Bank in a Window — see
+  /// docs/decisions/0221-an-edge-that-must-be-quick.md.
+  bool seeksForward = false;
+
+  /// Declared `.driver span none`: no image and no Frame crosses from one unit
+  /// into the next, so the driver needs no way of carrying there and may know
+  /// nothing of how the units follow one another. Silence means the driver
+  /// carries, which every driver this tool ships does — a Bank number and a
+  /// page number are one more than the last, and a sector is the next sector.
+  /// It is a word about the medium and not a role, as `seek` is; what pays for
+  /// it is the placement, which must then refuse an image no single unit holds.
+  bool spansNothing = false;
 };
 
 /// Which Container the run writes. Chosen by the output file's name, and
@@ -623,6 +675,20 @@ struct Project
   std::vector<ProjectModule> modules;
   PhaseGraph phases;
   Target target;
+
+  /// Declared `frames held`: an edge's block descriptors are read **once**
+  /// into the memory of the block that loads last, and the Frame is then
+  /// opened twice an edge instead of once a block. What it costs is the
+  /// routine's second way of fetching them, some 138 bytes of it and two of
+  /// zero page, which every Phase carries — so it is the Project's to ask for
+  /// and not the tool's to decide: it pays where an `open` is a disk operation
+  /// or a page shifted in, and buys nothing at all where one is fifty cycles.
+  /// See docs/spec/project-file.md and
+  /// docs/decisions/0226-an-edge-holds-its-descriptors-in-the-block-that-loads-last.md.
+  bool framesHeld = false;
+
+  /// Where `frames` was said, so a refusal can point at it.
+  std::optional<diag::SourceSpan> framesSite;
 
   /// The Modules the generator added for Transitions, when the graph has an
   /// edge: the routine and the Cell.
@@ -679,6 +745,15 @@ struct Project
   /// default being there — see docs/decisions/0177-intent.md.
   Intent intent = Intent::FIT;
   std::optional<diag::SourceSpan> intentSite{};
+
+  /// What a `cartridge` block said, for the header a Lynx cartridge carries —
+  /// see docs/spec/lnx.md. Empty strings where nothing said, which is what the
+  /// header then holds: a name invented from the file's own would be a name the
+  /// reader shows and nobody chose.
+  std::string cartridgeName;
+  std::string cartridgeMaker;
+  std::uint8_t cartridgeRotation = 0;
+  std::optional<diag::SourceSpan> cartridgeBlockSite{};
 };
 
 /// The base a Window shows in a Phase: what the Phase chose, or what a group

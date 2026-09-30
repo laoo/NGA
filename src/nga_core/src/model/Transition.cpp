@@ -88,6 +88,10 @@ ngaCount .ztemp 1
 ngaFrameUnit .ztemp 1
 ngaUnit .ztemp 1
 
+; What a Frame's header comes to, which is two bytes longer where the Project
+; said `frames held` — see docs/spec/transition.md.
+ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
+
 .proc ngaTransition
         pla
         sta ngaPtr
@@ -142,14 +146,105 @@ ngaUnit .ztemp 1
 .export ngaEnter
 .proc ngaEnter
         jsr ngaFrameOpen
+.if ngaFramesHeld
+        nga.read
+        sta ngaPtr
+        nga.read
+        sta ngaPtr+1            ; where the descriptors are to be held, or zero
+.endif
         nga.read
         sta ngaEntry
         nga.read
         sta ngaEntry+1
         nga.read
         sta ngaCount            ; blocks that follow
-        lda #3
+        lda #ngaFrameHeader
         jsr ngaFrameSkip
+.if ngaFramesHeld
+        lda ngaPtr
+        ora ngaPtr+1
+        beq @block              ; nowhere to hold them: one open a block
+
+; Six bytes a block, read in one pass from where the stream already stands. The
+; write pointer, the counter and the index are Temporaries of the routine's own
+; that nothing is keeping here: ngaValue belongs to the Cell writes, which come
+; after the blocks, and ngaUnit and ngaDst to a block being loaded, which has
+; not begun. Only ngaPtr is really spent, being live across the whole of the
+; block loop and so no longer able to share with what a driver declares — which
+; is the two bytes of zero page this way of fetching costs.
+        lda ngaPtr
+        sta ngaValue
+        lda ngaPtr+1
+        sta ngaValue+1
+        lda ngaCount
+        sta ngaUnit             ; blocks still to hold
+@hold
+        lda ngaUnit
+        beq @heldBlock
+        lda #0
+        sta ngaDst              ; the index, which a read may take out of Y
+@six
+        nga.read
+        ldy ngaDst
+        sta (ngaValue),y
+        iny
+        sty ngaDst
+        cpy #6
+        bne @six
+        lda #6
+        jsr ngaFrameSkip        ; so the Frame stands past them at the end
+        lda ngaValue
+        clc
+        adc #6
+        sta ngaValue
+        bcc @counted
+        inc ngaValue+1
+@counted
+        dec ngaUnit
+        jmp @hold
+
+; Then a block at a time out of memory, and the Frame opened once more at the
+; end rather than once for every one of them.
+@heldBlock
+        lda ngaCount
+        beq @cells
+        ldy #0
+        lda (ngaPtr),y
+        sta ngaUnit
+        iny
+        lda (ngaPtr),y
+        sta ngaOffset
+        iny
+        lda (ngaPtr),y
+        sta ngaOffset+1
+        iny
+        lda (ngaPtr),y
+        sta ngaDst
+        iny
+        lda (ngaPtr),y
+        sta ngaDst+1
+        iny
+        lda (ngaPtr),y
+        pha                     ; the decoder's number
+        lda ngaPtr
+        clc
+        adc #6
+        sta ngaPtr
+        bcc @heldLoad
+        inc ngaPtr+1
+@heldLoad
+        lda ngaUnit
+        ldx ngaOffset
+        ldy ngaOffset+1
+        nga.open
+        pla
+        ldx ngaDst
+        ldy ngaDst+1
+        jsr ngaTransform
+        dec ngaCount
+        jmp @heldBlock
+.endif
+
 @block
         lda ngaCount
         beq @cells
@@ -314,7 +409,12 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
   // The routine: the tool's own source, knowing no hardware. What it calls
   // is the driver's, under names the dispatcher defines at the end of
   // Assemble.
-  std::string routineText{ ROUTINE_SOURCE };
+  // The routine's own text, with the one thing it asks of the Project in front
+  // of it: whether an edge's descriptors are held. The text is built here,
+  // before Assemble, so it can be asked of the Project and not of the driver,
+  // which is resolved at the end of it — see docs/spec/project-file.md.
+  std::string routineText = fmt::format( "ngaFramesHeld = {}\n", project.framesHeld ? 1 : 0 );
+  routineText += ROUTINE_SOURCE;
   if ( takesColdStart( project ) )
   {
     // The Phase to enter is known here; where its Frame waits is not, and is
@@ -661,9 +761,9 @@ std::uint32_t sizeOfTransition( Residency const& residency )
   return TRANSITION_HEADER_SIZE + ( TRANSITION_ENTRY_SIZE * phases );
 }
 
-std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows )
+std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows, bool held )
 {
-  return FRAME_HEADER_SIZE + ( FRAME_BLOCK_SIZE * payloads ) + 1 + ( CELL_WRITE_SIZE * cellWrites ) + windows;
+  return frameHeaderSize( held ) + ( FRAME_BLOCK_SIZE * payloads ) + 1 + ( CELL_WRITE_SIZE * cellWrites ) + windows;
 }
 
 std::vector<WindowIndex> baseOrderOf( Project const& project )
@@ -736,24 +836,17 @@ void writeTransition( TransitionContent const& content,
   putByte( into, 4, entries );
 }
 
-std::vector<std::uint8_t>
-frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, EntryAddresses& entries )
+std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Storage const& storage )
 {
-  GlobalSymbols const& symbols = build.symbols();
   Layout const& layout = build.layout();
   std::span<Module const> const modules = build.modules();
-  std::vector<SymbolRef> const slots = slotsOf( modules );
-
-  std::vector<std::uint8_t> bytes( storage.frameSizeOf( frame ), 0 );
-  std::span<std::uint8_t> const into{ bytes };
-  std::size_t at = 0;
   std::optional<PhaseIndex> const from = storage.frameFrom( frame );
   PhaseIndex const to = storage.frameTo( frame );
 
   // What the edge copies: everything it may have to, less a Movable Section
   // the Phase left already holds where the entered one wants it. The Frame
   // was sized for all of them, and a shorter list leaves the rest unread.
-  std::vector<SectionRef> copied;
+  std::vector<EdgeBlock> blocks;
   for ( SectionRef const payload : storage.framePayloadsOf( frame ) )
   {
     // Sized for the whole load set; what is listed is what Prune kept.
@@ -767,28 +860,105 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
     bool const held = from.has_value() && section.isMovable() &&
                       modules[payload.module.value].residency().includes( *from ) && layout.isPlaced( payload ) &&
                       layout.addressIn( payload, *from ) == layout.addressIn( payload, to );
-    if ( !held )
+    if ( held )
     {
-      copied.push_back( payload );
+      continue;
+    }
+    // A block per **piece**. A Payload is one stored form unless no unit of
+    // storage held the whole of it, and then it is several, each a form the
+    // decoder reads from its first byte and each with a destination of its
+    // own.
+    for ( std::uint32_t piece = 0; piece < storage.pieceCountOf( payload ); ++piece )
+    {
+      blocks.push_back( EdgeBlock{ .payload = payload, .piece = piece } );
     }
   }
 
+  if ( !build.project().framesHeld )
+  {
+    return blocks;
+  }
+
+  // The block that lends the routine its list of descriptors goes last. It is
+  // the longest of them, and it serves only if it is longer than the list —
+  // six bytes a block — which an edge of many short Sections may leave nobody
+  // able to do. What is compared is the **stored form**, never the longer of
+  // the two, so a block with room for the list as it waits has room for it
+  // once turned back, whichever decoder turns it.
+  auto const need = static_cast<std::uint32_t>( FRAME_BLOCK_SIZE * blocks.size() );
+  std::optional<std::size_t> lender;
+  std::uint32_t largest = 0;
+  for ( std::size_t index = 0; index < blocks.size(); ++index )
+  {
+    if ( !layout.isPlaced( blocks[index].payload ) )
+    {
+      continue;
+    }
+    // The **last** of the longest, so that blocks of one size leave the order
+    // alone and nothing is rotated for nothing.
+    std::uint32_t const room = storage.sizeOf( blocks[index].payload, blocks[index].piece );
+    if ( room >= need && room >= largest )
+    {
+      largest = room;
+      lender = index;
+    }
+  }
+  if ( lender.has_value() )
+  {
+    auto const first = blocks.begin() + static_cast<std::ptrdiff_t>( *lender );
+    std::rotate( first, first + 1, blocks.end() );
+  }
+  return blocks;
+}
+
+std::vector<std::uint8_t>
+frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, EntryAddresses& entries )
+{
+  GlobalSymbols const& symbols = build.symbols();
+  Layout const& layout = build.layout();
+  std::span<Module const> const modules = build.modules();
+  std::vector<SymbolRef> const slots = slotsOf( modules );
+
+  std::vector<std::uint8_t> bytes( storage.frameSizeOf( frame ), 0 );
+  std::span<std::uint8_t> const into{ bytes };
+  std::size_t at = 0;
+  PhaseIndex const to = storage.frameTo( frame );
+
+  std::vector<EdgeBlock> const blocks = edgeBlocksOf( frame, build, storage );
+
+  // Where the descriptors wait while the images arrive: the destination of the
+  // last block, which edgeBlocksOf put there because it is the largest and has
+  // room for them — and zero where no block of this edge had. Its bytes are
+  // overwritten by this edge in any case, so until it arrives what stands
+  // there is nobody's, and the list costs the program no memory at all. See
+  // docs/decisions/0226-an-edge-holds-its-descriptors-in-the-block-that-loads-last.md.
+  if ( build.project().framesHeld )
+  {
+    bool const lent = !blocks.empty() && layout.isPlaced( blocks.back().payload ) &&
+                      storage.sizeOf( blocks.back().payload, blocks.back().piece ) >= FRAME_BLOCK_SIZE * blocks.size();
+    putWord( into,
+             at,
+             lent ? layout.addressIn( blocks.back().payload, to ) +
+                        storage.landingOf( blocks.back().payload, blocks.back().piece )
+                  : 0 );
+    at += FRAME_HELD_SIZE;
+  }
   putWord( into, at, entries.of( to ).value_or( 0 ) );
-  putByte( into, at + 2, static_cast<std::uint32_t>( copied.size() ) );
+  putByte( into, at + 2, static_cast<std::uint32_t>( blocks.size() ) );
   at += FRAME_HEADER_SIZE;
 
-  for ( SectionRef const payload : copied )
+  for ( auto const& [payload, piece] : blocks )
   {
-    bool const known = storage.isPlaced( payload ) && layout.isPlaced( payload );
-    StorageAddress const waits = known ? storage.addressOf( payload ) : StorageAddress{};
+    bool const known = storage.isPlaced( payload, piece ) && layout.isPlaced( payload );
+    StorageAddress const waits = known ? storage.addressOf( payload, piece ) : StorageAddress{};
     putByte( into, at, known ? waits.bank.value : 0 );
     putWord( into, at + 1, known ? waits.offset : 0 );
     // Where the decoder's output lands: the Section's address in the Phase
-    // entered plus the start of its initialised extent, which is Storage's
-    // answer because the Payload was made from that extent and not from the
-    // Section. Per edge, since a Movable Section lands where the entered
-    // Phase holds it; the stored size travels with the form, which is one.
-    putWord( into, at + 3, known ? layout.addressIn( payload, to ) + storage.landingOf( payload ) : 0 );
+    // entered plus how far into it this piece begins, which is Storage's
+    // answer because the Payload was made from the initialised extent and not
+    // from the Section. Per edge, since a Movable Section lands where the
+    // entered Phase holds it; the stored size travels with the form.
+    putWord( into, at + 3, known ? layout.addressIn( payload, to ) + storage.landingOf( payload, piece ) : 0 );
     putByte( into, at + 5, known ? storage.transformOf( payload ) : TRANSFORM_COPY );
     at += FRAME_BLOCK_SIZE;
   }

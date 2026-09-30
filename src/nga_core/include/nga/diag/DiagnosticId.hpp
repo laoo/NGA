@@ -103,6 +103,20 @@ enum class Severity : std::uint8_t
      0193,                                                                                                             \
      WARNING,                                                                                                          \
      "a `.proc` holds code, which nothing writes unless a statement says so, and `readonly` changes nothing" )         \
+  X( FOREIGN_EXCLUDES, 0194, ERROR, "`foreign` does not go with `{other}`" )                                           \
+  X( FOREIGN_NEEDS_ROOT,                                                                                               \
+     0195,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`foreign` says another master reads the section, which reaches it by an address handed to the hardware, so "     \
+     "the section is a `root`" )                                                                                       \
+  X( PROC_NOT_FOREIGN,                                                                                                 \
+     0196,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `.proc` holds code the CPU runs, and `foreign` says the CPU does not reach the bytes" )                        \
+  X( UNKNOWN_TRANSITION_ATTRIBUTE,                                                                                     \
+     0197,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is not an attribute of a transition; `fast` is the one there is" )                                      \
   X( SOURCE_TAKES_PATH_AND_LINE,                                                                                       \
      0181,                                                                                                             \
      ERROR,                                                                                                            \
@@ -188,6 +202,30 @@ enum class Severity : std::uint8_t
   X( CONTAINER_NOT_TAKEN, 1141, ERROR, "this machine does not take a `{name}`; it takes {taken}" )                     \
   X( CONTAINERS_DECLARED_HERE, 1142, NOTE, "the machine says what it takes here" )                                     \
   X( CONTAINER_TAKES_NO_FORMAT, 1216, ERROR, "a `{name}` is one thing and takes no format; only `car` names a board" ) \
+  X( EXPECTED_CARTRIDGE_ENTRY, 1230, ERROR, "a cartridge's entry is a field and a value, and `{token}` is neither" )   \
+  X( CARTRIDGE_FIELD_UNKNOWN,                                                                                          \
+     1231,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{field}` is not something a cartridge's header holds; it holds `name`, `manufacturer` and `rotation`" )         \
+  X( CARTRIDGE_FIELD_VALUE,                                                                                            \
+     1232,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{field}` takes {field} of the kind its header field is: `name` and `manufacturer` a quoted string, "            \
+     "`rotation` a word" )                                                                                             \
+  X( CARTRIDGE_FIELD_TOO_LONG,                                                                                         \
+     1233,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{field}` holds {available:n} bytes and {given:n} were given; a reader writes a terminator over the last, so "   \
+     "one more would be a name nobody chose" )                                                                         \
+  X( CARTRIDGE_FIELD_REPEATED, 1234, ERROR, "`{field}` is given twice" )                                               \
+  X( CARTRIDGE_ROTATION_UNKNOWN,                                                                                       \
+     1235,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is no rotation; a cartridge is held `none`, `left` or `right`" )                                        \
+  X( CARTRIDGE_BLOCK_WITHOUT_HEADER,                                                                                   \
+     1236,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `cartridge` block says what a header shows, and a `{name}` carries no header to show it in" )                  \
   X( CARTRIDGE_WITHOUT_FORMAT,                                                                                         \
      1217,                                                                                                             \
      ERROR,                                                                                                            \
@@ -206,6 +244,12 @@ enum class Severity : std::uint8_t
   X( UNKNOWN_INTENT, 1143, ERROR, "`{name}` is not what a program is optimised for; the words are {known}" )           \
   X( INTENT_ALREADY_SET, 1144, ERROR, "what the program is optimised for is set more than once" )                      \
   X( PREVIOUS_INTENT, 1145, NOTE, "it was already set here" )                                                          \
+  X( UNKNOWN_FRAMES_WORD,                                                                                              \
+     1239,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is not something to do with an edge's descriptors; `held` is the one word there is" )                   \
+  X( FRAMES_ALREADY_SET, 1240, ERROR, "`frames` is said once, and was said already" )                                  \
+  X( PREVIOUS_FRAMES, 1241, NOTE, "the earlier one is here" )                                                          \
   X( UNKNOWN_CPU, 1146, ERROR, "`{name}` names no processor; the words are {known}" )                                  \
   X( CPU_ALREADY_SET, 1149, ERROR, "the processor is set more than once" )                                             \
   X( PREVIOUS_CPU, 1152, NOTE, "the processor was already set here" )                                                  \
@@ -609,6 +653,14 @@ enum class Severity : std::uint8_t
      "`.driver`, and a machine variant usually lists that module" )                                                    \
   X( SECOND_DRIVER, 2282, ERROR, "this module declares the storage driver, and `{module}` already does" )              \
   X( DRIVER_IS_HERE, 2283, NOTE, "the driver is declared here" )                                                       \
+  X( DRIVER_SEEK_UNKNOWN,                                                                                              \
+     2335,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{word}` is not something a medium does about an offset; `forward` is the one word there is" )                   \
+  X( DRIVER_SPAN_UNKNOWN,                                                                                              \
+     2426,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{word}` is not something an image does across a unit; `none` is the one word there is" )                        \
   X( UNKNOWN_DRIVER_ROLE,                                                                                              \
      2284,                                                                                                             \
      ERROR,                                                                                                            \
@@ -728,6 +780,11 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "the layout puts `{section}` at {address:hex}..{last:hex}, outside the pool it was allocated from" )              \
   X( LAYOUT_NOT_PLACED, 5245, ERROR, "the layout gives `{section}` no address" )                                       \
+  X( IMAGE_SPANS_A_UNIT,                                                                                               \
+     5255,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` comes to {size:n} bytes and the driver is promised that nothing crosses a unit, which holds "        \
+     "{available:n}: no single unit can hold it" )                                                                     \
   X( LAYOUT_PAST_MEMORY,                                                                                               \
      5246,                                                                                                             \
      ERROR,                                                                                                            \
@@ -798,6 +855,15 @@ enum class Severity : std::uint8_t
      6214,                                                                                                             \
      ERROR,                                                                                                            \
      "the .xex fills a unit through one range, and window `{name}` has {count}" )                                      \
+  X( CONTAINER_CANNOT_INIT,                                                                                            \
+     6207,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the driver declares `init`, and a `{container}` has nowhere to call it: the `.xex` is the one Container that "   \
+     "reaches the driver before the entry" )                                                                           \
+  X( XEX_INIT_NOT_PLACED,                                                                                              \
+     6208,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the .xex calls the driver's `init` before it fills a unit, and `ngaInit` has no address to call" )               \
   X( ATR_STORAGE_IS_A_UNIT_SET,                                                                                        \
      6221,                                                                                                             \
      ERROR,                                                                                                            \
@@ -832,6 +898,56 @@ enum class Severity : std::uint8_t
      "`{section}` holds bytes at {address:hex}, and a `{name}` cartridge is ROM at {range} and nothing else, so "      \
      "nothing would ever put them there" )                                                                             \
   X( CAR_WITHOUT_HEADER, 6233, ERROR, "a cartridge is started through the six bytes at its top, and none were made" )  \
+  X( D64_STORAGE_GEOMETRY,                                                                                             \
+     1238,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `{name}` is {tracks:n} tracks of at most {expected:n} bytes, the unit's number being the track's, and "        \
+     "this machine's storage is {count:n} units of {size:n}" )                                                         \
+  X( LNX_STORAGE_GEOMETRY,                                                                                             \
+     1237,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `{name}` cartridge is 255 pages of {expected:n} bytes, page zero being the bootstrap's, and this machine's "   \
+     "storage is {count:n} units of {size:n}" )                                                                        \
+  X( LNX_WITHOUT_LOADER,                                                                                               \
+     6236,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a Lynx cartridge is booted by fifty bytes its ROM decrypts and the loader they read in, and those were not "     \
+     "made" )                                                                                                          \
+  X( LNX_LOADER_TOO_LARGE,                                                                                             \
+     6237,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the boot ROM decrypts {available:n} bytes and the loader's first part came to {required:n}" )                    \
+  X( LNX_BOOTSTRAP_TOO_LARGE,                                                                                          \
+     6238,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the rest of page zero holds {available:n} bytes and the loader came to {required:n}: the first part reads the "  \
+     "second where the ROM left the counter, and the counter does not leave the page it is on" )                       \
+  X( LNX_DOES_NOT_FIT, 6239, ERROR, "a `{name}` cartridge holds {available:n} bytes and this comes to {required:n}" )  \
+  X( BS93_ENTRY_NOT_LOWEST,                                                                                            \
+     6234,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `bs93` image carries one address, which is both where it is loaded and where it is entered, so the entry "     \
+     "has to be its lowest byte: the entry is {entry:hex} and the image begins at {begin:hex}" )                       \
+  X( BS93_HAS_A_PAYLOAD,                                                                                               \
+     6235,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` waits in storage, and a `bs93` image is one block an emulator copies into memory: it has no "        \
+     "loader, and nothing would ever put those bytes where they belong" )                                              \
+  X( PRG_BELOW_THE_STUB,                                                                                               \
+     6240,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a `prg` is loaded at BASIC's own start and the line that enters it stands there, so the program begins at "      \
+     "{floor:hex}: this image begins at {begin:hex}, which the load would write over BASIC's pointers" )               \
+  X( D64_PROGRAM_HAS_NO_ROOM,                                                                                          \
+     6242,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the program comes to {required:n} sectors and the Phases left {available:n}: a diskette holds both, and the "    \
+     "Phases are placed first" )                                                                                       \
+  X( PRG_HAS_A_PAYLOAD,                                                                                                \
+     6241,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` waits in storage, and a `prg` is one block a PET is handed by hand: it has no loader, and nothing "  \
+     "would ever put those bytes where they belong" )                                                                  \
   X( ATR_WITHOUT_BOOT_RECORD, 6226, ERROR, "an .atr is booted by its first sectors, and none were made" )              \
   X( ATR_BOOT_RECORD_TOO_LARGE,                                                                                        \
      6227,                                                                                                             \
@@ -900,6 +1016,15 @@ enum class Severity : std::uint8_t
      WARNING,                                                                                                          \
      "`{section}` reserves space and emits no bytes, so `readonly` says nothing about it" )                            \
   X( LAYOUT_UNREACHABLE_PLACED, 5250, ERROR, "the layout gives `{section}` an address, and nothing reaches it" )       \
+  X( FOREIGN_HOLDS_BYTES,                                                                                              \
+     5253,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` holds bytes and reaches {last:hex}, where `{region}` stands: what a `foreign` section holds is "     \
+     "written by the CPU like every other byte, and the CPU does not reach there" )                                    \
+  X( FOREIGN_OPERAND,                                                                                                  \
+     5254,                                                                                                             \
+     ERROR,                                                                                                            \
+     "this reaches {address:hex} of `{section}`, where `{region}` stands, and the CPU does not reach there" )          \
   X( LAYOUT_NOT_FOLLOWING,                                                                                             \
      5251,                                                                                                             \
      ERROR,                                                                                                            \
