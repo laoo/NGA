@@ -5,6 +5,8 @@
 #include "nga/model/Slots.hpp"
 #include "nga/model/Transition.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <optional>
@@ -83,9 +85,50 @@ Residency const& Storage::frameLiveOf( FrameIndex index ) const
   return mFrames[index.value].live;
 }
 
+void Storage::decodeAtLoad( LoadForm form )
+{
+  auto const after = std::ranges::upper_bound( mLoadForms, form.to, {}, &LoadForm::to );
+  mLoadForms.insert( after, std::move( form ) );
+}
+
+bool Storage::isDecodedAtLoad( SectionRef where ) const
+{
+  return std::ranges::any_of( mLoadForms, [where]( LoadForm const& one ) { return one.where == where; } );
+}
+
+void Storage::hideAtLoad( Hidden hidden )
+{
+  mHidden.push_back( std::move( hidden ) );
+}
+
+void Storage::stageHidden( HiddenBatch batch )
+{
+  mHiddenBatches.push_back( std::move( batch ) );
+}
+
+void Storage::decodeHidden( HiddenForm form )
+{
+  mHiddenForms.push_back( std::move( form ) );
+}
+
+void Storage::chooseAtLoad( std::vector<ChoiceSite> sites )
+{
+  mChoiceSites = std::move( sites );
+}
+
+bool Storage::isHiddenAtLoad( SectionRef where ) const
+{
+  return std::ranges::any_of( mHidden, [where]( Hidden const& one ) { return one.where == where; } );
+}
+
 void Storage::addPaneImage( SectionRef where, StorageAddress at )
 {
   mPaneImages.push_back( PaneImage{ .where = where, .at = at } );
+}
+
+void Storage::addStateImage( SectionRef where, std::uint32_t state, std::uint32_t offset )
+{
+  mStateImages.push_back( StateImage{ .where = where, .state = state, .offset = offset } );
 }
 
 void Storage::place( SectionRef where, std::uint32_t piece, StorageAddress at )
@@ -157,8 +200,8 @@ void Storage::declareFrame( FrameIndex index,
                             std::vector<SectionRef> payloads,
                             std::uint32_t blocks,
                             std::uint32_t cellWrites,
-                            std::uint32_t windows,
-                            bool held )
+                            std::uint32_t headerBytes,
+                            std::uint32_t unitBytes )
 {
   if ( mFrames.size() <= index.value )
   {
@@ -169,8 +212,7 @@ void Storage::declareFrame( FrameIndex index,
   frame.from = from;
   frame.to = to;
   frame.payloads = std::move( payloads );
-  frame.cellWrites = cellWrites;
-  frame.size = sizeOfFrame( blocks, cellWrites, windows, held );
+  frame.size = sizeOfFrame( blocks, cellWrites, headerBytes, unitBytes );
 }
 
 std::optional<FrameIndex> Storage::frameOf( std::optional<PhaseIndex> from, PhaseIndex to ) const
@@ -188,11 +230,6 @@ std::optional<FrameIndex> Storage::frameOf( std::optional<PhaseIndex> from, Phas
 std::span<SectionRef const> Storage::framePayloadsOf( FrameIndex index ) const
 {
   return mFrames[index.value].payloads;
-}
-
-std::uint32_t Storage::frameCellWritesOf( FrameIndex index ) const
-{
-  return mFrames[index.value].cellWrites;
 }
 
 void Storage::placeFrame( FrameIndex index, StorageAddress at )
@@ -275,10 +312,10 @@ Residency liveAcross( PhaseGraph const& graph, Residency const& needed )
   Residency live{ graph.phases.size() };
   for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
   {
-    bool still = needed.phaseCount() > phase && needed.includes( PhaseIndex{ phase } );
+    bool still = needed.includes( PhaseIndex{ phase } );
     for ( std::uint32_t ahead = 0; ahead < graph.phases.size() && !still; ++ahead )
     {
-      still = reaches[phase][ahead] && needed.phaseCount() > ahead && needed.includes( PhaseIndex{ ahead } );
+      still = reaches[phase][ahead] && needed.includes( PhaseIndex{ ahead } );
     }
     if ( still )
     {
@@ -286,6 +323,13 @@ Residency liveAcross( PhaseGraph const& graph, Residency const& needed )
     }
   }
   return live;
+}
+
+Residency
+heldAcross( PhaseGraph const& graph, Target const& target, Section const& section, Residency const& residency )
+{
+  bool const writtenOnce = section.emitsBytes() && ( section.inMedium() || !target.hasStorage() );
+  return writtenOnce ? liveAcross( graph, residency ) : residency;
 }
 
 /// A `root` Section holding no bytes, evicted between two Phases that need
@@ -299,12 +343,19 @@ void reportEvictedRoots( Pruned const& build, diag::DiagnosticSink& sink )
 {
   PhaseGraph const& graph = build.phases();
   std::vector<std::vector<bool>> const reaches = reachabilityOf( graph );
-  auto const nameOf = [&graph]( std::uint32_t phase ) { return graph.phases[phase].name.value_or( "(implicit)" ); };
+  auto const nameOf = [&graph]( std::uint32_t phase ) { return graph.phases[phase].displayName(); };
 
+  // A ROM the driver switches out is evicted from a Phase on purpose, and
+  // comes back with the switch rather than with a load — see
+  // docs/decisions/0229-no-window-has-a-base.md.
   for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
   {
     Module const& one = build.modules()[module];
     Residency const& residency = one.residency();
+    if ( isSwitchedRom( build, ModuleIndex{ module } ) )
+    {
+      continue;
+    }
     for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
     {
       Section const& section = one.sections()[index];
@@ -340,12 +391,18 @@ void reportEvictedRoots( Pruned const& build, diag::DiagnosticSink& sink )
         {
           continue;
         }
+        // A loop of two Phases comes back to the one it left, and is said so.
+        std::string const between =
+            *before == *after
+                ? fmt::format( "between two runs of `{}`, which needs it", nameOf( *before ) )
+                : fmt::format( "between `{}` and `{}`, which both need it", nameOf( *before ), nameOf( *after ) );
         sink.add( diag::diagnostic( diag::DiagnosticId::ROOT_EVICTED )
                       .at( section.span().begin, section.span().length )
-                      .arg( "section", one.displayNameOf( SectionIndex{ index }, build.sources() ) )
+                      .arg( "section", one.displayNameOf( SectionIndex{ index } ) )
                       .arg( "gap", nameOf( gap ) )
                       .arg( "before", nameOf( *before ) )
-                      .arg( "after", nameOf( *after ) ) );
+                      .arg( "after", nameOf( *after ) )
+                      .arg( "between", between ) );
         break;
       }
     }
@@ -357,7 +414,30 @@ bool takesColdStart( Project const& project )
   // Storage is where a Frame waits, so a board with no banks takes no cold
   // start: there is nothing for one to wait in, and a program on such a board
   // holds every byte it has in ROM.
-  return project.container == Container::CAR && project.target.unitCount > 0;
+  if ( project.container == Container::CAR )
+  {
+    return project.target.unitCount > 0;
+  }
+  // A `.xex` with storage writes its start itself, and takes a cold start
+  // only for what it would otherwise write as it is: a Section of the entry
+  // Phase that a `transform` names, which the resident decoder then brings —
+  // see docs/decisions/0236-a-xex-with-storage-brings-a-transformed-start-by-a-cold-start.md.
+  if ( project.container != Container::XEX || !project.target.hasStorage() ||
+       project.phases.entry.value >= project.phases.phases.size() )
+  {
+    return false;
+  }
+  std::vector<ModuleIndex> const& needs = project.phases.phases[project.phases.entry.value].needs;
+  return std::ranges::any_of(
+      project.transforms,
+      [&needs]( TransformRequest const& request )
+      { return request.transform != "copy" && std::ranges::find( needs, request.module ) != needs.end(); } );
+}
+
+bool Storage::isLoadedByColdStart( SectionRef where, PhaseIndex entry ) const
+{
+  std::optional<FrameIndex> const cold = frameOf( std::nullopt, entry );
+  return cold.has_value() && std::ranges::find( framePayloadsOf( *cold ), where ) != framePayloadsOf( *cold ).end();
 }
 
 /// The first position at or after `at` where `size` bytes fit inside one unit,
@@ -367,20 +447,10 @@ bool takesColdStart( Project const& project )
 /// diskette of zoned tracks has. Both are answered the same way, since an image
 /// that may not cross cannot lie in the gap either.
 /// The ceiling one stored form is held to, which is the widest unit there is
-/// where a driver was promised that nothing crosses one, and nothing at all
-/// otherwise.
-std::uint32_t storedCeilingOf( Target const& target, std::optional<Driver> const& driver )
+/// where images stay inside one, and nothing at all otherwise.
+std::uint32_t storedCeilingOf( Project const& project )
 {
-  if ( !driver.has_value() || !driver->spansNothing || target.bankSize() == 0 )
-  {
-    return 0;
-  }
-  std::uint32_t widest = 0;
-  for ( std::uint32_t unit = 0; unit * target.bankSize() < target.storageSize(); ++unit )
-  {
-    widest = std::max( widest, target.usableInUnit( unit ) );
-  }
-  return widest;
+  return imagesStayInOneUnit( project ) ? project.target.widestUsableUnit() : 0;
 }
 
 std::uint32_t blocksForPayload( std::uint32_t storedCeiling, std::uint32_t extent )
@@ -445,6 +515,15 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
   Storage storage{ build.modules() };
   reportEvictedRoots( build, sink );
 
+  // Without storage nothing waits anywhere: every Section with bytes is kept
+  // wherever it is live, so no edge loads one and none has a Payload, nor a
+  // Frame, since what one would say a stub of the Phase entered says in code
+  // — see docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+  if ( !build.target().hasStorage() )
+  {
+    return storage;
+  }
+
   // The load set of every edge, which is the whole of what decides that a
   // Section waits somewhere — nothing declares it. The Phases whose edges
   // load a Section are what it is needed in, and it is live in those and in
@@ -467,6 +546,35 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
     std::erase_if( coldBlocks,
                    [&readOnly, &build]( SectionRef const& where )
                    { return readOnly.standsInRom( where ) || !build.reachable().includes( where ); } );
+    // A `.xex` brings by it only what a `transform` names, and none of what
+    // the cold start itself runs: the driver and the decoders are in memory
+    // before the first block is read, so nothing could decode them — see
+    // docs/decisions/0236-a-xex-with-storage-brings-a-transformed-start-by-a-cold-start.md.
+    if ( build.project().container == Container::XEX )
+    {
+      Project const& project = build.project();
+      std::erase_if(
+          coldBlocks,
+          [&]( SectionRef const& where )
+          {
+            Section const& section = build.modules()[where.module.value].sectionAt( where.section );
+            if ( section.format() == TRANSFORM_COPY )
+            {
+              return true;
+            }
+            bool const runs =
+                ( project.driver.has_value() && project.driver->module == where.module ) ||
+                std::ranges::any_of( project.decoders,
+                                     [&where]( Decoder const& decoder ) { return decoder.module == where.module; } );
+            if ( runs )
+            {
+              sink.add( diag::diagnostic( diag::DiagnosticId::COLD_START_RUNS_IT )
+                            .at( section.span().begin, section.span().length )
+                            .arg( "section", build.modules()[where.module.value].displayNameOf( where.section ) ) );
+            }
+            return runs;
+          } );
+    }
     for ( SectionRef const where : coldBlocks )
     {
       storage.markPayload( where );
@@ -479,7 +587,7 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
   // form exists yet, so this is what the lengths allow rather than what the
   // encoding will come to, and a Frame sized for a block that is never used
   // leaves it unread.
-  std::uint32_t const ceiling = storedCeilingOf( build.project().target, build.project().driver );
+  std::uint32_t const ceiling = storedCeilingOf( build.project() );
   auto const blocksFor = [&sizes, ceiling]( std::vector<SectionRef> const& payloads )
   {
     std::uint32_t blocks = 0;
@@ -539,11 +647,16 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
                           coldBlocks,
                           blocksFor( coldBlocks ),
                           slotCount,
-                          static_cast<std::uint32_t>( baseOrderOf( build.project() ).size() ),
-                          build.project().framesHeld );
-    // Read before anything of the program runs, and on every reset for as long
-    // as it lives, so it is live wherever the program is.
-    storage.liveFrame( FrameIndex{ frames }, Residency::all( graph.phases.size() ) );
+                          frameHeaderSizeOf( build.project() ),
+                          build.project().target.unitBytes() );
+    // Read before anything of the program runs, and on a cartridge on every
+    // reset for as long as it lives, so it is live wherever the program is; a
+    // `.xex` reads it once, at the start.
+    Residency entered{ graph.phases.size() };
+    entered.add( graph.entry );
+    storage.liveFrame( FrameIndex{ frames },
+                       build.project().container == Container::XEX ? liveAcross( graph, entered )
+                                                                   : Residency::all( graph.phases.size() ) );
     ++frames;
   }
   for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
@@ -596,7 +709,7 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
           // The same set, less what stands in ROM: a Frame's blocks are what
           // the routine copies, and it copies none of those.
           std::vector<SectionRef> blocks = loadSetOf( graph, from, to, build.modules() );
-          std::erase_if( blocks, [&readOnly]( SectionRef const& where ) { return readOnly.standsInRom( where ); } );
+          std::erase_if( blocks, [&readOnly]( SectionRef const& block ) { return readOnly.standsInRom( block ); } );
           if ( quick )
           {
             for ( SectionRef const& block : blocks )
@@ -610,8 +723,8 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
                                 blocks,
                                 blocksFor( blocks ),
                                 slotCount,
-                                static_cast<std::uint32_t>( baseOrderOf( build.project() ).size() ),
-                                build.project().framesHeld );
+                                frameHeaderSizeOf( build.project() ),
+                                build.project().target.unitBytes() );
           // After the Frame exists and not before: a Frame is declared into a
           // vector this grows.
           if ( quick )
@@ -633,7 +746,7 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
   // the next, since the driver's stream carries on — so the Frames are
   // placed one after the other from the start of it.
   Target const& target = build.target();
-  bool const confined = build.project().driver.has_value() && build.project().driver->spansNothing;
+  bool const confined = imagesStayInOneUnit( build.project() );
   std::uint32_t used = 0;
   for ( std::uint32_t index = 0; index < storage.frameCount(); ++index )
   {
@@ -648,7 +761,7 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
     }
     // A Frame that may not cross a unit, or would land in a part of one that
     // is not there, begins at the next unit instead.
-    if ( confined || !target.unitUsable.empty() )
+    if ( confined )
     {
       used = fitInUnit( target, used, size );
     }
@@ -664,10 +777,9 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
 
 void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& sink )
 {
-  diag::SourceManager const& sources = build.sources();
   // A driver promised `span none` is held to it here: nothing it is handed
   // crosses from one unit into the next, so it needs no way of carrying there.
-  bool const confined = build.project().driver.has_value() && build.project().driver->spansNothing;
+  bool const confined = imagesStayInOneUnit( build.project() );
   Target const& target = build.target();
   Layout const& layout = build.layout();
   Sizes const& sizes = build.sizes();
@@ -698,10 +810,11 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
   }
 
   // A Pane's Section with bytes waits in its Bank at its own offset within
-  // the Window, written by the Container; one pinned to a named state has
-  // no Bank a loader fills. A Pane's reservation takes the same bytes of
-  // the same Bank — of every member's, for a family — while it is present.
-  bool noBanksReported = false;
+  // the Window, written by the Container; one pinned to a named state is
+  // written into that state where a `.xex` can show it while it loads, and
+  // has no loader to come from anywhere else. A Pane's reservation takes the
+  // same bytes of the same Bank — of every member's, for a family — while it
+  // is present.
   for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
   {
     Module const& one = build.modules()[module];
@@ -718,17 +831,6 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
       Window const& window = target.windows[pane.window.value];
       std::optional<UnitSetIndex> const set = target.unitSetShownBy( pane.window );
       std::optional<std::uint32_t> const state = layout.stateOfPane( *section.pane() );
-      if ( pane.state.has_value() || !set.has_value() || !state.has_value() )
-      {
-        if ( pane.state.has_value() && section.emitsBytes() )
-        {
-          sink.add( diag::diagnostic( diag::DiagnosticId::PANE_STATE_PAYLOAD )
-                        .at( section.span().begin, section.span().length )
-                        .arg( "section", one.displayNameOf( where.section, sources ) )
-                        .arg( "pane", pane.name ) );
-        }
-        continue;
-      }
       // The offset within the Window: the ranges laid end to end, which is
       // what an address in a Bank means whichever Window shows it.
       auto const offsetOf = [&window]( std::uint32_t address )
@@ -744,8 +846,39 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
         }
         return offset;
       };
+      if ( pane.state.has_value() || !set.has_value() || !state.has_value() )
+      {
+        if ( pane.state.has_value() && section.emitsBytes() )
+        {
+          if ( fillsNamedStates( build.project(), pane.window ) )
+          {
+            std::uint32_t const address = layout.addressOf( where ) + sizes.initialisedExtentOf( where ).begin;
+            storage.addStateImage( where, *pane.state, offsetOf( address ) );
+          }
+          else
+          {
+            sink.add( diag::diagnostic( diag::DiagnosticId::PANE_STATE_PAYLOAD )
+                          .at( section.span().begin, section.span().length )
+                          .arg( "section", one.displayNameOf( where.section ) )
+                          .arg( "pane", pane.name ) );
+          }
+        }
+        continue;
+      }
       std::uint32_t const first = window.firstStateOf( *set, target.unitSets ).value_or( 0 );
       std::uint32_t const bank = *state - first;
+      // A Bank's bytes are written by the Container into the set it fills,
+      // storage's or the one the driver's stream reads: in any other set, or
+      // with no set filled at all, nothing would write them.
+      if ( section.emitsBytes() && target.filledSet() != set )
+      {
+        sink.add( diag::diagnostic( diag::DiagnosticId::PANE_NOT_FILLED )
+                      .at( section.span().begin, section.span().length )
+                      .arg( "section", one.displayNameOf( where.section ) )
+                      .arg( "pane", pane.name )
+                      .arg( "units", target.unitSets[set->value].name ) );
+        continue;
+      }
       if ( section.emitsBytes() )
       {
         std::uint32_t const address = layout.addressOf( where ) + sizes.initialisedExtentOf( where ).begin;
@@ -753,7 +886,7 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
         // member. A family's Sections stand in every member at one offset so
         // that code shown any member finds them there, and a Container fills
         // each Bank on its own, so each needs its own copy of the bytes.
-        for ( std::uint32_t member = bank; member < bank + pane.count && member < target.unitCount; ++member )
+        for ( std::uint32_t member = bank; member < bank + pane.count && member < target.filledCount(); ++member )
         {
           storage.addPaneImage( where, StorageAddress{ .bank = BankIndex{ member }, .offset = offsetOf( address ) } );
         }
@@ -769,6 +902,52 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
         std::uint32_t const begin = ( member * target.unitSize ) + offset;
         taken.push_back( Taken{ .begin = begin,
                                 .end = begin + sizes.sizeOfSection( where ),
+                                .present = section.emitsBytes() ? std::nullopt : std::optional{ one.residency() } } );
+      }
+    }
+  }
+
+  // A Section in a unit set with bytes is written by the Container as well,
+  // at its linear address taken as a position in the set — a piece per Bank
+  // where it runs across them, as any image does; only a set the Container
+  // fills has a loader to put it there. One that reserves takes its bytes of
+  // storage while it is present, as a Pane's reservation does — see
+  // docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
+  {
+    Module const& one = build.modules()[module];
+    for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
+    {
+      Section const& section = one.sections()[index];
+      SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
+      std::optional<UnitSetIndex> const set = section.unitSet();
+      if ( !set.has_value() || !build.reachable().includes( where ) || !layout.isPlaced( where ) ||
+           !sizes.isKnown( where ) || sizes.sizeOfSection( where ) == 0 )
+      {
+        continue;
+      }
+      std::optional<AddressRange> const banks = target.linearBanksOf( *set );
+      if ( !banks.has_value() )
+      {
+        continue;
+      }
+      std::uint32_t const position = layout.addressOf( where ) - banks->begin;
+      if ( section.emitsBytes() )
+      {
+        if ( target.filledSet() != set )
+        {
+          sink.add( diag::diagnostic( diag::DiagnosticId::IN_UNITS_NOT_FILLED )
+                        .at( section.span().begin, section.span().length )
+                        .arg( "section", one.displayNameOf( where.section ) )
+                        .arg( "units", target.unitSets[set->value].name ) );
+          continue;
+        }
+        storage.addPaneImage( where, target.filledAddressAt( position + sizes.initialisedExtentOf( where ).begin ) );
+      }
+      if ( target.storageUnits == set )
+      {
+        taken.push_back( Taken{ .begin = position,
+                                .end = position + sizes.sizeOfSection( where ),
                                 .present = section.emitsBytes() ? std::nullopt : std::optional{ one.residency() } } );
       }
     }
@@ -849,18 +1028,7 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
         {
           continue;
         }
-        std::string const name = one.displayNameOf( where.section, sources );
-
-        if ( target.unitCount == 0 )
-        {
-          sink.add( diag::diagnostic( diag::DiagnosticId::NO_STORAGE )
-                        .at( section.span().begin, section.span().length )
-                        .arg( "section", name )
-                        .arg( "size", size )
-                        .note( diag::diagnostic( diag::DiagnosticId::NO_BANKS ) ) );
-          noBanksReported = true;
-          continue;
-        }
+        std::string const name = one.displayNameOf( where.section );
 
         // The bytes this image may not lie on: everything taken for good, and
         // every reservation present in a Phase the image is live in.
@@ -881,21 +1049,13 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
         // image that would straddle begins at the next unit instead. That
         // moves the candidate forward past blocks already weighed, so the
         // scan runs again until it stops moving.
-        bool const inOneUnit = confined || !target.unitUsable.empty();
-        auto const confine = [&target, inOneUnit, size]( std::uint32_t at )
-        { return inOneUnit ? fitInUnit( target, at, size ) : at; };
+        auto const confine = [&target, confined, size]( std::uint32_t at )
+        { return confined ? fitInUnit( target, at, size ) : at; };
 
         // No unit holds it at all, which is a different fault from a full
         // medium: the widest unit is the ceiling and the author has to say so.
-        std::uint32_t widest = 0;
-        if ( inOneUnit )
-        {
-          for ( std::uint32_t which = 0; which * target.bankSize() < target.storageSize(); ++which )
-          {
-            widest = std::max( widest, target.usableInUnit( which ) );
-          }
-        }
-        if ( inOneUnit && size > widest )
+        std::uint32_t const widest = target.widestUsableUnit();
+        if ( confined && size > widest )
         {
           sink.add( diag::diagnostic( diag::DiagnosticId::IMAGE_SPANS_A_UNIT )
                         .at( section.span().begin, section.span().length )
@@ -937,10 +1097,10 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
     }
   }
 
-  // A Frame the first half could not place: no Bank at all, or none with
-  // room for it. A Frame has no source of its own, so a finding about one
-  // names the edge and sorts by it; no Bank at all is one finding, and where
-  // a Payload has already said it, the Frames say nothing more.
+  // A Frame the first half could not place, since no Bank had room for it.
+  // Without storage there is no Frame at all, and no Payload either. A Frame
+  // has no source of its own, so a finding about one names the edge and sorts
+  // by it.
   for ( std::uint32_t index = 0; index < storage.frameCount(); ++index )
   {
     FrameIndex const frame{ index };
@@ -950,19 +1110,6 @@ void placeStorage( Placed const& build, Storage& storage, diag::DiagnosticSink& 
     }
     std::uint32_t const size = storage.frameSizeOf( frame );
     std::string const name = nameOfFrame( build.phases(), storage.frameFrom( frame ), storage.frameTo( frame ) );
-    if ( target.unitCount == 0 )
-    {
-      if ( !noBanksReported )
-      {
-        sink.add( diag::diagnostic( diag::DiagnosticId::NO_STORAGE )
-                      .arg( "section", name )
-                      .arg( "size", size )
-                      .note( diag::diagnostic( diag::DiagnosticId::NO_BANKS ) )
-                      .sortedBy( name ) );
-        noBanksReported = true;
-      }
-      continue;
-    }
     sink.add( diag::diagnostic( diag::DiagnosticId::NO_STORAGE )
                   .arg( "section", name )
                   .arg( "size", size )

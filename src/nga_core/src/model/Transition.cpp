@@ -1,6 +1,8 @@
 #include "nga/model/Transition.hpp"
 
+#include "nga/model/Assemble.hpp"
 #include "nga/model/Prune.hpp"
+#include "nga/model/Segments.hpp"
 #include "nga/model/Slots.hpp"
 #include "nga/model/Storage.hpp"
 #include "nga/model/Transform.hpp"
@@ -37,6 +39,9 @@ constexpr std::string_view COLD_START_SOURCE =
 .section absolute, readonly
 ngaColdFrame
         .byte 0                 ; the unit
+.if ngaUnitBytes > 1
+        .byte 0
+.endif
         .word 0                 ; and where in it
 .ends
 
@@ -49,11 +54,15 @@ ngaColdFrame
         lda #{}
         sta ngaWanted
         lda ngaColdFrame
-        sta ngaFrameUnit
+        sta ngaFrameAt+2
+.if ngaUnitBytes > 1
         lda ngaColdFrame+1
-        sta ngaFramePos
-        lda ngaColdFrame+2
-        sta ngaFramePos+1
+        sta ngaFrameAt+3
+.endif
+        lda ngaColdFrame+ngaUnitBytes
+        sta ngaFrameAt
+        lda ngaColdFrame+ngaUnitBytes+1
+        sta ngaFrameAt+1
         jmp ngaEnter
 .endp
 )asm";
@@ -63,9 +72,8 @@ constexpr std::string_view ROUTINE_SOURCE =
 ; statement's list right behind the call: the Phase to enter, and per Phase
 ; the code may be in, the unit and offset where the edge's Frame waits.
 ; nga.open and nga.read are the driver's roles, macros of the driver's
-; Module expanded here; ngaShowBases is the Proc the tool generates beside
-; the dispatcher, which reads from the Frame the base the entered Phase gives
-; every Window and shows it, the stream's last; and ngaCurrentPhase is the
+; Module expanded here, and nga.unit and nga.offset the cells its stream
+; stands in, which open reads the position from; and ngaCurrentPhase is the
 ; Cell the tool generates. Everything else the edge has to say waits in the
 ; Frame, in storage. See docs/spec/transition.md.
 ;
@@ -82,15 +90,10 @@ ngaEntry .ztemp 2
 ngaDst .ztemp 2
 ngaValue .ztemp 2
 ngaOffset .ztemp 2
-ngaFramePos .ztemp 2
+ngaFrameAt .ztemp 2 + ngaUnitBytes ; where the Frame's stream stands: the offset, then the unit
 ngaWanted .ztemp 1
 ngaCount .ztemp 1
-ngaFrameUnit .ztemp 1
-ngaUnit .ztemp 1
-
-; What a Frame's header comes to, which is two bytes longer where the Project
-; said `frames held` — see docs/spec/transition.md.
-ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
+ngaUnit .ztemp ngaUnitBytes
 
 .proc ngaTransition
         pla
@@ -118,9 +121,9 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         lda (ngaPtr),y
         cmp ngaCurrentPhase
         beq @found
-        lda ngaPtr              ; the next entry: four bytes on
+        lda ngaPtr              ; the next entry
         clc
-        adc #4
+        adc #ngaEntrySize
         sta ngaPtr
         bcc @skipped
         inc ngaPtr+1
@@ -130,18 +133,23 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
 @found
         iny
         lda (ngaPtr),y
-        sta ngaFrameUnit        ; the unit the Frame waits in
+        sta ngaFrameAt+2        ; the unit the Frame waits in
+.if ngaUnitBytes > 1
         iny
         lda (ngaPtr),y
-        sta ngaFramePos
+        sta ngaFrameAt+3
+.endif
         iny
         lda (ngaPtr),y
-        sta ngaFramePos+1       ; and where in it
+        sta ngaFrameAt
+        iny
+        lda (ngaPtr),y
+        sta ngaFrameAt+1        ; and where in it
 .endp then ngaEnter
 
 ; The rest of it, and the way in for a Container that has no current Phase to
-; look one up by: ngaWanted holds the Phase to enter and ngaFrameUnit and
-; ngaFramePos where its Frame waits. The cold start comes here — see
+; look one up by: ngaWanted holds the Phase to enter and ngaFrameAt where
+; its Frame waits. The cold start comes here — see
 ; docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
 .export ngaEnter
 .proc ngaEnter
@@ -158,6 +166,10 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         sta ngaEntry+1
         nga.read
         sta ngaCount            ; blocks that follow
+.if ngaSelects
+        nga.read                ; the ROMs the entered Phase needs, switched
+        nga.select              ; before a byte of it lands
+.endif
         lda #ngaFrameHeader
         jsr ngaFrameSkip
 .if ngaFramesHeld
@@ -165,7 +177,7 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         ora ngaPtr+1
         beq @block              ; nowhere to hold them: one open a block
 
-; Six bytes a block, read in one pass from where the stream already stands. The
+; A block's bytes, read in one pass from where the stream already stands. The
 ; write pointer, the counter and the index are Temporaries of the routine's own
 ; that nothing is keeping here: ngaValue belongs to the Cell writes, which come
 ; after the blocks, and ngaUnit and ngaDst to a block being loaded, which has
@@ -189,13 +201,13 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         sta (ngaValue),y
         iny
         sty ngaDst
-        cpy #6
+        cpy #ngaBlockSize
         bne @six
-        lda #6
+        lda #ngaBlockSize
         jsr ngaFrameSkip        ; so the Frame stands past them at the end
         lda ngaValue
         clc
-        adc #6
+        adc #ngaBlockSize
         sta ngaValue
         bcc @counted
         inc ngaValue+1
@@ -210,13 +222,18 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         beq @cells
         ldy #0
         lda (ngaPtr),y
-        sta ngaUnit
+        sta nga.unit            ; straight into the driver's cells: the
+        iny                     ; descriptors are in memory, and nothing
+.if ngaUnitBytes > 1            ; reads the stream before it is opened
+        lda (ngaPtr),y
+        sta nga.unit+1
+        iny
+.endif
+        lda (ngaPtr),y
+        sta nga.offset
         iny
         lda (ngaPtr),y
-        sta ngaOffset
-        iny
-        lda (ngaPtr),y
-        sta ngaOffset+1
+        sta nga.offset+1
         iny
         lda (ngaPtr),y
         sta ngaDst
@@ -228,14 +245,11 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         pha                     ; the decoder's number
         lda ngaPtr
         clc
-        adc #6
+        adc #ngaBlockSize
         sta ngaPtr
         bcc @heldLoad
         inc ngaPtr+1
 @heldLoad
-        lda ngaUnit
-        ldx ngaOffset
-        ldy ngaOffset+1
         nga.open
         pla
         ldx ngaDst
@@ -251,6 +265,10 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         jsr ngaFrameOpen        ; back to the Frame: a block's stream replaced it
         nga.read
         sta ngaUnit
+.if ngaUnitBytes > 1
+        nga.read
+        sta ngaUnit+1
+.endif
         nga.read
         sta ngaOffset
         nga.read
@@ -261,11 +279,18 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         sta ngaDst+1
         nga.read
         pha                     ; the decoder's number
-        lda #6
+        lda #ngaBlockSize
         jsr ngaFrameSkip
-        lda ngaUnit
-        ldx ngaOffset
-        ldy ngaOffset+1
+        lda ngaUnit             ; only now: the driver reads the Frame through
+        sta nga.unit            ; these very cells, and writing them while it
+.if ngaUnitBytes > 1            ; did would move the stream
+        lda ngaUnit+1
+        sta nga.unit+1
+.endif
+        lda ngaOffset
+        sta nga.offset
+        lda ngaOffset+1
+        sta nga.offset+1
         nga.open                ; the block's stream: its stored size, then its bytes
         pla
         ldx ngaDst
@@ -297,7 +322,6 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
         dec ngaCount
         jmp @cell
 @enter
-        jsr ngaShowBases        ; the entered Phase's base in every Window, read from the Frame
         lda ngaWanted
         sta ngaCurrentPhase     ; the Phase the program is in from here on
         jmp (ngaEntry)
@@ -305,26 +329,41 @@ ngaFrameHeader = 3 + ngaFramesHeld + ngaFramesHeld
 
 ; The Frame's stream, from where the routine last left it.
 .proc ngaFrameOpen
-        lda ngaFrameUnit
-        ldx ngaFramePos
-        ldy ngaFramePos+1
+        lda ngaFrameAt
+        sta nga.offset
+        lda ngaFrameAt+1
+        sta nga.offset+1
+        lda ngaFrameAt+2
+        sta nga.unit
+.if ngaUnitBytes > 1
+        lda ngaFrameAt+3
+        sta nga.unit+1
+.endif
         nga.open
         rts
 .endp
 
-; A bytes on in the Frame, which is where its stream is opened next.
+; A bytes on in the Frame, which is where its stream is opened next. The
+; offset carries into the unit, so that a Frame running past the last offset
+; a unit's number can reach goes on into the next.
 .proc ngaFrameSkip
         clc
-        adc ngaFramePos
-        sta ngaFramePos
+        adc ngaFrameAt
+        sta ngaFrameAt
         bcc @done
-        inc ngaFramePos+1
+        inc ngaFrameAt+1
+        bne @done
+        inc ngaFrameAt+2
+.if ngaUnitBytes > 1
+        bne @done
+        inc ngaFrameAt+3
+.endif
 @done
         rts
 .endp
 )asm";
 
-constexpr std::string_view CELL_NAME = "ngaCurrentPhase";
+constexpr std::string_view CELL_NAME = TRANSITION_CELL_NAME;
 
 /// Phase numbers travel in a byte, and `$FF` ends a table.
 constexpr std::size_t MOST_PHASES = 0xFF;
@@ -345,18 +384,21 @@ void putByte( std::span<std::uint8_t> into, std::size_t at, std::uint32_t value 
   }
 }
 
+/// A unit's number or a Window's state, low byte first, in as many bytes as it
+/// is written in where it is written — see Target::unitBytes and stateBytesOf.
+void putNumber( std::span<std::uint8_t> into, std::size_t at, std::uint32_t value, std::uint32_t bytes )
+{
+  putByte( into, at, value );
+  if ( bytes > 1 )
+  {
+    putByte( into, at + 1, value >> 8U );
+  }
+}
+
 void putWord( std::span<std::uint8_t> into, std::size_t at, std::uint32_t value )
 {
   putByte( into, at, value );
   putByte( into, at + 1, value >> 8 );
-}
-
-/// The runtime address of a Label the whole program can see, or nothing.
-std::optional<std::uint32_t>
-addressOfExported( GlobalSymbols const& symbols, std::string_view name, Sizes const& sizes, Layout const& layout )
-{
-  std::optional<SymbolRef> const where = symbols.find( name );
-  return where.has_value() ? addressOfLabel( symbols, *where, sizes, layout ) : std::nullopt;
 }
 
 } // namespace
@@ -406,6 +448,44 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
     return index;
   };
 
+  // The Cell: its pseudo-source is the one name it exports, so that the
+  // Symbol's name is text the SourceManager owns like every other name.
+  // Outside the Window, as every Cell is: the routine writes it with the
+  // driver's stream open, which on a mapped driver is a Bank in.
+  auto const addCell = [&]
+  {
+    diag::FileId const cellFile = sources.addFile( "<nga>/cell", std::string{ CELL_NAME } );
+    ModuleIndex const cellModule = addModule( ProjectModule{ .name = "nga.cell",
+                                                             .file = cellFile,
+                                                             .residency = {},
+                                                             .generated = Generated::TRANSITION_CELL,
+                                                             .outsideWindow = true } );
+    project.transitionCell = cellModule;
+    return cellModule;
+  };
+
+  // Without storage there is nowhere for a Frame to wait and nothing for a
+  // routine to read, so there is no routine: an edge is a jump to a stub of
+  // the Phase it enters, which the end of Assemble adds once it knows which
+  // Phases a statement enters. The Cell stays, since it is exported and the
+  // stubs write it. See
+  // docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+  if ( !project.target.hasStorage() )
+  {
+    if ( project.framesSite.has_value() )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::FRAMES_WITHOUT_STORAGE )
+                    .at( project.framesSite->begin, project.framesSite->length ) );
+    }
+    ModuleIndex const cellModule = addCell();
+    for ( Phase& phase : graph.phases )
+    {
+      addOnce( phase.needs, cellModule );
+    }
+    deriveResidency( project );
+    return;
+  }
+
   // The routine: the tool's own source, knowing no hardware. What it calls
   // is the driver's, under names the dispatcher defines at the end of
   // Assemble.
@@ -413,7 +493,25 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
   // of it: whether an edge's descriptors are held. The text is built here,
   // before Assemble, so it can be asked of the Project and not of the driver,
   // which is resolved at the end of it — see docs/spec/project-file.md.
-  std::string routineText = fmt::format( "ngaFramesHeld = {}\n", project.framesHeld ? 1 : 0 );
+  // And how wide a unit's number is, which the variant says, with the sizes
+  // that follow from it written in from the one place Patch and Size read them
+  // too — see docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+  // Whether the driver switches ROMs is the one thing here that is the
+  // driver's, so it is not written in but read as `ngaSelects`, which the
+  // dispatcher's Module defines once the driver is resolved and `.if` answers
+  // once every Module's Symbols are known — see
+  // docs/decisions/0229-no-window-has-a-base.md.
+  std::uint32_t const unitBytes = project.target.unitBytes();
+  std::string routineText = fmt::format( "ngaFramesHeld = {}\n"
+                                         "ngaUnitBytes = {}\n"
+                                         "ngaEntrySize = {}\n"
+                                         "ngaBlockSize = {}\n"
+                                         "ngaFrameHeader = {} + ngaSelects\n",
+                                         project.framesHeld ? 1 : 0,
+                                         unitBytes,
+                                         transitionEntrySize( unitBytes ),
+                                         frameBlockSize( unitBytes ),
+                                         frameHeaderSize( project.framesHeld ) );
   routineText += ROUTINE_SOURCE;
   if ( takesColdStart( project ) )
   {
@@ -429,17 +527,7 @@ void addTransitionModules( Project& project, diag::SourceManager& sources, diag:
                                                               .outsideWindow = true } );
   project.transitionRoutine = routineModule;
 
-  // The Cell: its pseudo-source is the one name it exports, so that the
-  // Symbol's name is text the SourceManager owns like every other name.
-  diag::FileId const cellFile = sources.addFile( "<nga>/cell", std::string{ CELL_NAME } );
-  // Outside the Window, as every Cell is: the routine writes it with the
-  // driver's stream open, which on a mapped driver is a Bank in.
-  ModuleIndex const cellModule = addModule( ProjectModule{ .name = "nga.cell",
-                                                           .file = cellFile,
-                                                           .residency = {},
-                                                           .generated = Generated::TRANSITION_CELL,
-                                                           .outsideWindow = true } );
-  project.transitionCell = cellModule;
+  ModuleIndex const cellModule = addCell();
 
   // Nothing declares Residency: the generator lists what it added in every
   // Phase's needs and lets the derivation say the rest.
@@ -456,7 +544,7 @@ Module buildGeneratedModule( diag::SourceManager const& sources, ProjectModule c
   Module module{ entry.name, entry.file, entry.residency };
   diag::SourceSpan const span{ .begin = sources.locationOf( entry.file, 0 ), .length = 0 };
 
-  Section section{ PlacementClass::ABSOLUTE, nullptr, nullptr, nullptr, false, false, SectionKind::PLAIN, span };
+  Section section{ syntax::PlacementClass::ABSOLUTE, nullptr, nullptr, nullptr, false, SectionKind::PLAIN, span };
   section.appendChunk( TransitionCellContent{}, span, {} );
   SectionIndex const index = module.addSection( std::move( section ) );
 
@@ -491,9 +579,10 @@ loadSetOf( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex t
     for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
     {
       // A Pane's Section is loaded once, by the Container into its Bank, and
-      // no edge copies it — see docs/decisions/0054-panes.md.
+      // no edge copies it — see docs/decisions/0054-panes.md — and so is one
+      // in a unit set.
       Section const& section = one.sections()[index];
-      if ( section.emitsBytes() && !section.pane().has_value() && ( !kept || section.isMovable() ) )
+      if ( section.emitsBytes() && !section.inMedium() && !kept )
       {
         loaded.push_back( SectionRef{ .module = module, .section = SectionIndex{ index } } );
       }
@@ -518,15 +607,16 @@ void resolveTransitions( diag::SourceManager const& sources,
 
   // What a Frame can count: an edge loading more Sections than a byte holds
   // is refused here, where the edge is, whether or not a statement takes it.
-  for ( std::uint32_t from = 0; from < graph.phases.size(); ++from )
+  // Without storage an edge loads nothing and has no Frame to count in.
+  for ( std::uint32_t from = 0; project.target.hasStorage() && from < graph.phases.size(); ++from )
   {
     for ( PhaseIndex const next : graph.phases[from].then )
     {
       std::vector<SectionRef> const loaded = loadSetOf( graph, PhaseIndex{ from }, next, modules );
       if ( loaded.size() > MOST_BLOCKS )
       {
-        std::string const fromName = graph.phases[from].name.value_or( "(implicit)" );
-        std::string const toName = graph.phases[next.value].name.value_or( "(implicit)" );
+        std::string const fromName = graph.phases[from].displayName();
+        std::string const toName = graph.phases[next.value].displayName();
         std::string key = fromName;
         key += ' ';
         key += toName;
@@ -543,6 +633,11 @@ void resolveTransitions( diag::SourceManager const& sources,
   // statement takes is a Phase that nothing can enter, and Prune will drop
   // it, so the author is told here, where the mirror finding is raised.
   std::vector<std::vector<bool>> taken( graph.phases.size(), std::vector<bool>( graph.phases.size(), false ) );
+
+  // The Phases a `.transition` naming no Phase may run in. Which edge it
+  // meant is not known, so none of theirs is said to be taken by nothing:
+  // the misspelt name is the one finding.
+  std::vector<bool> misnamedIn( graph.phases.size(), false );
 
   for ( Module& module : modules )
   {
@@ -574,6 +669,10 @@ void resolveTransitions( diag::SourceManager const& sources,
           sink.add( diag::diagnostic( diag::DiagnosticId::TRANSITION_TO_UNKNOWN_PHASE )
                         .at( transition->name.location, transition->name.length )
                         .arg( "phase", std::string{ name } ) );
+          for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
+          {
+            misnamedIn[phase] = misnamedIn[phase] || module.residency().includes( PhaseIndex{ phase } );
+          }
           continue;
         }
 
@@ -593,19 +692,22 @@ void resolveTransitions( diag::SourceManager const& sources,
             sink.add( diag::diagnostic( diag::DiagnosticId::TRANSITION_WITHOUT_EDGE )
                           .at( transition->name.location, transition->name.length )
                           .arg( "to", std::string{ name } )
-                          .arg( "from", graph.phases[phase].name.value_or( "(implicit)" ) ) );
+                          .arg( "from", graph.phases[phase].displayName() ) );
             complete = false;
           }
         }
         if ( complete )
         {
           transition->target = target;
-          for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
+        }
+        // The statement stands in every Phase of its Module, so each of
+        // those with the edge has a statement that takes it, whether or not
+        // another Phase lacks the edge and refused the statement.
+        for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
+        {
+          if ( module.residency().includes( PhaseIndex{ phase } ) )
           {
-            if ( module.residency().includes( PhaseIndex{ phase } ) )
-            {
-              taken[phase][target->value] = true;
-            }
+            taken[phase][target->value] = true;
           }
         }
       }
@@ -616,12 +718,12 @@ void resolveTransitions( diag::SourceManager const& sources,
   {
     for ( PhaseIndex const to : graph.phases[from].then )
     {
-      if ( taken[from][to.value] )
+      if ( taken[from][to.value] || misnamedIn[from] )
       {
         continue;
       }
-      std::string const fromName = graph.phases[from].name.value_or( "(implicit)" );
-      std::string const toName = graph.phases[to.value].name.value_or( "(implicit)" );
+      std::string const fromName = graph.phases[from].displayName();
+      std::string const toName = graph.phases[to.value].displayName();
       std::string key = fromName;
       key += ' ';
       key += toName;
@@ -680,6 +782,14 @@ std::optional<SymbolRef> entrySymbolOf( PhaseGraph const& graph, PhaseIndex phas
   return SymbolRef{ .module = lookup.home, .index = static_cast<std::uint32_t>( lookup.found - table.data() ) };
 }
 
+std::optional<std::uint32_t> startAddressOf( Placed const& build, diag::DiagnosticSink& sink )
+{
+  PhaseIndex const entry = build.phases().entry;
+  diag::SeverityPolicy quietPolicy;
+  diag::DiagnosticSink quiet{ quietPolicy };
+  return entryAddressOf( build, entry, isEnteredByAnEdge( build.phases(), entry ) ? quiet : sink );
+}
+
 std::optional<std::uint32_t> entryAddressOf( Placed const& build, PhaseIndex phase, diag::DiagnosticSink& sink )
 {
   GlobalSymbols const& symbols = build.symbols();
@@ -687,7 +797,7 @@ std::optional<std::uint32_t> entryAddressOf( Placed const& build, PhaseIndex pha
   Sizes const& sizes = build.sizes();
   Phase const& entered = build.phases().phases[phase.value];
   std::string const name = entered.entry.value_or( "entry" );
-  std::string const phaseName = entered.name.value_or( "(implicit)" );
+  std::string const phaseName = entered.displayName();
 
   auto const [found, home, ambiguous] = lookupEntry( build.phases(), phase, symbols );
 
@@ -722,9 +832,7 @@ std::optional<std::uint32_t> entryAddressOf( Placed const& build, PhaseIndex pha
   {
     return std::nullopt;
   }
-  // Where the Section stands in the Phase entered, which for a Movable one
-  // is the only address that means anything here.
-  return layout.addressIn( where, phase ) + sizes.offsetOf( where, position.chunk );
+  return layout.addressOf( where ) + sizes.offsetOf( where, position.chunk );
 }
 
 EntryAddresses::EntryAddresses( Placed const& build, diag::DiagnosticSink& sink )
@@ -748,7 +856,7 @@ bool isEnteredByAnEdge( PhaseGraph const& graph, PhaseIndex phase )
       graph.phases, [phase]( Phase const& from ) { return std::ranges::find( from.then, phase ) != from.then.end(); } );
 }
 
-std::uint32_t sizeOfTransition( Residency const& residency )
+std::uint32_t sizeOfTransition( Residency const& residency, std::uint32_t unitBytes )
 {
   std::uint32_t phases = 0;
   for ( std::uint32_t phase = 0; phase < residency.phaseCount(); ++phase )
@@ -758,44 +866,62 @@ std::uint32_t sizeOfTransition( Residency const& residency )
       ++phases;
     }
   }
-  return TRANSITION_HEADER_SIZE + ( TRANSITION_ENTRY_SIZE * phases );
+  return TRANSITION_HEADER_SIZE + ( transitionEntrySize( unitBytes ) * phases );
 }
 
-std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows, bool held )
+std::uint32_t
+sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t headerBytes, std::uint32_t unitBytes )
 {
-  return frameHeaderSize( held ) + ( FRAME_BLOCK_SIZE * payloads ) + 1 + ( CELL_WRITE_SIZE * cellWrites ) + windows;
+  return headerBytes + ( frameBlockSize( unitBytes ) * payloads ) + 1 + ( CELL_WRITE_SIZE * cellWrites );
 }
 
-std::vector<WindowIndex> baseOrderOf( Project const& project )
+std::uint32_t frameHeaderSizeOf( Project const& project )
 {
-  std::vector<WindowIndex> order;
-  std::optional<WindowIndex> const stream = project.driver.has_value() ? project.driver->stream : std::nullopt;
-  // A Window with no base is left switched, so there is nothing to put back
-  // and nothing for a Frame to say about it — see
-  // docs/decisions/0217-a-window-without-a-base-is-switched-and-never-restored.md.
-  auto const hasBase = [&project]( std::uint32_t index ) { return project.target.windows[index].base.has_value(); };
-  for ( std::uint32_t index = 0; index < project.target.windows.size(); ++index )
+  bool const selects = project.driver.has_value() && project.driver->select.has_value();
+  return frameHeaderSize( project.framesHeld ) + ( selects ? 1 : 0 );
+}
+
+std::uint32_t romsOf( Project const& project, PhaseIndex phase )
+{
+  std::uint32_t set = 0;
+  if ( !project.driver.has_value() )
   {
-    if ( stream != WindowIndex{ index } && hasBase( index ) )
+    return set;
+  }
+  std::vector<ModuleIndex> const& needs = project.phases.phases[phase.value].needs;
+  for ( std::size_t bit = 0; bit < project.driver->roms.size(); ++bit )
+  {
+    std::optional<ModuleIndex> const module = project.driver->roms[bit].module;
+    if ( module.has_value() && std::ranges::find( needs, *module ) != needs.end() )
     {
-      order.push_back( WindowIndex{ index } );
+      set |= 1U << bit;
     }
   }
-  if ( stream.has_value() && hasBase( stream->value ) )
+  return set;
+}
+
+std::uint32_t stateBytesOf( Project const& project, WindowIndex window )
+{
+  if ( !project.driver.has_value() || window.value >= project.driver->windows.size() )
   {
-    order.push_back( *stream );
+    return 1;
   }
-  return order;
+  return project.driver->windows[window.value].stateBytes;
+}
+
+bool fillsNamedStates( Project const& project, WindowIndex window )
+{
+  return project.container == Container::XEX && project.driver.has_value() && project.driver->stream == window;
 }
 
 std::string nameOfFrame( PhaseGraph const& graph, std::optional<PhaseIndex> from, PhaseIndex to )
 {
-  std::string const entered = graph.phases[to.value].name.value_or( "(implicit)" );
+  std::string const entered = graph.phases[to.value].displayName();
   if ( !from.has_value() )
   {
     return "frame into " + entered;
   }
-  return "frame " + graph.phases[from->value].name.value_or( "(implicit)" ) + " -> " + entered;
+  return "frame " + graph.phases[from->value].displayName() + " -> " + entered;
 }
 
 void writeTransition( TransitionContent const& content,
@@ -804,7 +930,21 @@ void writeTransition( TransitionContent const& content,
                       Storage const& storage,
                       std::span<std::uint8_t> into )
 {
+  // Without storage the statement is a jump to the stub of the Phase it
+  // enters, which is everything a Frame would have said, written as code.
+  if ( !build.project().target.hasStorage() )
+  {
+    std::uint32_t const stub =
+        content.target.has_value()
+            ? addressOfExported( build.symbols(), entryStubName( *content.target ), build.sizes(), build.layout() )
+                  .value_or( 0 )
+            : 0;
+    putByte( into, 0, 0x4C ); // jmp
+    putWord( into, 1, stub );
+    return;
+  }
   Residency const& residency = build.symbols().moduleAt( home ).residency();
+  std::uint32_t const unitBytes = build.project().target.unitBytes();
   std::uint32_t const routine =
       addressOfExported( build.symbols(), TRANSITION_ROUTINE_NAME, build.sizes(), build.layout() ).value_or( 0 );
   putByte( into, 0, 0x20 ); // jsr
@@ -828,9 +968,9 @@ void writeTransition( TransitionContent const& content,
     bool const known = frame.has_value() && storage.isFramePlaced( *frame );
     StorageAddress const waits = known ? storage.frameAddressOf( *frame ) : StorageAddress{};
     putByte( into, at, phase );
-    putByte( into, at + 1, known ? waits.bank.value : 0 );
-    putWord( into, at + 2, known ? waits.offset : 0 );
-    at += TRANSITION_ENTRY_SIZE;
+    putNumber( into, at + 1, known ? waits.bank.value : 0, unitBytes );
+    putWord( into, at + 1 + unitBytes, known ? waits.offset : 0 );
+    at += transitionEntrySize( unitBytes );
     ++entries;
   }
   putByte( into, 4, entries );
@@ -839,28 +979,13 @@ void writeTransition( TransitionContent const& content,
 std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Storage const& storage )
 {
   Layout const& layout = build.layout();
-  std::span<Module const> const modules = build.modules();
-  std::optional<PhaseIndex> const from = storage.frameFrom( frame );
-  PhaseIndex const to = storage.frameTo( frame );
 
-  // What the edge copies: everything it may have to, less a Movable Section
-  // the Phase left already holds where the entered one wants it. The Frame
-  // was sized for all of them, and a shorter list leaves the rest unread.
+  // What the edge copies: its load set.
   std::vector<EdgeBlock> blocks;
   for ( SectionRef const payload : storage.framePayloadsOf( frame ) )
   {
     // Sized for the whole load set; what is listed is what Prune kept.
     if ( !build.reachable().includes( payload ) )
-    {
-      continue;
-    }
-    Section const& section = modules[payload.module.value].sectionAt( payload.section );
-    // The cold start comes from no Phase, so nothing is already held: every
-    // block of it is copied.
-    bool const held = from.has_value() && section.isMovable() &&
-                      modules[payload.module.value].residency().includes( *from ) && layout.isPlaced( payload ) &&
-                      layout.addressIn( payload, *from ) == layout.addressIn( payload, to );
-    if ( held )
     {
       continue;
     }
@@ -881,11 +1006,11 @@ std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Stor
 
   // The block that lends the routine its list of descriptors goes last. It is
   // the longest of them, and it serves only if it is longer than the list —
-  // six bytes a block — which an edge of many short Sections may leave nobody
+  // a block's bytes for each — which an edge of many short Sections may leave nobody
   // able to do. What is compared is the **stored form**, never the longer of
   // the two, so a block with room for the list as it waits has room for it
   // once turned back, whichever decoder turns it.
-  auto const need = static_cast<std::uint32_t>( FRAME_BLOCK_SIZE * blocks.size() );
+  auto const need = static_cast<std::uint32_t>( frameBlockSize( build.project().target.unitBytes() ) * blocks.size() );
   std::optional<std::size_t> lender;
   std::uint32_t largest = 0;
   for ( std::size_t index = 0; index < blocks.size(); ++index )
@@ -911,18 +1036,46 @@ std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Stor
   return blocks;
 }
 
-std::vector<std::uint8_t>
-frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, EntryAddresses& entries )
+namespace
+{
+
+/// The Cells entering `phase` rewrites, each with what it is written: every
+/// Slot with an Implementation live there gets its Cell set to that
+/// Implementation's address. A `vector` Cell keeps its `jmp` and is written
+/// one byte in. A Frame and an entry stub write the same.
+std::vector<std::pair<std::uint32_t, std::uint32_t>> cellWritesOf( Placed const& build, PhaseIndex phase )
 {
   GlobalSymbols const& symbols = build.symbols();
   Layout const& layout = build.layout();
-  std::span<Module const> const modules = build.modules();
-  std::vector<SymbolRef> const slots = slotsOf( modules );
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> writes;
+  for ( SymbolRef const slot : slotsOf( build.modules() ) )
+  {
+    auto const& declaration = std::get<SlotDeclaration>( symbols.at( slot ).value );
+    std::optional<SymbolRef> const live = implementationIn( symbols, slot, phase );
+    if ( !declaration.cell.has_value() || !live.has_value() || !layout.isPlaced( *declaration.cell ) )
+    {
+      continue;
+    }
+    std::uint32_t const cell =
+        layout.addressOf( *declaration.cell ) + ( declaration.binding == syntax::Binding::VECTOR ? 1 : 0 );
+    writes.emplace_back( cell, addressOfImplementation( build, *live ).value_or( 0 ) );
+  }
+  return writes;
+}
+
+} // namespace
+
+std::vector<std::uint8_t>
+frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, EntryAddresses& entries )
+{
+  Layout const& layout = build.layout();
 
   std::vector<std::uint8_t> bytes( storage.frameSizeOf( frame ), 0 );
   std::span<std::uint8_t> const into{ bytes };
   std::size_t at = 0;
   PhaseIndex const to = storage.frameTo( frame );
+  std::uint32_t const unitBytes = build.project().target.unitBytes();
+  std::uint32_t const blockSize = frameBlockSize( unitBytes );
 
   std::vector<EdgeBlock> const blocks = edgeBlocksOf( frame, build, storage );
 
@@ -935,10 +1088,10 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
   if ( build.project().framesHeld )
   {
     bool const lent = !blocks.empty() && layout.isPlaced( blocks.back().payload ) &&
-                      storage.sizeOf( blocks.back().payload, blocks.back().piece ) >= FRAME_BLOCK_SIZE * blocks.size();
+                      storage.sizeOf( blocks.back().payload, blocks.back().piece ) >= blockSize * blocks.size();
     putWord( into,
              at,
-             lent ? layout.addressIn( blocks.back().payload, to ) +
+             lent ? layout.addressOf( blocks.back().payload ) +
                         storage.landingOf( blocks.back().payload, blocks.back().piece )
                   : 0 );
     at += FRAME_HELD_SIZE;
@@ -947,40 +1100,33 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
   putByte( into, at + 2, static_cast<std::uint32_t>( blocks.size() ) );
   at += FRAME_HEADER_SIZE;
 
+  // The ROMs the entered Phase needs, which the routine hands the driver
+  // before the first block lands, since a Payload for RAM under a ROM lands
+  // only once the ROM is out — see docs/decisions/0229-no-window-has-a-base.md.
+  if ( build.project().driver.has_value() && build.project().driver->select.has_value() )
+  {
+    putByte( into, at, romsOf( build.project(), to ) );
+    at += 1;
+  }
+
   for ( auto const& [payload, piece] : blocks )
   {
     bool const known = storage.isPlaced( payload, piece ) && layout.isPlaced( payload );
     StorageAddress const waits = known ? storage.addressOf( payload, piece ) : StorageAddress{};
-    putByte( into, at, known ? waits.bank.value : 0 );
-    putWord( into, at + 1, known ? waits.offset : 0 );
+    putNumber( into, at, known ? waits.bank.value : 0, unitBytes );
+    putWord( into, at + unitBytes, known ? waits.offset : 0 );
     // Where the decoder's output lands: the Section's address in the Phase
     // entered plus how far into it this piece begins, which is Storage's
     // answer because the Payload was made from the initialised extent and not
-    // from the Section. Per edge, since a Movable Section lands where the
-    // entered Phase holds it; the stored size travels with the form.
-    putWord( into, at + 3, known ? layout.addressIn( payload, to ) + storage.landingOf( payload, piece ) : 0 );
-    putByte( into, at + 5, known ? storage.transformOf( payload ) : TRANSFORM_COPY );
-    at += FRAME_BLOCK_SIZE;
+    // from the Section; the stored size travels with the form.
+    putWord( into, at + unitBytes + 2, known ? layout.addressOf( payload ) + storage.landingOf( payload, piece ) : 0 );
+    putByte( into, at + unitBytes + 4, known ? storage.transformOf( payload ) : TRANSFORM_COPY );
+    at += blockSize;
   }
 
-  // The Cells: every Slot with an Implementation live in the Phase entered
-  // gets its Cell rewritten to that Implementation's address there. A
-  // `vector` Cell keeps its `jmp` and is written one byte in. The Frame was
-  // sized for every Slot, and a shorter list leaves the rest unread.
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> writes;
-  for ( SymbolRef const slot : slots )
-  {
-    auto const& declaration = std::get<SlotDeclaration>( symbols.at( slot ).value );
-    std::optional<SymbolRef> const live = implementationIn( symbols, slot, to );
-    if ( !declaration.cell.has_value() || !live.has_value() || !layout.isPlaced( *declaration.cell ) )
-    {
-      continue;
-    }
-    std::uint32_t const cell =
-        layout.addressOf( *declaration.cell ) + ( declaration.binding == Binding::VECTOR ? 1 : 0 );
-    std::uint32_t const value = addressOfImplementation( build, *live, to ).value_or( 0 );
-    writes.emplace_back( cell, value );
-  }
+  // The Cells. The Frame was sized for every Slot, and a shorter list leaves
+  // the rest unread.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> const writes = cellWritesOf( build, to );
   putByte( into, at, static_cast<std::uint32_t>( writes.size() ) );
   at += 1;
   for ( auto const& [cell, value] : writes )
@@ -988,15 +1134,6 @@ frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, Ent
     putWord( into, at, cell );
     putWord( into, at + 2, value );
     at += CELL_WRITE_SIZE;
-  }
-
-  // The bases the entered Phase gives every Window, in the order the routine
-  // shows them; a Window with no base at all gets zero, which its driver is
-  // never handed since the routine shows nothing for it.
-  for ( WindowIndex const window : baseOrderOf( build.project() ) )
-  {
-    putByte( into, at, baseIn( build.project(), to, window ).value_or( 0 ) );
-    at += 1;
   }
   return bytes;
 }
@@ -1006,8 +1143,8 @@ void writeSlotCell( SlotCellContent const& content, Placed const& build, std::sp
   PhaseGraph const& graph = build.phases();
   SymbolRef const slot{ .module = content.module, .index = content.symbol };
   std::optional<SymbolRef> const live = implementationIn( build.symbols(), slot, graph.entry );
-  std::uint32_t const value = live.has_value() ? addressOfImplementation( build, *live, graph.entry ).value_or( 0 ) : 0;
-  if ( content.binding == Binding::VECTOR )
+  std::uint32_t const value = live.has_value() ? addressOfImplementation( build, *live ).value_or( 0 ) : 0;
+  if ( content.binding == syntax::Binding::VECTOR )
   {
     putByte( into, 0, 0x4C ); // jmp
     putWord( into, 1, value );
@@ -1019,6 +1156,207 @@ void writeSlotCell( SlotCellContent const& content, Placed const& build, std::sp
 void writeCell( Placed const& build, std::span<std::uint8_t> into )
 {
   putByte( into, 0, build.phases().entry.value );
+}
+
+std::string entryStubName( PhaseIndex phase )
+{
+  return std::string{ ENTRY_STUB_PREFIX } + std::to_string( phase.value );
+}
+
+namespace
+{
+
+/// `lda #imm`, `sta abs`, `jsr abs` and `jmp abs`, and how long each is.
+constexpr std::uint8_t LDA_IMMEDIATE = 0xA9;
+constexpr std::uint8_t STA_ABSOLUTE = 0x8D;
+constexpr std::uint8_t JSR = 0x20;
+constexpr std::uint8_t JMP = 0x4C;
+constexpr std::uint32_t SELECT_SIZE = 5;
+constexpr std::uint32_t SLOT_WRITE_SIZE = 10;
+constexpr std::uint32_t PHASE_WRITE_SIZE = 5;
+
+bool selectsRoms( Project const& project )
+{
+  return project.driver.has_value() && project.driver->select.has_value();
+}
+
+} // namespace
+
+std::uint32_t sizeOfEntryStub( Project const& project, std::uint32_t slots )
+{
+  return ( selectsRoms( project ) ? SELECT_SIZE : 0 ) + ( SLOT_WRITE_SIZE * slots ) + PHASE_WRITE_SIZE +
+         TRANSITION_JUMP_SIZE;
+}
+
+void addEntryStubs( diag::SourceManager& sources,
+                    Project& project,
+                    std::vector<Module>& modules,
+                    diag::DiagnosticSink& sink )
+{
+  if ( project.target.hasStorage() || !project.transitionCell.has_value() )
+  {
+    return;
+  }
+  PhaseGraph& graph = project.phases;
+  std::size_t const phaseCount = graph.phases.size();
+
+  // Where each Phase is entered from: every Phase in which a statement that
+  // enters it may run, which is the Residency of the statement's Module.
+  std::vector<Residency> takenIn( phaseCount, Residency{ phaseCount } );
+  std::vector<bool> entered( phaseCount, false );
+  for ( Module const& module : modules )
+  {
+    for ( Section const& section : module.sections() )
+    {
+      for ( Chunk const& chunk : section.chunks() )
+      {
+        auto const* const transition = std::get_if<TransitionContent>( &chunk.content );
+        if ( transition == nullptr || !transition->target.has_value() )
+        {
+          continue;
+        }
+        std::uint32_t const target = transition->target->value;
+        entered[target] = true;
+        for ( std::uint32_t phase = 0; phase < phaseCount; ++phase )
+        {
+          if ( module.residency().includes( PhaseIndex{ phase } ) )
+          {
+            takenIn[target].add( PhaseIndex{ phase } );
+          }
+        }
+      }
+    }
+  }
+  if ( std::ranges::none_of( entered, []( bool one ) { return one; } ) )
+  {
+    return;
+  }
+
+  auto const list = [&project, phaseCount]( ModuleIndex index, Residency const& residency )
+  {
+    for ( std::uint32_t phase = 0; phase < phaseCount; ++phase )
+    {
+      if ( residency.includes( PhaseIndex{ phase } ) )
+      {
+        addOnce( project.phases.phases[phase].needs, index );
+      }
+    }
+  };
+
+  // The driver's `select`, which a stub calls since Patch writes a stub's
+  // bytes and cannot expand a macro into them. Where the driver is, which is
+  // not in a `final` Phase other than the entry — see
+  // docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  if ( selectsRoms( project ) )
+  {
+    std::string source = "; The driver's `select`, wrapped so that a Phase's stub has an address to\n"
+                         "; call. See docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.\n"
+                         ".export ";
+    source += SELECT_ROMS_NAME;
+    source += "\n.proc ";
+    source += SELECT_ROMS_NAME;
+    source += "\n        nga.select\n        rts\n.endp\n";
+    addAssembledModule( sources, project, modules, "nga.roms", std::move( source ), notFinal( project.phases ), sink );
+  }
+
+  // A stub per Phase entered. It holds bytes the Container writes at load and
+  // nothing writes again, so it is present where a statement into its Phase
+  // runs and in every Phase from which one of those is reached, which is what
+  // keeps any edge from having to bring it.
+  for ( std::uint32_t phase = 0; phase < phaseCount; ++phase )
+  {
+    if ( !entered[phase] )
+    {
+      continue;
+    }
+    Residency const present = liveAcross( graph, takenIn[phase] );
+    std::string const name = entryStubName( PhaseIndex{ phase } );
+    diag::FileId const file = sources.addFile( "<nga>/" + name, name );
+    diag::SourceSpan const span{ .begin = sources.locationOf( file, 0 ), .length = 0 };
+    std::string const moduleName = "nga.into." + graph.phases[phase].name.value_or( std::to_string( phase ) );
+    Module module{ moduleName, file, present };
+    Section section{ syntax::PlacementClass::ABSOLUTE, nullptr, nullptr, nullptr, false, SectionKind::PLAIN, span };
+    section.appendChunk( PhaseEntryContent{ .phase = PhaseIndex{ phase } }, span, {} );
+    SectionIndex const at = module.addSection( std::move( section ) );
+    diag::SourceSpan const label{ .begin = sources.locationOf( file, 0 ),
+                                  .length = static_cast<std::uint32_t>( name.size() ) };
+    module.symbols().add(
+        Symbol{ .name = sources.textOf( label ),
+                .kind = SymbolKind::LABEL,
+                .definition = label,
+                .exported = true,
+                .value = LabelPosition{ .section = at, .chunk = ChunkIndex{ 0 }, .inner = std::nullopt } } );
+    module.keepOutsideWindow();
+    ModuleIndex const index{ static_cast<std::uint32_t>( modules.size() ) };
+    modules.push_back( std::move( module ) );
+    project.modules.push_back( ProjectModule{ .name = moduleName,
+                                              .file = file,
+                                              .residency = present,
+                                              .generated = Generated::ENTRY_STUB,
+                                              .outsideWindow = true } );
+    list( index, present );
+  }
+}
+
+void writeEntryStub( PhaseEntryContent const& content,
+                     Placed const& build,
+                     std::optional<std::uint32_t> entry,
+                     std::span<std::uint8_t> into )
+{
+  GlobalSymbols const& symbols = build.symbols();
+  Layout const& layout = build.layout();
+  std::size_t at = 0;
+  auto const op = [&into, &at]( std::uint8_t opcode, std::uint32_t operand, std::uint32_t width )
+  {
+    putByte( into, at, opcode );
+    if ( width == 1 )
+    {
+      putByte( into, at + 1, operand );
+    }
+    else
+    {
+      putWord( into, at + 1, operand );
+    }
+    at += 1 + width;
+  };
+
+  // The ROMs first, as the routine hands them over before anything of the
+  // Phase lands — see docs/decisions/0229-no-window-has-a-base.md.
+  if ( selectsRoms( build.project() ) )
+  {
+    op( LDA_IMMEDIATE, romsOf( build.project(), content.phase ), 1 );
+    op( JSR, addressOfExported( symbols, SELECT_ROMS_NAME, build.sizes(), layout ).value_or( 0 ), 2 );
+  }
+
+  // The Cells the Frame would have written.
+  for ( auto const& [cell, value] : cellWritesOf( build, content.phase ) )
+  {
+    op( LDA_IMMEDIATE, value, 1 );
+    op( STA_ABSOLUTE, cell, 2 );
+    op( LDA_IMMEDIATE, value >> 8U, 1 );
+    op( STA_ABSOLUTE, cell + 1, 2 );
+  }
+
+  op( LDA_IMMEDIATE, content.phase.value, 1 );
+  op( STA_ABSOLUTE, addressOfExported( symbols, CELL_NAME, build.sizes(), layout ).value_or( 0 ), 2 );
+  op( JMP, entry.value_or( 0 ), 2 );
+}
+
+std::string underGlueName( std::string_view format )
+{
+  return "ngaUnder" + loadGlueName( format ).substr( std::string_view{ "nga" }.size() );
+}
+
+std::string loadGlueName( std::string_view format )
+{
+  std::string name{ "ngaUnpack" };
+  std::size_t const first = name.size();
+  name += format;
+  if ( name.size() > first && name[first] >= 'a' && name[first] <= 'z' )
+  {
+    name[first] = static_cast<char>( name[first] - 'a' + 'A' );
+  }
+  return name;
 }
 
 } // namespace nga::model

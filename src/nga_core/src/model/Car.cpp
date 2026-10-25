@@ -104,14 +104,14 @@ ngaCartStart
         .byte $04               ; $BFFD: started through $BFFA, no disk boot,
                                 ; and not the diagnostic cartridge bit 7 would
                                 ; make it
-        .root
+        .root cartinit
         .word ngaCartInit       ; $BFFE: called in the middle of the cold start
 .ends
 
 ; The init vector points here and here does nothing on purpose: it is called
 ; before the OS has finished its own cold start and before E: exists, so
 ; anything run there would run in a machine half set up.
-.proc ngaCartInit, root
+.proc ngaCartInit
         rts
 .endp
 )asm";
@@ -126,19 +126,10 @@ std::string cartHeaderSource()
 void addCartHeader( Project& project, diag::SourceManager& sources )
 {
   diag::FileId const file = sources.addFile( "<nga>/cart.asm", cartHeaderSource() );
-  ModuleIndex const index{ static_cast<std::uint32_t>( project.modules.size() ) };
-  project.modules.push_back( ProjectModule{
-      .name = std::string{ CART_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
-  for ( Phase& phase : project.phases.phases )
-  {
-    phase.needs.push_back( index );
-  }
-  deriveResidency( project );
-}
-
-std::span<Cartridge const> cartridges()
-{
-  return CARTRIDGES;
+  addToolModule(
+      project,
+      ProjectModule{
+          .name = std::string{ CART_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
 }
 
 std::optional<Cartridge> cartridgeNamed( std::string_view name )
@@ -172,8 +163,7 @@ CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink )
   // A Project whose Container is a `.car` has a board: one that named none was
   // refused where the document was read, and an error there stops the build
   // long before this.
-  std::optional<Cartridge> const board =
-      project.cartridge.has_value() ? cartridgeNamed( *project.cartridge ) : std::nullopt;
+  std::optional<Cartridge> const& board = project.cartridge;
   if ( !board.has_value() )
   {
     return {};
@@ -223,7 +213,7 @@ CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink )
       // A Pane's Section stands in a Bank and a Payload waits in one, and both
       // are written above: what storage holds is one space and the writer
       // knows it by position, not by address.
-      if ( section.pane().has_value() || build.storage().hasPayload( where ) )
+      if ( section.inMedium() || build.storage().hasPayload( where ) )
       {
         continue;
       }
@@ -235,7 +225,7 @@ CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink )
       {
         sink.add( diag::diagnostic( diag::DiagnosticId::CAR_SECTION_OUTSIDE_ROM )
                       .at( section.span().begin, section.span().length )
-                      .arg( "section", one.displayNameOf( where.section, build.sources() ) )
+                      .arg( "section", one.displayNameOf( where.section ) )
                       .arg( "address", static_cast<std::int64_t>( address ) )
                       .arg( "name", std::string{ board->name } )
                       .arg( "range", rangeText( board->fixed ) ) );
@@ -255,35 +245,22 @@ CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink )
     return {};
   }
 
-  // Where the cold start's Frame waits, into the three bytes its stub reads:
-  // nothing knows them until every Payload has been placed, which is why they
-  // are patched here and not written into the Module's own text.
+  // Where the cold start's Frame waits is in the bytes its stub reads already:
+  // `patchColdFrame` wrote it there before any Container was, and the fixed
+  // part was copied from those bytes. A Frame without the stub, or the stub
+  // without a Frame, is a header this Container cannot finish.
   std::optional<FrameIndex> const cold = build.storage().frameOf( std::nullopt, project.phases.entry );
-  std::optional<std::uint32_t> const coldAt = addressOfExported( symbols, COLD_FRAME_NAME, sizes, layout );
-  if ( cold.has_value() != coldAt.has_value() )
+  if ( cold.has_value() != addressOfExported( symbols, COLD_FRAME_NAME, sizes, layout ).has_value() )
   {
     sink.add( diag::diagnostic( diag::DiagnosticId::CAR_WITHOUT_HEADER ).sortedBy( "header" ) );
     return {};
   }
-  if ( cold.has_value() )
-  {
-    StorageAddress const at = build.storage().frameAddressOf( *cold );
-    std::uint32_t const where = board->fixedOffset + ( *coldAt - board->fixed.begin );
-    image[where] = static_cast<std::uint8_t>( at.bank.value );
-    image[where + 1] = static_cast<std::uint8_t>( at.offset & 0xFF );
-    image[where + 2] = static_cast<std::uint8_t>( ( at.offset >> 8 ) & 0xFF );
-  }
 
   // What the OS jumps through: the stub that hands the cold start's Frame to
   // the routine, where there is one, and the entry Phase's entry Label
-  // otherwise. When some edge enters the entry Phase, Patch has resolved its
-  // entry for a table and reported whatever was wrong with it.
-  diag::SeverityPolicy quietPolicy;
-  diag::DiagnosticSink quiet{ quietPolicy };
-  bool const alreadyReported = isEnteredByAnEdge( project.phases, project.phases.entry );
+  // otherwise.
   std::optional<std::uint32_t> const stub = addressOfExported( symbols, COLD_START_NAME, sizes, layout );
-  std::optional<std::uint32_t> const run =
-      stub.has_value() ? stub : entryAddressOf( build, project.phases.entry, alreadyReported ? quiet : sink );
+  std::optional<std::uint32_t> const run = stub.has_value() ? stub : startAddressOf( build, sink );
   std::optional<std::uint32_t> const start = addressOfExported( symbols, CART_START_NAME, sizes, layout );
   if ( !run.has_value() || !start.has_value() || *start < board->fixed.begin || *start + 1 >= board->fixed.end )
   {
@@ -309,7 +286,7 @@ CarFile emitCar( Patched const& build, diag::DiagnosticSink& sink )
     file.push_back( static_cast<std::uint8_t>( ( value >> 8 ) & 0xFF ) );
     file.push_back( static_cast<std::uint8_t>( value & 0xFF ) );
   }
-  file.resize( 16, 0 );
+  file.resize( CAR_HEADER_SIZE, 0 );
   file.insert( file.end(), image.begin(), image.end() );
   return CarFile{ .bytes = std::move( file ) };
 }
@@ -341,13 +318,22 @@ void checkCartridgeAgainstTarget( Cartridge const& board,
     {
       finding = std::move( finding ).note( diag::diagnostic( diag::DiagnosticId::REGION_DECLARED_HERE )
                                                .at( rom->site->begin, rom->site->length )
-                                               .arg( "region", displayNameOf( *rom ) ) );
+                                               .arg( "region", displayNameOf( *rom ) )
+                                               .arg( "kind", std::string{ "region" } ) );
     }
     sink.add( std::move( finding ) );
   }
 
+  // A board without banks has nowhere for storage to be: its image is the
+  // fixed part alone, and a unit written into it would stand over the program.
   if ( !board.isBanked() )
   {
+    if ( target.hasStorage() )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_STORAGE_WITHOUT_BANKS )
+                    .at( where.begin, where.length )
+                    .arg( "name", std::string{ board.name } ) );
+    }
     return;
   }
 

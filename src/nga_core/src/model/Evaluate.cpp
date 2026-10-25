@@ -3,6 +3,9 @@
 #include "nga/syntax/Literal.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -11,6 +14,61 @@ namespace nga::model
 
 namespace
 {
+
+// Arithmetic on the 64 bits an expression is evaluated in, where an answer
+// those bits do not hold is no answer, as a division by zero is none: each
+// checked before it is done, since a signed overflow is undefined and a
+// division of the least value by -1 traps on x86. Written out rather than
+// through a compiler's builtins, which MSVC does not have.
+constexpr std::int64_t LEAST = std::numeric_limits<std::int64_t>::min();
+constexpr std::int64_t MOST = std::numeric_limits<std::int64_t>::max();
+
+std::optional<std::int64_t> sumOf( std::int64_t a, std::int64_t b )
+{
+  if ( ( b > 0 && a > MOST - b ) || ( b < 0 && a < LEAST - b ) )
+  {
+    return std::nullopt;
+  }
+  return a + b;
+}
+
+std::optional<std::int64_t> differenceOf( std::int64_t a, std::int64_t b )
+{
+  if ( ( b < 0 && a > MOST + b ) || ( b > 0 && a < LEAST + b ) )
+  {
+    return std::nullopt;
+  }
+  return a - b;
+}
+
+std::optional<std::int64_t> productOf( std::int64_t a, std::int64_t b )
+{
+  if ( a == 0 || b == 0 )
+  {
+    return 0;
+  }
+  // The bound the other factor is held to, by the signs of the two: the
+  // quotient of the extreme the product would pass by the factor.
+  bool fits = false;
+  if ( a > 0 )
+  {
+    fits = b > 0 ? a <= MOST / b : b >= LEAST / a;
+  }
+  else
+  {
+    fits = b > 0 ? a >= LEAST / b : b >= MOST / a;
+  }
+  return fits ? std::optional{ a * b } : std::nullopt;
+}
+
+std::optional<std::int64_t> quotientOf( std::int64_t a, std::int64_t b )
+{
+  if ( b == 0 || ( a == LEAST && b == -1 ) )
+  {
+    return std::nullopt;
+  }
+  return a / b;
+}
 
 /// An intermediate result. An address is kept as its Section and an offset
 /// into it, so that `dataEnd - data` is a number after Size, before any
@@ -191,21 +249,29 @@ std::optional<Value> Evaluator::evaluateAttribute( ModuleIndex home, syntax::Exp
   }
 
   SectionRef const section = *named;
-  if ( attribute == "runtimeSectionSize" )
+  std::optional<SectionAttribute> const which = sectionAttributeNamed( attribute );
+  if ( which == SectionAttribute::RUNTIME_SECTION_SIZE )
   {
     std::optional<std::int64_t> const size = mKnown->sizeOfSection( section );
     return size.has_value() ? std::optional{ Value{ .number = *size, .section = std::nullopt } } : std::nullopt;
   }
-  if ( attribute == "runtimeSectionAddress" )
+  if ( which == SectionAttribute::RUNTIME_SECTION_ADDRESS )
   {
     return Value{ .number = 0, .section = section };
   }
-  if ( attribute == "resident" )
+  if ( which == SectionAttribute::RESIDENT )
   {
     // Read from the Module and never from a Step's result: Residency is what
     // the Project derived, and it exists before anything has been sized.
     bool const resident = mSymbols->moduleAt( section.module ).residency().isAll();
     return Value{ .number = resident ? 1 : 0, .section = std::nullopt };
+  }
+  if ( which == SectionAttribute::LINEAR_SECTION_ADDRESS || which == SectionAttribute::LINEAR_FAMILY_ADDRESS )
+  {
+    // A number and not a position of a Section: the medium's address, which
+    // no runtime address is added to.
+    std::optional<std::int64_t> const linear = mKnown->linearAddressOf( section );
+    return linear.has_value() ? std::optional{ Value{ .number = *linear, .section = std::nullopt } } : std::nullopt;
   }
   return std::nullopt;
 }
@@ -240,6 +306,10 @@ std::optional<Value> Evaluator::evaluateUnary( ModuleIndex home, syntax::Express
   switch ( node.unaryOperator )
   {
   case syntax::UnaryOperator::NEGATE:
+    if ( operand->number == LEAST )
+    {
+      return std::nullopt;
+    }
     return Value{ .number = -operand->number, .section = std::nullopt };
   case syntax::UnaryOperator::COMPLEMENT:
     return Value{ .number = ~operand->number, .section = std::nullopt };
@@ -277,12 +347,16 @@ std::optional<Value> Evaluator::evaluateBinary( ModuleIndex home, syntax::Expres
   }
 
   auto const plain = []( std::int64_t number ) { return Value{ .number = number, .section = std::nullopt }; };
+  auto const plainOf = [&plain]( std::optional<std::int64_t> number ) -> std::optional<Value>
+  { return number.has_value() ? std::optional{ plain( *number ) } : std::nullopt; };
+  auto const at = []( std::optional<SectionRef> section, std::optional<std::int64_t> number ) -> std::optional<Value>
+  { return number.has_value() ? std::optional{ Value{ .number = *number, .section = section } } : std::nullopt; };
 
   if ( node.binaryOperator == syntax::BinaryOperator::ADD && left->isAddress() != right->isAddress() )
   {
     Value const& address = left->isAddress() ? *left : *right;
     Value const& offset = left->isAddress() ? *right : *left;
-    return Value{ .number = address.number + offset.number, .section = address.section };
+    return at( address.section, sumOf( address.number, offset.number ) );
   }
 
   if ( node.binaryOperator == syntax::BinaryOperator::SUBTRACT )
@@ -295,11 +369,11 @@ std::optional<Value> Evaluator::evaluateBinary( ModuleIndex home, syntax::Expres
       {
         return std::nullopt;
       }
-      return plain( left->number - right->number );
+      return plainOf( differenceOf( left->number, right->number ) );
     }
     if ( left->isAddress() )
     {
-      return Value{ .number = left->number - right->number, .section = left->section };
+      return at( left->section, differenceOf( left->number, right->number ) );
     }
   }
 
@@ -313,15 +387,16 @@ std::optional<Value> Evaluator::evaluateBinary( ModuleIndex home, syntax::Expres
   switch ( node.binaryOperator )
   {
   case syntax::BinaryOperator::ADD:
-    return plain( *a + *b );
+    return plainOf( sumOf( *a, *b ) );
   case syntax::BinaryOperator::SUBTRACT:
-    return plain( *a - *b );
+    return plainOf( differenceOf( *a, *b ) );
   case syntax::BinaryOperator::MULTIPLY:
-    return plain( *a * *b );
+    return plainOf( productOf( *a, *b ) );
   case syntax::BinaryOperator::DIVIDE:
-    // A division by zero has no value to give. It deserves a finding of its
-    // own, and will have one when a Step exists that can carry it.
-    return *b == 0 ? std::nullopt : std::optional{ plain( *a / *b ) };
+    // A division by zero has no value to give, and neither has one whose
+    // answer 64 bits do not hold. It deserves a finding of its own, and will
+    // have one when a Step exists that can carry it.
+    return plainOf( quotientOf( *a, *b ) );
   case syntax::BinaryOperator::SELECT:
   case syntax::BinaryOperator::ARM:
     // The conditional is answered above, and an arm pair is reached only
@@ -461,6 +536,55 @@ std::optional<std::int64_t> declaredValueOf( diag::SourceManager const& sources,
                                              syntax::Expression const& node )
 {
   return evaluate( sources, symbols, charsets, home, node, nothingIsKnown() );
+}
+
+std::optional<std::int64_t> offsetPast( diag::SourceManager const& sources,
+                                        GlobalSymbols const& symbols,
+                                        Charsets const* charsets,
+                                        ModuleIndex home,
+                                        syntax::Expression const& node,
+                                        SectionRef where,
+                                        ChunkIndex chunk )
+{
+  /// A source that gives the one Label an address and nothing else an
+  /// address at all, so that an expression naming anything beside it says
+  /// nothing.
+  class AtLabel final : public ValueSource
+  {
+  public:
+    AtLabel( SectionRef where, ChunkIndex chunk, std::int64_t address )
+        : mWhere( where ), mChunk( chunk ), mAddress( address )
+    {
+    }
+
+    [[nodiscard]] std::optional<std::int64_t> addressOf( SectionRef where ) override
+    {
+      return where == mWhere ? std::optional{ mAddress } : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::int64_t>
+    offsetOf( SectionRef where, ChunkIndex chunk, std::optional<std::uint32_t> inner ) override
+    {
+      return where == mWhere && chunk == mChunk && !inner.has_value() ? std::optional{ std::int64_t{ 0 } }
+                                                                      : std::nullopt;
+    }
+
+  private:
+    SectionRef mWhere;
+    ChunkIndex mChunk;
+    std::int64_t mAddress;
+  };
+
+  constexpr std::int64_t shift = 0x10000;
+  AtLabel low{ where, chunk, 0 };
+  AtLabel high{ where, chunk, shift };
+  std::optional<std::int64_t> const atLow = evaluate( sources, symbols, charsets, home, node, low );
+  std::optional<std::int64_t> const atHigh = evaluate( sources, symbols, charsets, home, node, high );
+  if ( !atLow.has_value() || !atHigh.has_value() || *atHigh - *atLow != shift )
+  {
+    return std::nullopt;
+  }
+  return atLow;
 }
 
 } // namespace nga::model

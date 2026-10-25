@@ -2,10 +2,11 @@
 
 #include "nga/model/Build.hpp"
 #include "nga/model/Chunk.hpp"
-#include "nga/model/PlacementClass.hpp"
 #include "nga/model/Project.hpp"
 #include "nga/model/Section.hpp"
 #include "nga/model/Storage.hpp"
+#include "nga/model/Symbols.hpp"
+#include "nga/syntax/Statement.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -23,9 +24,8 @@ struct MapPlacement
   std::uint32_t size = 0;
 };
 
-/// One Section as it stands across a run of consecutive Phases at one
-/// address: a Section present in Phases 0 to 2 is one of these, a Movable
-/// one standing elsewhere in Phase 1 is three.
+/// One Section as it stands across a run of consecutive Phases: a Section
+/// present in Phases 0 to 2 is one of these, one held in 0 and 2 alone is two.
 struct MapEntry
 {
   SectionRef where;
@@ -41,10 +41,36 @@ struct MapEntry
   std::uint32_t begin = 0;
   std::uint32_t end = 0;
 
-  PlacementClass placement = PlacementClass::ABSOLUTE;
+  /// What of it holds initialised bytes, half-open and in the space `begin`
+  /// and `end` are in; empty, at `begin`, for a Section of reservations
+  /// alone. Reserved space at either end lies outside it — see
+  /// docs/decisions/0026-a-payload-is-the-initialised-extent.md.
+  std::uint32_t initialisedBegin = 0;
+  std::uint32_t initialisedEnd = 0;
+
+  /// The Constraints its text wrote, so that a reader can tell what was asked
+  /// for from what the solver chose: `at`, `align`, `within`, the Proc
+  /// `.endp then` falls into, by name, and the Regions `in` named, by name.
+  /// Read by the facts alone.
+  bool pinned = false;
+  std::optional<std::uint32_t> alignment;
+  std::optional<std::uint32_t> boundary;
+  std::string then{};
+  std::vector<std::string> regions{};
+
+  syntax::PlacementClass placement = syntax::PlacementClass::ABSOLUTE;
   SectionKind kind = SectionKind::PLAIN;
   bool root = false;
-  bool movable = false;
+
+  /// Held in Phases that do not need it, because nothing could bring its
+  /// bytes back: its Phases are the ones it is live in, not the ones that
+  /// need it — see heldAcross.
+  bool kept = false;
+
+  /// Its bytes lie under a ROM while the entry Phase has it in, and the load
+  /// moved them there — see
+  /// docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+  bool hidden = false;
 
   /// Where the Section's Payload waits, when it has one, and how it waits,
   /// and the first and last Phase it is live in — see the glossary.
@@ -64,9 +90,29 @@ struct MapEntry
   std::vector<std::string> shares;
 
   /// The Pane the Section is in, by name, and the state its Window shows it
-  /// in; empty for a Section in `fixed` or a base state.
+  /// in; empty for a Section in `fixed`.
   std::string pane{};
   std::uint32_t paneState = 0;
+
+  /// The unit set the Section stands in as the medium sees it, by name, and
+  /// then `begin` and `end` are linear addresses; empty for any other — see
+  /// docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  std::string units{};
+};
+
+/// A Section Prune dropped: it stands nowhere and waits nowhere, and what is
+/// left of it is where it was written.
+struct MapPruned
+{
+  std::string name;
+  std::string module;
+  SectionKind kind = SectionKind::PLAIN;
+
+  /// Its own text, from the directive that opened it to the one that closed
+  /// it, less every Section written inside it, which is listed for itself if
+  /// it was dropped too and stands somewhere if it was not. Empty for a
+  /// Section the tool built and wrote no text for.
+  std::vector<SymbolSite> text;
 };
 
 /// One Frame as it waits.
@@ -102,6 +148,12 @@ struct MemoryMap
 {
   std::vector<MapPhase> phases;
   std::vector<MapEntry> entries;
+
+  /// What Prune dropped, Module by Module in the order it was written. Read
+  /// by the facts alone: the text map is a map of memory, and these stand in
+  /// none of it.
+  std::vector<MapPruned> pruned;
+
   std::vector<MapFrame> frames;
   std::vector<MapBank> banks;
   Pools pools;

@@ -4,12 +4,36 @@
 #include "nga/model/Build.hpp"
 #include "nga/model/Chunk.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <utility>
 
 namespace nga::model
 {
+
+/// The second result of the Trace Step: where the hardware may hold a
+/// Section — the Phases, and the Load — which keeps its bytes where they are
+/// for that long. What the same walk finds of the Holders' flow, and read by
+/// Place — see
+/// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+class Holds
+{
+public:
+  void hold( SectionRef where, PhaseIndex phase, std::size_t phaseCount );
+  void holdAtLoad( SectionRef where );
+
+  /// The Phases some Holder may hold `where` in; none where nothing does.
+  [[nodiscard]] Residency phasesOf( SectionRef where, std::size_t phaseCount ) const;
+  [[nodiscard]] bool atLoad( SectionRef where ) const;
+
+private:
+  static std::uint64_t keyOf( SectionRef where );
+
+  std::map<std::uint64_t, Residency> mPhases;
+  std::set<std::uint64_t> mAtLoad;
+};
 
 /// The result of the Trace Step: which pairs of Sections may share addresses.
 ///
@@ -54,6 +78,9 @@ private:
 /// Section that can call itself is an error, since a second Activation would
 /// destroy the first's value. See docs/decisions/0034-trace.md and
 /// 0075-liveness-within-an-activation.md.
-Interference trace( Pruned const& build, diag::DiagnosticSink& sink );
+///
+/// The same walk follows the Holders, so the Step has two results, and the
+/// Holds are the second.
+std::pair<Interference, Holds> trace( Pruned const& build, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

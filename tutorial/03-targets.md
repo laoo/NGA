@@ -81,7 +81,7 @@ belowDos
 
 <!-- diagnostics 03-targets/pinned -->
 ```
-warning[NGA5218]: `belowDos` is pinned at $800, in the reserved region `dos`
+warning[NGA5218]: `belowDos` is pinned at $0800, in the reserved region `dos`
  --> pinned.asm:2:1
   |
 2 | .section absolute at $0800

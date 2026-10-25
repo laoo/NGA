@@ -84,10 +84,9 @@ public:
   [[nodiscard]] std::optional<AddressingMode> modeOf( SectionRef where, ChunkIndex chunk ) const;
 
   /// The inside of a macro use, by inner index: where an inner Chunk stands
-  /// from the start of the Section, how large it is, and the mode Size
-  /// settled it to. The use's own size is the sum, and its own mode nothing.
+  /// from the start of the Section, and the mode Size settled it to. The use's own size is the sum, and its own mode
+  /// nothing.
   [[nodiscard]] std::uint32_t innerOffsetOf( SectionRef where, ChunkIndex chunk, std::uint32_t inner ) const;
-  [[nodiscard]] std::uint32_t innerSizeOf( SectionRef where, ChunkIndex chunk, std::uint32_t inner ) const;
   [[nodiscard]] std::optional<AddressingMode>
   innerModeOf( SectionRef where, ChunkIndex chunk, std::uint32_t inner ) const;
 

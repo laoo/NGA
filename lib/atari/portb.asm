@@ -6,9 +6,15 @@
 ; glue, the decoders and the tool's own Procs expand where they use it as
 ; `nga.open`, `nga.read`, `nga.show` and `nga.showAt`. What the hardware
 ; calls each state of a Window is this Module's alone: `portbValues` holds
-; a PORTB value per state of `ext` — base RAM first, then one per Bank, as
-; many as the variant's `extension` counts — and the OS Window is bit 0.
-; `PORTB` is the variant's register.
+; a PORTB value per state of `ext`, one per Bank, as many as the variant's
+; `extension` counts — the last of the 130XE's five being the machine's own
+; memory, which no Window keeps as a base — see 0229. `PORTB` is the variant's
+; register.
+;
+; **The same register holds the OS ROM and BASIC**, bits 0 and 1, so this
+; driver is also what switches them: `.driver rom` names the Modules that are
+; those ROMs, and `select` is handed the set a Phase needs and writes the two
+; bits, which every switch of a Bank keeps as they are — see 0229.
 ;
 ; Resident, and outside the window — the variant lists this Module in
 ; `resident`, and the tool holds it outside the window the stream reads
@@ -17,17 +23,61 @@
 portbWindow    = $4000
 portbWindowEnd = portbWindow + $4000    ; one past the window: the high byte of the first address outside it
 portbUnitPages = $40                    ; a unit, in pages: what an offset carries by
-portbBase      = $FF                    ; base RAM in, the OS ROM in, BASIC and the self-test out
 
 .driver open    portbOpen
 .driver read    portbRead
+.driver unit    portbUnit
+.driver offset  portbPtr
 .driver stream  ext
 .driver show    ext portbShow
 .driver showAt  ext portbShowAt
-.driver show    os  portbShowOs
-.driver showAt  os  portbShowOsAt
+.driver init    portbInit
+.driver finalize portbFinalize
+.driver rom     osrom                   ; bit 0 of the set
+.driver rom     mathpack osrom          ; bit 1, which one bit of PORTB shows with the OS
+.driver rom     basic                   ; bit 2
+.driver select  portbRoms
+.driver mask    portbMask
+.driver unmask  portbUnmask
 
 .transform copy portbCopy
+
+; PORTB as the program found it, kept by `init` and put back by `finalize`: the
+; bits of BASIC and of the self-test are the user's, whatever the program does
+; with them meanwhile, and a DOS returned to expects its machine as it left it
+; — see docs/decisions/0229-no-window-has-a-base.md.
+.macro portbInit
+        lda PORTB
+        sta portbFound
+.endm
+
+.macro portbFinalize
+        lda portbFound
+        sta PORTB
+.endm
+
+.section
+portbFound      .res 1
+.ends
+
+; What the load wraps a switch of every ROM out in, while the DOS's interrupts
+; are still on: with the OS out, $FFFA is RAM the load is writing. IRQ masked,
+; and NMI, which `sei` does not reach, off at ANTIC; then back as the OS keeps
+; it, the vertical blank on — see
+; docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+NMIEN = $D40E
+
+.macro portbMask
+        sei
+        lda #0
+        sta NMIEN
+.endm
+
+.macro portbUnmask
+        lda #$40
+        sta NMIEN
+        cli
+.endm
 
 .macro portbOpen
         jsr portbOpenStream
@@ -37,43 +87,28 @@ portbBase      = $FF                    ; base RAM in, the OS ROM in, BASIC and 
         jsr portbReadByte
 .endm
 
-; The state to show, as the tool numbers ext's states: 0 is base RAM, and
-; Bank n is n + 1.
+; The state to show, as the tool numbers ext's states: Bank n is n.
 .macro portbShow state
         ldx #state
-        jsr portbSelect
+        jsr portbBank
 .endm
 
 ; X = the state to show.
 .macro portbShowAt
-        jsr portbSelect
+        jsr portbBank
 .endm
 
-; The OS Window is bit 0 of PORTB: set for the ROM, state 0, and clear for
-; the RAM beneath it, state 1. The bank bits are left as they are.
-.macro portbShowOs state
-        lda PORTB
-        and #$FE
-        ora #1 - state
-        sta PORTB
+; A = the set of ROMs the Phase needs.
+.macro portbRoms
+        jsr portbSelectRoms
 .endm
 
-; X = the state to show, 0 or 1.
-.macro portbShowOsAt
-        lda PORTB
-        ora #1
-        cpx #0
-        beq @store
-        and #$FE
-@store
-        sta PORTB
-.endm
-
-; PORTB per state of ext: base RAM, then one value per Bank. The list runs
-; to the 130XE's four and the variant's count trims it, so that a variant
-; with fewer Banks takes a prefix; one with more lists its values here.
-; Every value has bit 0 set — the OS ROM in — which is what lets
-; portbSelect keep the OS Window's bit with one `and` and no scratch byte.
+; PORTB per state of ext, one value per Bank. The list runs to the 130XE's
+; five — four of extended memory, and then $FF, the machine's own with the
+; self-test out — and the variant's count trims it, so that a variant with
+; fewer Banks takes a prefix; one with more lists its values here. Every value
+; has bits 0 and 1 set, which is what lets portbBank keep the ROMs' bits as
+; they are with one `and` and no scratch byte.
 .macro portbBankValues n, values...
 .if n > 0
 .match values
@@ -84,41 +119,69 @@ portbBase      = $FF                    ; base RAM in, the OS ROM in, BASIC and 
 .endif
 .endm
 
-; The table portbSelect indexes, in a Section of its own: what has an
+; The table portbBank indexes, in a Section of its own: what has an
 ; address stands in one, and a Proc holds code alone.
 .section
 portbValues
-        .byte portbBase
-        portbBankValues extension, $E3, $E7, $EB, $EF
+        portbBankValues extension, $E3, $E7, $EB, $EF, $FF
 .ends
 
 ; The stream: where the next byte is, and which unit is in. A plain zero-page
 ; Section rather than Temporaries, because the value has to survive between
-; one call and the next while nothing here is running.
+; one call and the next while nothing here is running. They are also the
+; cells the routine writes a position into before it opens the stream,
+; `portbPtr` the offset and `portbUnit` the unit.
 .section zeropage
 portbPtr        .res 2
 portbUnit       .res 1
 .ends
 
-; X = the state of ext to show: its PORTB value, with the OS bit left as it
-; is, since the OS Window is the same byte. Writes no memory, so that a
-; loader running it leaves nothing behind but the register.
-.proc portbSelect
+; X = the state of ext to show: its PORTB value, with the bits of the OS ROM
+; and of BASIC left as they are, since those are what `select` said. Writes no
+; memory, so that a loader running it leaves nothing behind but the register.
+.proc portbBank
         lda PORTB
-        ora #$FE
+        ora #$FC
         and portbValues,x
         sta PORTB
         rts
 .endp
 
-; A = the unit, X/Y = the offset in it: the stream stands there. An offset
-; past the unit's end carries into the units after, since the routine
-; counts on in a Frame without knowing where a unit ends: a unit is $4000
-; bytes, so the offset's top two bits are units.
+; A = the set of ROMs the Phase entered needs: bit 0 `osrom`, bit 1 `mathpack`,
+; bit 2 `basic`. Bit 0 of PORTB is set for the OS ROM and the floating-point
+; pack, which one bit shows together, and bit 1 is clear for BASIC; the bank
+; bits are left as they are. Writes no memory, the set waiting on the stack
+; while the register is worked out.
+.proc portbSelectRoms
+        pha
+        lda PORTB
+        ora #$03                        ; the OS in and BASIC out, to begin with
+        tax
+        pla
+        pha
+        and #$03                        ; neither osrom nor mathpack: the OS out
+        bne @os
+        txa
+        and #$FE
+        tax
+@os
+        pla
+        and #$04                        ; basic: BASIC in
+        beq @basic
+        txa
+        and #$FD
+        tax
+@basic
+        stx PORTB
+        rts
+.endp
+
+; The stream to the position in portbUnit and portbPtr. An offset past the
+; unit's end carries into the units after, since the routine counts on in a
+; Frame without knowing where a unit ends: a unit is $4000 bytes, so the
+; offset's top two bits are units.
 .proc portbOpenStream
-        sta portbUnit
-        stx portbPtr
-        tya
+        lda portbPtr+1
 @carry
         cmp #portbUnitPages
         bcc @within
@@ -130,8 +193,7 @@ portbUnit       .res 1
         adc #>portbWindow
         sta portbPtr+1
         ldx portbUnit
-        inx                             ; Bank n is state n + 1
-        jsr portbSelect
+        jsr portbBank
         rts
 .endp
 
@@ -156,8 +218,7 @@ portbUnit       .res 1
 .proc portbNextUnit
         inc portbUnit
         ldx portbUnit
-        inx
-        jsr portbSelect
+        jsr portbBank
         lda #0
         sta portbPtr
         lda #>portbWindow

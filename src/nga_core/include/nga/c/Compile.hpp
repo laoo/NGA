@@ -21,12 +21,6 @@ struct SourceFile
   /// What the text's `.source` marks name: the file as its entry wrote it,
   /// so that the text is the same wherever the tool runs.
   std::string path;
-
-  /// The Panes pinned to a state that every Phase the Module is present in
-  /// gives their Window as its base: shown wherever the Module's code runs,
-  /// so a call into one is not wrapped — see
-  /// docs/decisions/0096-panes-in-c.md.
-  std::vector<std::string> shownByBase{};
 };
 
 /// What a name an `.asm` Module exports is in C — see
@@ -157,12 +151,14 @@ struct ExternalName
   std::string window{};
   std::uint32_t paneCount = 1;
   std::string paneState{};
+
+  /// PANE and WINDOW: how many bytes a state of the Window takes — two where
+  /// the driver's `showAt` for it takes the high byte in `Y`, and then
+  /// `[[with]]` writes `, xy` and computes a member's state in sixteen bits —
+  /// see docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+  std::uint32_t stateBytes = 1;
 };
 
-/// What each `.ngc` file of the program becomes in the compiler's own form, in
-/// the order the files are given, and nothing for a file that holds an error,
-/// which has then been reported. The passes `compile` runs before it emits
-/// the text; see there.
 /// What the program is optimised for, as the compiler is told it. The model's
 /// `Intent` by another name, copied rather than depended on for the reason
 /// `AddressRange` below is: the compiler reads no model type — see
@@ -194,6 +190,10 @@ struct AddressRange
   std::string name{};
 };
 
+/// What each `.ngc` file of the program becomes in the compiler's own form, in
+/// the order the files are given, and nothing for a file that holds an error,
+/// which has then been reported. The passes `compile` runs before it emits
+/// the text; see there.
 std::vector<std::optional<ir::Unit>> lower( diag::SourceManager const& sources,
                                             std::span<SourceFile const> files,
                                             std::span<ExternalName const> externals,

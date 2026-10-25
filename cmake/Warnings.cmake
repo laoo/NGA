@@ -33,6 +33,22 @@ else( )
   # error here too, for whichever of the three is compiling.
   if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
     target_compile_options( nga_warnings INTERFACE -Werror=reorder-init-list )
+
+    # `-Wshadow` is one word on each compiler and two different warnings.
+    # GCC's covers a local shadowing an enclosing local **and** one shadowing a
+    # class member; clang's covers neither of those on its own and splits them
+    # off, so a lambda parameter named after the local the loop above it walks
+    # is silence here and `-Werror=shadow` on the build CI uses. That is the
+    # worse direction for a divergence to run in — the machine the code is
+    # written on accepts what the machine that gates it refuses — and it cost
+    # a red CI twice.
+    #
+    # These two are that difference and nothing more. `-Wshadow-all` is the
+    # third one as well, `-Wshadow-field-in-constructor`, which GCC does not
+    # warn about at all: it is `Foo( int x ) : x( x )`, an idiom, and taking it
+    # would make this build refuse code CI never questions — the same
+    # divergence again, pointing the other way.
+    target_compile_options( nga_warnings INTERFACE -Wshadow-uncaptured-local -Wshadow-field )
   endif( )
 
   if( NGA_WERROR )

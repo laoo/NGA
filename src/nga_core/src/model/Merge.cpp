@@ -1,5 +1,8 @@
 #include "nga/model/Merge.hpp"
 
+#include "nga/model/Transition.hpp"
+
+#include <cstdint>
 #include <string>
 #include <variant>
 
@@ -26,13 +29,34 @@ std::optional<SymbolRef> GlobalSymbols::add( std::string_view name, SymbolRef wh
   return entry->second;
 }
 
+std::optional<DeclaredResult> declaredResultAt( GlobalSymbols const& symbols, SymbolRef where )
+{
+  Symbol const& symbol = symbols.at( where );
+  auto const* const position = std::get_if<LabelPosition>( &symbol.value );
+  if ( symbol.kind != SymbolKind::LABEL || position == nullptr || position->chunk.value != 0 ||
+       position->inner.has_value() )
+  {
+    return std::nullopt;
+  }
+  Module const& module = symbols.moduleAt( where.module );
+  for ( std::uint32_t index = 0; index < module.sections().size(); ++index )
+  {
+    Section const& proc = module.sections()[index];
+    std::optional<Declared> const& result = proc.signature().result;
+    if ( proc.isProc() && result.has_value() && result->temporary == position->section && result->place.empty() )
+    {
+      return DeclaredResult{ .module = where.module, .proc = SectionIndex{ index }, .result = &*result };
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<SymbolRef> GlobalSymbols::lookup( ModuleIndex home, std::string_view name ) const
 {
   SymbolTable const& own = moduleAt( home ).symbols();
-  if ( Symbol const* const local = own.find( name ); local != nullptr )
+  if ( std::optional<std::uint32_t> const index = own.indexOf( name ); index.has_value() )
   {
-    auto const index = static_cast<std::uint32_t>( local - own.symbols().data() );
-    return SymbolRef{ .module = home, .index = index };
+    return SymbolRef{ .module = home, .index = *index };
   }
   return find( name );
 }
@@ -40,8 +64,7 @@ std::optional<SymbolRef> GlobalSymbols::lookup( ModuleIndex home, std::string_vi
 std::optional<SymbolRef>
 GlobalSymbols::lookupScoped( ModuleIndex home, std::string_view scope, std::string_view name ) const
 {
-  std::string_view rest = scope;
-  while ( true )
+  for ( std::string_view rest = scope;; rest = enclosingScopeOf( rest ) )
   {
     std::string candidate{ rest };
     candidate += name;
@@ -53,9 +76,6 @@ GlobalSymbols::lookupScoped( ModuleIndex home, std::string_view scope, std::stri
     {
       return std::nullopt;
     }
-    rest.remove_suffix( 1 );
-    std::size_t const dot = rest.rfind( '.' );
-    rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( 0, dot + 1 );
   }
 }
 
@@ -102,9 +122,31 @@ bool opensItsOwnScope( Module const& module, Symbol const& symbol )
 
 } // namespace
 
-GlobalSymbols merge( std::span<Module const> modules, diag::DiagnosticSink& sink )
+GlobalSymbols merge( std::span<Module const> modules, Project const& project, diag::DiagnosticSink& sink )
 {
   GlobalSymbols globals{ modules };
+  std::optional<Driver> const& driver = project.driver;
+
+  // The cells the driver's stream stands in, under the names the routine
+  // writes them by. Bound before anything else, as the tool's own exports
+  // are, and through the declaration rather than an export, so the label
+  // stays the driver's own — see
+  // docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+  if ( driver.has_value() && driver->streams )
+  {
+    globals.add( "nga.unit", SymbolRef{ .module = driver->module, .index = driver->unit } );
+    globals.add( "nga.offset", SymbolRef{ .module = driver->module, .index = driver->offset } );
+  }
+  // The entry Label, where there is one Label of the name: what a Container
+  // says about a missing or doubled one it says where it looks for it — see
+  // docs/decisions/0229-no-window-has-a-base.md.
+  if ( !project.phases.phases.empty() && project.phases.entry.value < project.phases.phases.size() )
+  {
+    if ( std::optional<SymbolRef> const entry = entrySymbolOf( project.phases, project.phases.entry, globals ) )
+    {
+      globals.add( "nga.entry", *entry );
+    }
+  }
 
   // The Target's named Regions and the exports of the Modules the tool
   // added first, so that a Module's Symbol of the same name is what
@@ -152,7 +194,7 @@ GlobalSymbols merge( std::span<Module const> modules, diag::DiagnosticSink& sink
       // A Symbol named as a Namespace is: `one` the Section and `one.x`
       // cannot both stand, since `one.x` would then be an attribute of one
       // and a member of the other. A Proc is the exception it makes itself:
-      // its Label opens the scope its own names lie in, and the three
+      // its Label opens the scope its own names lie in, and the
       // attributes are refused as names inside it, so `worker.runtimeSectionSize`
       // and `worker.inner` stay apart — see
       // docs/decisions/0046-a-proc-is-a-scope.md.
@@ -169,12 +211,34 @@ GlobalSymbols merge( std::span<Module const> modules, diag::DiagnosticSink& sink
         Symbol const& named = globals.at( *taken );
         if ( modules[taken->module.value].name() == "nga.regions" )
         {
+          // What the Project named it as: a unit set's name is its count, and
+          // a register is a Region of its own.
+          std::string kind = "region";
+          if ( auto const* const region = std::get_if<RegionValue>( &named.value );
+               region != nullptr && project.target.regions[region->region.value].property == RegionProperty::REGISTER )
+          {
+            kind = "register";
+          }
+          else if ( named.kind == SymbolKind::PANE )
+          {
+            kind = "pane";
+          }
+          else if ( named.kind == SymbolKind::WINDOW )
+          {
+            kind = "window";
+          }
+          else if ( named.kind == SymbolKind::CONSTANT )
+          {
+            kind = "unit set";
+          }
           sink.add( diag::diagnostic( diag::DiagnosticId::REGION_NAME_COLLISION )
                         .at( symbol.definition.begin, symbol.definition.length )
                         .arg( "symbol", std::string{ symbol.name } )
+                        .arg( "kind", kind )
                         .note( diag::diagnostic( diag::DiagnosticId::REGION_DECLARED_HERE )
                                    .at( named.definition.begin, named.definition.length )
-                                   .arg( "region", std::string{ named.name } ) ) );
+                                   .arg( "region", std::string{ named.name } )
+                                   .arg( "kind", kind ) ) );
           continue;
         }
         if ( modules[taken->module.value].name().starts_with( "nga." ) )
@@ -291,27 +355,21 @@ GlobalSymbols merge( std::span<Module const> modules, diag::DiagnosticSink& sink
       }
 
       // The Symbol of this Module, in the Namespace the directive stood in.
-      std::vector<Symbol> const& own = modules[index].symbols().symbols();
+      SymbolTable const& own = modules[index].symbols();
       std::optional<SymbolRef> target;
-      for ( std::string_view rest = implementation.scope;; )
+      for ( std::string_view rest = implementation.scope;; rest = enclosingScopeOf( rest ) )
       {
         std::string candidate{ rest };
         candidate += implementation.symbol;
-        for ( std::uint32_t position = 0; position < own.size(); ++position )
+        if ( std::optional<std::uint32_t> const position = own.indexOf( candidate );
+             position.has_value() && own.symbols()[*position].kind == SymbolKind::LABEL )
         {
-          if ( own[position].name == candidate && own[position].kind == SymbolKind::LABEL )
-          {
-            target = SymbolRef{ .module = home, .index = position };
-            break;
-          }
+          target = SymbolRef{ .module = home, .index = *position };
         }
         if ( target.has_value() || rest.empty() )
         {
           break;
         }
-        rest.remove_suffix( 1 );
-        std::size_t const dot = rest.rfind( '.' );
-        rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( 0, dot + 1 );
       }
       if ( !target.has_value() )
       {

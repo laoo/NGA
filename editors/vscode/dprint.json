@@ -1,0 +1,26 @@
+{
+  "lineWidth": 120,
+  "indentWidth": 2,
+  "useTabs": false,
+  "newLineKind": "lf",
+  "typescript": {
+    "bracePosition": "nextLine",
+    "nextControlFlowPosition": "nextLine",
+    "spaceAround": true,
+    "useBraces": "always",
+    "singleBodyPosition": "nextLine",
+    "operatorPosition": "nextLine",
+    "preferHanging": false,
+    "preferSingleLine": false,
+    "quoteStyle": "preferDouble",
+    "semiColons": "always",
+    "trailingCommas": "never",
+    "arguments.preferHanging": "never",
+    "parameters.preferHanging": "never",
+    "objectExpression.spaceSurroundingProperties": true,
+    "importDeclaration.spaceSurroundingNamedImports": true,
+    "exportDeclaration.spaceSurroundingNamedExports": true
+  },
+  "includes": [ "src/**/*.ts", "test/**/*.ts", "eslint.config.mjs" ],
+  "plugins": [ "./node_modules/@dprint/typescript/plugin.wasm" ]
+}

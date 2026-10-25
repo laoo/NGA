@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace nga::syntax
 {
@@ -145,6 +146,11 @@ void ProjectParser::parseBlock( Token name )
     parseConstants( name );
     return;
   }
+  if ( word == "choose" )
+  {
+    parseChoose( name );
+    return;
+  }
   if ( word == "cartridge" )
   {
     parseCartridge( name );
@@ -158,6 +164,11 @@ void ProjectParser::parseBlock( Token name )
   if ( word == "resident" )
   {
     parseResident( name );
+    return;
+  }
+  if ( word == "load" )
+  {
+    parseLoad( name );
     return;
   }
   if ( word == "group" )
@@ -191,8 +202,9 @@ void ProjectParser::parseBlock( Token name )
               .arg( "name", std::string{ word } ) );
 
   // Read the body anyway, so an unknown block costs one finding rather than one
-  // per entry inside it.
-  if ( openBody( name ) )
+  // per entry inside it. A word with no body is that one finding too: nothing
+  // says it was meant to have one.
+  if ( mCursor->match( TokenKind::LEFT_BRACE ) )
   {
     while ( !bodyEnded( name ) )
     {
@@ -286,13 +298,11 @@ void ProjectParser::parseGroup( Token keyword )
 
   Token const name = mCursor->advance();
   mBuilder->declareGroup( name );
-  std::function<void( Token, Token )> const base = [this, name]( Token window, Token state )
-  { mBuilder->groupBase( name, window, state ); };
   parseNameBody(
       name,
       diag::DiagnosticId::EXPECTED_GROUP_ENTRY,
       [this, name]( Token member ) { mBuilder->groupMember( name, member ); },
-      &base );
+      true );
 }
 
 void ProjectParser::parseDiagnostics( Token name )
@@ -348,9 +358,10 @@ void ProjectParser::parseDiagnostics( Token name )
   }
 }
 
-/// `constants { NAME = NUMBER }`. The value is one token by design: a
-/// terminator is what an expression would need to end, and this grammar has
-/// none — see docs/decisions/0178-a-configuration-is-a-document.md.
+/// `constants { NAME = NUMBER }`, the number optionally signed. The value is
+/// one literal by design: a terminator is what an expression would need to
+/// end, and this grammar has none — see
+/// docs/decisions/0178-a-configuration-is-a-document.md.
 void ProjectParser::parseConstants( Token name )
 {
   if ( !openBody( name ) )
@@ -373,15 +384,28 @@ void ProjectParser::parseConstants( Token name )
     reported = false;
     Token const declared = mCursor->advance();
 
+    // An entry that broke costs one finding: what is left of it, up to the
+    // next name, is read past as rubbish already reported — `WIDTH 40` leaves
+    // the `40`.
     if ( !mCursor->at( TokenKind::EQUAL ) )
     {
       Token const missing = mCursor->current();
       report( diag::diagnostic( diag::DiagnosticId::EXPECTED_CONSTANT_ENTRY )
                   .at( missing.location, missing.length )
                   .arg( "token", describe( missing ) ) );
+      reported = true;
       continue;
     }
     mCursor->advance();
+
+    // A `-` right after the `=` is the literal's sign and not an operator: an
+    // entry begins with a name, so nothing can read it as continuing the entry
+    // before, and `SHIFT = -1` delimits itself as `SHIFT = 1` does.
+    std::optional<Token> sign;
+    if ( mCursor->at( TokenKind::MINUS ) )
+    {
+      sign = mCursor->advance();
+    }
 
     if ( !mCursor->at( TokenKind::NUMBER ) )
     {
@@ -389,17 +413,18 @@ void ProjectParser::parseConstants( Token name )
       report( diag::diagnostic( diag::DiagnosticId::EXPECTED_CONSTANT_ENTRY )
                   .at( missing.location, missing.length )
                   .arg( "token", describe( missing ) ) );
-      // What stood where the value should have costs one finding rather than
-      // two: read past it, unless it is the brace that ends the block, which
-      // the loop is owed.
+      // A name standing where the value should is the value and not the
+      // next entry, so it is read past too; the brace that ends the block is
+      // the loop's.
       if ( !mCursor->at( TokenKind::RIGHT_BRACE ) )
       {
         mCursor->advance();
       }
+      reported = true;
       continue;
     }
 
-    mBuilder->addConstant( declared, mCursor->advance() );
+    mBuilder->addConstant( declared, sign, mCursor->advance() );
   }
 }
 
@@ -437,6 +462,13 @@ void ProjectParser::parseCartridge( Token name )
       {
         mCursor->advance();
       }
+      // The value after `name =` or `rotation =` is what is left of an entry
+      // already reported, and not one of its own.
+      if ( missing.kind == TokenKind::EQUAL && mCursor->at( TokenKind::IDENTIFIER ) )
+      {
+        mCursor->advance();
+      }
+      reported = true;
       continue;
     }
     mBuilder->setCartridgeField( name, field, mCursor->advance() );
@@ -597,8 +629,8 @@ void ProjectParser::parsePhase( Token keyword )
     Token const here = mCursor->current();
     std::string_view const word = here.kind == TokenKind::IDENTIFIER ? textOf( here ) : std::string_view{};
 
-    // `needs` and `then` are recognised by position, as `as` and `at` are, so
-    // neither becomes a keyword.
+    // `needs`, `then`, `without` and `final` are recognised by position, as
+    // `as` and `at` are, so none becomes a keyword.
     if ( word == "needs" )
     {
       reported = false;
@@ -611,6 +643,20 @@ void ProjectParser::parsePhase( Token keyword )
       reported = false;
       mCursor->advance();
       parseNameList( here, [this, name]( Token next ) { mBuilder->phaseLeadsTo( name, next ); } );
+      continue;
+    }
+    if ( word == "without" )
+    {
+      reported = false;
+      mCursor->advance();
+      parseNameList( here, [this, name]( Token module ) { mBuilder->phaseWithout( name, module ); } );
+      continue;
+    }
+    if ( word == "final" )
+    {
+      reported = false;
+      mCursor->advance();
+      mBuilder->phaseFinal( name, here );
       continue;
     }
     if ( word == "entry" )
@@ -626,12 +672,48 @@ void ProjectParser::parsePhase( Token keyword )
     if ( word == "base" )
     {
       reported = false;
-      mCursor->advance();
-      parseBase( here, [this, name]( Token window, Token state ) { mBuilder->phaseBase( name, window, state ); } );
+      skipBase();
       continue;
     }
 
     skipUnreadable( diag::diagnostic( diag::DiagnosticId::EXPECTED_PHASE_ENTRY )
+                        .at( here.location, here.length )
+                        .arg( "token", describe( here ) ),
+                    reported );
+  }
+}
+
+void ProjectParser::parseLoad( Token name )
+{
+  if ( !openBody( name ) )
+  {
+    return;
+  }
+  bool reported = false;
+  while ( !bodyEnded( name ) )
+  {
+    Token const here = mCursor->current();
+    // `needs` and `init`, read by position as a Phase reads `needs` and
+    // `entry`: the load is a Phase of the Container's, which is entered and
+    // left by nothing else.
+    if ( here.kind == TokenKind::IDENTIFIER && textOf( here ) == "needs" )
+    {
+      reported = false;
+      mCursor->advance();
+      parseNameList( here, [this, name]( Token module ) { mBuilder->loadNeeds( name, module ); } );
+      continue;
+    }
+    if ( here.kind == TokenKind::IDENTIFIER && textOf( here ) == "init" )
+    {
+      reported = false;
+      mCursor->advance();
+      if ( std::vector<Token> label = parseDottedName( here ); !label.empty() )
+      {
+        mBuilder->loadInit( name, std::move( label ) );
+      }
+      continue;
+    }
+    skipUnreadable( diag::diagnostic( diag::DiagnosticId::EXPECTED_LOAD_ENTRY )
                         .at( here.location, here.length )
                         .arg( "token", describe( here ) ),
                     reported );
@@ -644,28 +726,30 @@ void ProjectParser::parseResident( Token name )
       name, diag::DiagnosticId::EXPECTED_RESIDENT_ENTRY, [this]( Token module ) { mBuilder->addResident( module ); } );
 }
 
-void ProjectParser::parseBase( Token keyword, std::function<void( Token, Token )> const& take )
+void ProjectParser::skipBase()
 {
-  // `base WINDOW = STATE`: two names around `=`, each recognised by position.
-  if ( !mCursor->at( TokenKind::IDENTIFIER ) || mCursor->peek( 1 ).kind != TokenKind::EQUAL ||
-       mCursor->peek( 2 ).kind != TokenKind::IDENTIFIER )
+  // `base` was a word of a Window, a Phase and a group, and is read still so
+  // that a Project written before it went hears why rather than what token
+  // was not expected: `base NAME`, or `base WINDOW = STATE` — see
+  // docs/decisions/0229-no-window-has-a-base.md.
+  Token const keyword = mCursor->advance();
+  report( diag::diagnostic( diag::DiagnosticId::BASE_GONE ).at( keyword.location, keyword.length ) );
+  if ( !mCursor->at( TokenKind::IDENTIFIER ) )
   {
-    Token const here = mCursor->current();
-    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_BASE_FORM )
-                .at( keyword.location, keyword.length )
-                .arg( "token", describe( here ) ) );
     return;
   }
-  Token const window = mCursor->advance();
   mCursor->advance();
-  Token const state = mCursor->advance();
-  take( window, state );
+  if ( mCursor->at( TokenKind::EQUAL ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER )
+  {
+    mCursor->advance();
+    mCursor->advance();
+  }
 }
 
 void ProjectParser::parseNameBody( Token name,
                                    diag::DiagnosticId entryError,
                                    std::function<void( Token )> const& take,
-                                   std::function<void( Token, Token )> const* base )
+                                   bool readsBase )
 {
   if ( !openBody( name ) )
   {
@@ -677,14 +761,11 @@ void ProjectParser::parseNameBody( Token name,
   while ( !bodyEnded( name ) )
   {
     Token const here = mCursor->current();
-    if ( base != nullptr && here.kind == TokenKind::IDENTIFIER && textOf( here ) == "base" )
+    if ( readsBase && here.kind == TokenKind::IDENTIFIER && textOf( here ) == "base" )
     {
-      // A group may carry a base beside its list, which the Phases needing it
-      // inherit — see docs/decisions/0056-a-phase-chooses-a-base.md.
       reported = false;
       last.reset();
-      mCursor->advance();
-      parseBase( here, *base );
+      skipBase();
       continue;
     }
     if ( here.kind != TokenKind::IDENTIFIER )
@@ -808,7 +889,7 @@ bool ProjectParser::parseGeneratorArguments( Token generator, std::vector<Projec
     }
     else if ( mCursor->at( TokenKind::IDENTIFIER ) )
     {
-      // A name with nothing after it is a flag: `root`, `movable`.
+      // A name with nothing after it is a flag: `root`, `readonly`.
       Token const flag = mCursor->advance();
       argument.name = flag;
       argument.span = flag.span();
@@ -885,32 +966,6 @@ ExpressionPtr ProjectParser::parseValue( Token after )
   return value;
 }
 
-void ProjectParser::parseValueList( Token after, std::function<void( ExpressionPtr )> const& take )
-{
-  Token previous = after;
-  while ( true )
-  {
-    if ( !atValueStart() )
-    {
-      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_VALUE )
-                  .at( previous.location, previous.length )
-                  .arg( "after", std::string{ textOf( previous ) } ) );
-      return;
-    }
-    // A value that could not be read has been reported and consumed, and the
-    // list goes on past it, so one bad value costs one finding.
-    if ( ExpressionPtr value = parseValue( previous ); value != nullptr )
-    {
-      take( std::move( value ) );
-    }
-    if ( !mCursor->at( TokenKind::COMMA ) )
-    {
-      return;
-    }
-    previous = mCursor->advance();
-  }
-}
-
 std::optional<std::pair<ExpressionPtr, ExpressionPtr>> ProjectParser::parseRange( Token after )
 {
   ExpressionPtr begin = parseValue( after );
@@ -952,6 +1007,18 @@ void ProjectParser::parseRegion( Token keyword )
     return;
   }
   mBuilder->addRegion( keyword, name, std::move( range->first ), std::move( range->second ), mCursor->advance() );
+}
+
+void ProjectParser::parseHolder( Token keyword )
+{
+  if ( !mCursor->at( TokenKind::IDENTIFIER ) )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME_IN_LIST )
+                .at( keyword.location, keyword.length )
+                .arg( "after", std::string{ textOf( keyword ) } ) );
+    return;
+  }
+  mBuilder->addHolder( keyword, mCursor->advance() );
 }
 
 void ProjectParser::parseRegister( Token keyword )
@@ -1013,6 +1080,13 @@ void ProjectParser::parseTarget( Token name )
       parseRegister( here );
       continue;
     }
+    if ( word == "holder" )
+    {
+      reported = false;
+      mCursor->advance();
+      parseHolder( here );
+      continue;
+    }
     if ( word == "units" )
     {
       reported = false;
@@ -1044,12 +1118,14 @@ void ProjectParser::parseTarget( Token name )
       if ( mCursor->at( TokenKind::STRING ) )
       {
         mBuilder->setCpu( here, mCursor->advance() );
+        continue;
       }
-      else
+      reportUnquoted( here, "the processor's name" );
+      // `6502` without its quotes is the name, and read past; a word may be
+      // the next entry, and the brace is the block's.
+      if ( mCursor->at( TokenKind::NUMBER ) )
       {
-        report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME_IN_LIST )
-                    .at( here.location, here.length )
-                    .arg( "after", std::string{ textOf( here ) } ) );
+        mCursor->advance();
       }
       continue;
     }
@@ -1080,7 +1156,18 @@ void ProjectParser::parseUnitSet( Token keyword )
   {
     return;
   }
-  mBuilder->addUnitSet( keyword, name, std::move( count ) );
+  // `linear` recognised by position, as `views` is after a Window's ranges.
+  std::optional<std::pair<ExpressionPtr, ExpressionPtr>> linear;
+  if ( mCursor->at( TokenKind::IDENTIFIER ) && textOf( mCursor->current() ) == "linear" )
+  {
+    Token const word = mCursor->advance();
+    linear = parseRange( word );
+    if ( !linear.has_value() )
+    {
+      return;
+    }
+  }
+  mBuilder->addUnitSet( keyword, name, std::move( count ), std::move( linear ) );
 }
 
 void ProjectParser::parseWindow( Token keyword )
@@ -1133,22 +1220,13 @@ void ProjectParser::parseWindow( Token keyword )
     return;
   }
 
-  std::optional<Token> base;
   if ( mCursor->at( TokenKind::IDENTIFIER ) && textOf( mCursor->current() ) == "base" )
   {
-    Token const word = mCursor->advance();
-    if ( !mCursor->at( TokenKind::IDENTIFIER ) )
-    {
-      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME_IN_LIST )
-                  .at( word.location, word.length )
-                  .arg( "after", std::string{ textOf( word ) } ) );
-      return;
-    }
-    base = mCursor->advance();
+    skipBase();
   }
   if ( name.has_value() )
   {
-    mBuilder->addWindow( keyword, *name, std::move( ranges ), std::move( states ), base );
+    mBuilder->addWindow( keyword, *name, std::move( ranges ), std::move( states ) );
   }
 }
 
@@ -1239,6 +1317,16 @@ void ProjectParser::parsePanes( Token name )
     {
       afterComma = true;
     }
+    else if ( mCursor->at( TokenKind::IDENTIFIER ) )
+    {
+      // Two names with nothing between them, reported as every list of names
+      // reports it, and both taken.
+      Token const here = mCursor->current();
+      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_COMMA )
+                  .at( here.location, here.length )
+                  .arg( "previous", std::string{ textOf( pane ) } )
+                  .arg( "next", std::string{ textOf( here ) } ) );
+    }
     else if ( !mCursor->at( TokenKind::RIGHT_BRACE ) )
     {
       Token const here = mCursor->current();
@@ -1252,9 +1340,34 @@ void ProjectParser::parsePanes( Token name )
 
 void ProjectParser::skipBody( Token name )
 {
-  // Read on to the body and through it, so that a block whose header could
-  // not be read costs one finding and not one per entry inside it.
-  while ( !mCursor->atEnd() && !mCursor->at( TokenKind::LEFT_BRACE ) )
+  // Through the body where it follows, so that a block whose header could
+  // not be read costs one finding and not one per entry inside it. Only the
+  // body that follows what is left of a header — `in`, a name, `=` and a
+  // name, as far as they stand there — as every other header's recovery
+  // does: a search for the next `{` anywhere would take a later block for
+  // this one's and swallow it unreported.
+  std::uint32_t header = 0;
+  if ( mCursor->peek( header ).kind == TokenKind::IDENTIFIER && textOf( mCursor->peek( header ) ) == "in" )
+  {
+    ++header;
+  }
+  if ( mCursor->peek( header ).kind == TokenKind::IDENTIFIER )
+  {
+    ++header;
+  }
+  if ( mCursor->peek( header ).kind == TokenKind::EQUAL )
+  {
+    ++header;
+    if ( mCursor->peek( header ).kind == TokenKind::IDENTIFIER )
+    {
+      ++header;
+    }
+  }
+  if ( mCursor->peek( header ).kind != TokenKind::LEFT_BRACE )
+  {
+    return;
+  }
+  for ( ; header > 0; --header )
   {
     mCursor->advance();
   }
@@ -1345,7 +1458,41 @@ void ProjectParser::parseContainer( Token keyword )
   {
     board = mCursor->advance();
   }
+  else if ( mCursor->at( TokenKind::NUMBER ) )
+  {
+    // `container car 8k`: a board without its quotes, which no block and no
+    // `include` begins with, so it is read past as the board it was meant to be.
+    reportUnquoted( name, "the board's name" );
+    mCursor->advance();
+    return;
+  }
   mBuilder->setContainer( name, board );
+
+  // `container xex compress zx0`: a word no statement begins with, so it is
+  // read as the Container's wherever it follows one — see
+  // docs/decisions/0259-a-xex-may-be-compressed-segment-by-segment.md.
+  if ( mCursor->at( TokenKind::IDENTIFIER ) && textOf( mCursor->peek() ) == "compress" )
+  {
+    Token const word = mCursor->advance();
+    if ( !mCursor->at( TokenKind::IDENTIFIER ) )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME_IN_LIST )
+                  .at( word.location, word.length )
+                  .arg( "after", std::string{ textOf( word ) } ) );
+      return;
+    }
+    mBuilder->setCompress( name, word, mCursor->advance() );
+
+    // `except { loadingPic }`: the Modules a compressed file writes as they
+    // are — see docs/decisions/0260-a-compressed-xex-writes-what-it-is-told-as-it-is.md.
+    if ( mCursor->at( TokenKind::IDENTIFIER ) && textOf( mCursor->peek() ) == "except" )
+    {
+      Token const except = mCursor->advance();
+      parseNameBody( except,
+                     diag::DiagnosticId::EXPECTED_EXCEPT_ENTRY,
+                     [this]( Token module ) { mBuilder->addUncompressed( module ); } );
+    }
+  }
 }
 
 void ProjectParser::parseIntent( Token keyword )
@@ -1376,13 +1523,61 @@ void ProjectParser::parseInclude( Token keyword )
 {
   if ( !mCursor->at( TokenKind::STRING ) )
   {
-    Token const here = mCursor->current();
-    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_BLOCK_OR_INCLUDE )
-                .at( keyword.location, keyword.length )
-                .arg( "token", describe( here ) ) );
+    reportUnquoted( keyword, "a path" );
+    // A path written without its quotes is a run of tokens with nothing
+    // between them, `atari/800xl.ngp`, and is read past whole so that each of
+    // them is not a block of its own. A word standing alone may be the next
+    // block, and is left to be one.
+    if ( !mCursor->atEnd() && touches( mCursor->current(), mCursor->peek( 1 ) ) )
+    {
+      Token last = mCursor->advance();
+      while ( !mCursor->atEnd() && touches( last, mCursor->current() ) )
+      {
+        last = mCursor->advance();
+      }
+    }
     return;
   }
   mBuilder->includeDocument( mCursor->advance() );
+}
+
+void ProjectParser::parseChoose( Token name )
+{
+  if ( !openBody( name ) )
+  {
+    return;
+  }
+
+  std::vector<Token> paths;
+  bool reported = false;
+  while ( !bodyEnded( name ) )
+  {
+    if ( !mCursor->at( TokenKind::STRING ) )
+    {
+      Token const here = mCursor->current();
+      skipUnreadable( diag::diagnostic( diag::DiagnosticId::EXPECTED_QUOTED )
+                          .at( name.location, name.length )
+                          .arg( "after", std::string{ textOf( name ) } )
+                          .arg( "what", "a path" )
+                          .arg( "token", describe( here ) ),
+                      reported );
+      continue;
+    }
+    reported = false;
+    paths.push_back( mCursor->advance() );
+  }
+  mBuilder->chooseDocuments( name, std::move( paths ) );
+}
+
+void ProjectParser::reportUnquoted( Token keyword, std::string_view what ) const
+{
+  // Reported at the word that wanted the quotes, which is where the reader
+  // has to go, as every entry of this grammar reports what follows it.
+  report( diag::diagnostic( diag::DiagnosticId::EXPECTED_QUOTED )
+              .at( keyword.location, keyword.length )
+              .arg( "after", std::string{ textOf( keyword ) } )
+              .arg( "what", std::string{ what } )
+              .arg( "token", describe( mCursor->current() ) ) );
 }
 
 } // namespace nga::syntax

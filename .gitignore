@@ -4,4 +4,9 @@ out/
 compile_commands.json
 .DS_Store
 *.user
+node_modules/
+editors/vscode/dist/
+editors/vscode/bin/
+editors/vscode/LICENSE
+*.vsix
 .nga-export

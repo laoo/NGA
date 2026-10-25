@@ -1,9 +1,11 @@
 #include "nga/c/Parser.hpp"
 
 #include "nga/c/Lexer.hpp"
+#include "nga/syntax/Expression.hpp"
 #include "nga/syntax/Literal.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <utility>
 
@@ -13,10 +15,55 @@ namespace nga::c
 namespace
 {
 
-diag::SourceSpan spanning( diag::SourceSpan first, diag::SourceSpan last )
+using syntax::spanning;
+
+/// A qualified name as what stands before its last part and that part, each
+/// a token of its own: `a::b::c` is `a::b` and `c`.
+std::pair<Token, Token> splitQualified( diag::SourceManager const& sources, Token const& name )
 {
-  std::uint32_t const end = last.begin.rawOffset() + last.length;
-  return diag::SourceSpan{ .begin = first.begin, .length = end - first.begin.rawOffset() };
+  std::string_view const text = sources.textOf( name.span() );
+  std::size_t last = text.size();
+  while ( last > 0 && ( std::isalnum( static_cast<unsigned char>( text[last - 1] ) ) != 0 || text[last - 1] == '_' ) )
+  {
+    --last;
+  }
+  // The last `::` that separates parts, read as nameSpelled reads them: the
+  // parser joins them across a space or a comment, and one in a comment, `a
+  // :: /* b::c */ d`, separates nothing.
+  std::size_t before = 0;
+  for ( std::size_t at = 0; at < text.size(); )
+  {
+    std::string_view const rest = text.substr( at );
+    if ( rest.starts_with( "::" ) )
+    {
+      before = at;
+      at += 2;
+    }
+    else if ( rest.starts_with( "//" ) )
+    {
+      std::size_t const end = text.find( '\n', at );
+      at = end == std::string_view::npos ? text.size() : end;
+    }
+    else if ( rest.starts_with( "/*" ) )
+    {
+      std::size_t const end = text.find( "*/", at + 2 );
+      at = end == std::string_view::npos ? text.size() : end + 2;
+    }
+    else
+    {
+      ++at;
+    }
+  }
+  while ( before > 0 && std::isspace( static_cast<unsigned char>( text[before - 1] ) ) != 0 )
+  {
+    --before;
+  }
+  Token prefix = name;
+  prefix.length = static_cast<std::uint32_t>( before );
+  Token part = name;
+  part.location = diag::SourceLocation::fromRawOffset( name.location.rawOffset() + static_cast<std::uint32_t>( last ) );
+  part.length = static_cast<std::uint32_t>( text.size() - last );
+  return { prefix, part };
 }
 
 bool canBeginExpression( Token const& token )
@@ -195,12 +242,42 @@ Parser::Parser( diag::SourceManager const& sources, std::span<Token const> token
 {
   // Comments are the suite's, which reads them for its markers, and nothing of
   // the grammar's.
+  std::vector<Token> read;
   for ( Token const& token : tokens )
   {
     if ( token.kind != TokenKind::COMMENT )
     {
-      mTokens.push_back( token );
+      read.push_back( token );
     }
+  }
+  // `a::b::c` is one token, a name wherever one stands, so that every place
+  // the grammar looks ahead for a name sees one — see
+  // docs/decisions/0230-c-names-a-namespace-with-two-colons.md. An
+  // attribute keeps its `::`, which separates a prefix there.
+  bool inAttribute = false;
+  for ( std::size_t at = 0; at < read.size(); ++at )
+  {
+    Token const& token = read[at];
+    bool const pair = !mTokens.empty() && mTokens.back().kind == token.kind;
+    if ( token.kind == TokenKind::LEFT_BRACKET && pair )
+    {
+      inAttribute = true;
+    }
+    else if ( token.kind == TokenKind::RIGHT_BRACKET && pair )
+    {
+      inAttribute = false;
+    }
+    if ( !inAttribute && token.kind == TokenKind::COLON_COLON && !mTokens.empty() &&
+         mTokens.back().kind == TokenKind::IDENTIFIER && at + 1 < read.size() &&
+         read[at + 1].kind == TokenKind::IDENTIFIER )
+    {
+      Token& name = mTokens.back();
+      Token const& last = read[at + 1];
+      name.length = last.location.rawOffset() + last.length - name.location.rawOffset();
+      ++at;
+      continue;
+    }
+    mTokens.push_back( token );
   }
   if ( mTokens.empty() || mTokens.back().kind != TokenKind::END_OF_FILE )
   {
@@ -228,6 +305,17 @@ bool Parser::match( TokenKind wanted )
   return true;
 }
 
+void Parser::unqualified( Token const& name )
+{
+  if ( name.kind == TokenKind::IDENTIFIER && isQualified( mSources->textOf( name.span() ) ) )
+  {
+    // As the source spells it, with `::`: the dot is the assembler's.
+    mSink->add( diagnostic( diag::DiagnosticId::C_QUALIFIED_DEFINITION )
+                    .at( name.location, name.length )
+                    .arg( "name", std::string{ mSources->textOf( name.span() ) } ) );
+  }
+}
+
 void Parser::fail( std::string_view expected )
 {
   Token const& found = peek();
@@ -242,6 +330,14 @@ void Parser::fail( std::string_view expected )
                   .at( found.location, found.length )
                   .arg( "expected", std::string{ expected } )
                   .arg( "found", std::move( shown ) ) );
+}
+
+void Parser::spelledOtherwise( Token const& found )
+{
+  mSink->add( diagnostic( diag::DiagnosticId::C_TYPE_SPELLED_OTHERWISE )
+                  .at( found.location, found.length )
+                  .arg( "found", std::string{ mSources->textOf( found.span() ) } )
+                  .arg( "spelling", std::string{ found.keyword == Keyword::INT ? "i16" : "u8" } ) );
 }
 
 void Parser::refuseDepth( Token const& where, std::string_view what, std::uint32_t limit )
@@ -298,7 +394,7 @@ TranslationUnit Parser::parseTranslationUnit()
   TranslationUnit unit;
   while ( !at( TokenKind::END_OF_FILE ) )
   {
-    std::optional<std::vector<Attribute>> attributes = parseAttributes();
+    std::optional<std::vector<Attribute>> attributes = parseAttributes( true );
     if ( !attributes.has_value() )
     {
       continue;
@@ -411,13 +507,9 @@ TranslationUnit Parser::parseTranslationUnit()
     }
     // One spelling of a type, so `int` and `char` are not a second one — see
     // docs/decisions/0076-arithmetic-in-the-subset.md.
-    if ( atKeyword( Keyword::INT ) || atKeyword( Keyword::CHAR ) )
+    if ( isSpelledOtherwise( peek() ) )
     {
-      Token const found = peek();
-      mSink->add( diagnostic( diag::DiagnosticId::C_TYPE_SPELLED_OTHERWISE )
-                      .at( found.location, found.length )
-                      .arg( "found", std::string{ mSources->textOf( found.span() ) } )
-                      .arg( "spelling", std::string{ found.keyword == Keyword::INT ? "i16" : "u8" } ) );
+      spelledOtherwise( peek() );
       recover( true );
       continue;
     }
@@ -434,12 +526,23 @@ bool Parser::declarationAhead() const
   Token const& third = peekAhead( 2 );
   // A name followed by a name, a qualifier, or a `*` and one of those: the
   // shape a declaration of locals is told by where a statement may begin one.
+  // `Light c;` declares and `c = 1;` assigns; `a * b;` would be an
+  // expression statement that neither assigns nor calls, which the subset
+  // refuses anyway. `int` and `char` begin a declaration too, which says how
+  // the subset spells them rather than that no statement begins so.
   bool const named =
       first.kind == TokenKind::IDENTIFIER &&
       ( second.kind == TokenKind::IDENTIFIER || isQualifier( second ) ||
         ( second.kind == TokenKind::STAR && ( third.kind == TokenKind::IDENTIFIER || isQualifier( third ) ) ) );
   return isType( first.keyword ) || named || first.keyword == Keyword::STATIC || isQualifier( first ) ||
-         first.keyword == Keyword::AUTO;
+         first.keyword == Keyword::AUTO || isSpelledOtherwise( first );
+}
+
+std::optional<Declaration> Parser::parseLocalDeclaration()
+{
+  std::optional<Token> const storage =
+      atKeyword( Keyword::STATIC ) ? std::optional<Token>{ advance() } : std::optional<Token>{};
+  return parseDeclaration( storage );
 }
 
 bool Parser::initialiserAhead() const
@@ -556,6 +659,10 @@ std::optional<FunctionDefinition> Parser::parseFunctionDefinition( std::optional
     return std::nullopt;
   }
   Token const name = advance();
+  if ( !prototype || named )
+  {
+    unqualified( name );
+  }
 
   if ( !match( TokenKind::LEFT_PAREN ) )
   {
@@ -573,13 +680,9 @@ std::optional<FunctionDefinition> Parser::parseFunctionDefinition( std::optional
   {
     for ( ;; )
     {
-      if ( atKeyword( Keyword::INT ) || atKeyword( Keyword::CHAR ) )
+      if ( isSpelledOtherwise( peek() ) )
       {
-        Token const found = peek();
-        mSink->add( diagnostic( diag::DiagnosticId::C_TYPE_SPELLED_OTHERWISE )
-                        .at( found.location, found.length )
-                        .arg( "found", std::string{ mSources->textOf( found.span() ) } )
-                        .arg( "spelling", std::string{ found.keyword == Keyword::INT ? "i16" : "u8" } ) );
+        spelledOtherwise( peek() );
         recover( true );
         return std::nullopt;
       }
@@ -609,6 +712,10 @@ std::optional<FunctionDefinition> Parser::parseFunctionDefinition( std::optional
                            .pointeeVolatile = pointee.isVolatile,
                            .size = std::nullopt,
                            .isNamed = !unnamed };
+      if ( !unnamed )
+      {
+        unqualified( parameter.name );
+      }
       // An array parameter is a pointer, as C has it.
       if ( !isPointer && at( TokenKind::LEFT_BRACKET ) )
       {
@@ -709,15 +816,26 @@ std::optional<Declaration> Parser::parseDeclaration( std::optional<Token> storag
   // `const` and `volatile` stand before the type or after it, each once.
   Qualifiers qualifiers;
   matchQualifiers( qualifiers );
+  // `int` and `char`, once said, are read as the types the subset spells them,
+  // so that the rest of the declaration is read and nothing after it cascades.
   // `auto` stands where a type does, and the value it is given says which —
   // see docs/decisions/0161-auto-takes-the-type-of-the-value.md.
-  if ( !isType( peek().keyword ) && !at( TokenKind::IDENTIFIER ) && !atKeyword( Keyword::AUTO ) )
+  bool const otherwise = isSpelledOtherwise( peek() );
+  if ( otherwise )
+  {
+    spelledOtherwise( peek() );
+  }
+  else if ( !isType( peek().keyword ) && !at( TokenKind::IDENTIFIER ) && !atKeyword( Keyword::AUTO ) )
   {
     fail( "a type" );
     recover( true );
     return std::nullopt;
   }
-  Token const type = advance();
+  Token type = advance();
+  if ( otherwise )
+  {
+    type.keyword = type.keyword == Keyword::INT ? Keyword::I16 : Keyword::U8;
+  }
   diag::SourceSpan first = type.span();
   if ( qualifier.has_value() )
   {
@@ -751,6 +869,10 @@ std::optional<Declaration> Parser::parseDeclaration( std::optional<Token> storag
       return std::nullopt;
     }
     declarators.push_back( advance() );
+    if ( !storage.has_value() || storage->keyword != Keyword::EXTERN )
+    {
+      unqualified( declarators.back() );
+    }
 
     // One dimension, its size perhaps left to the list.
     if ( match( TokenKind::LEFT_BRACKET ) )
@@ -982,7 +1104,7 @@ std::optional<Statement> Parser::parseStatement()
   // docs/decisions/0064-phase-in-c.md.
   if ( atAttributes() )
   {
-    std::optional<std::vector<Attribute>> attributes = parseAttributes();
+    std::optional<std::vector<Attribute>> attributes = parseAttributes( false );
     if ( !attributes.has_value() )
     {
       return std::nullopt;
@@ -1002,7 +1124,8 @@ std::optional<Statement> Parser::parseStatement()
     Token const next = peek();
     bool const returning = next.keyword == Keyword::RETURN;
     bool const declaration = isType( next.keyword ) || next.kind == TokenKind::IDENTIFIER ||
-                             next.keyword == Keyword::STATIC || isQualifier( next ) || next.keyword == Keyword::AUTO;
+                             next.keyword == Keyword::STATIC || isQualifier( next ) || next.keyword == Keyword::AUTO ||
+                             isSpelledOtherwise( next );
     if ( !declaration && !returning )
     {
       fail( "a declaration, a block or `return`" );
@@ -1046,22 +1169,9 @@ std::optional<Statement> Parser::parseStatement()
                       .declaration = {} };
   }
 
-  // A declaration of locals, told from a statement by the name, the `const`
-  // or the `*` and a name that follows a type's: `Light c;` declares and
-  // `c = 1;` assigns. `a * b;` would be an expression statement that neither
-  // assigns nor calls, which the subset refuses anyway.
-  Token const& second = peekAhead( 1 );
-  Token const& third = peekAhead( 2 );
-  bool const named =
-      first.kind == TokenKind::IDENTIFIER &&
-      ( second.kind == TokenKind::IDENTIFIER || isQualifier( second ) ||
-        ( second.kind == TokenKind::STAR && ( third.kind == TokenKind::IDENTIFIER || isQualifier( third ) ) ) );
-  if ( isType( first.keyword ) || named || first.keyword == Keyword::STATIC || isQualifier( first ) ||
-       first.keyword == Keyword::AUTO )
+  if ( declarationAhead() )
   {
-    std::optional<Token> const storage =
-        atKeyword( Keyword::STATIC ) ? std::optional<Token>{ advance() } : std::optional<Token>{};
-    std::optional<Declaration> declaration = parseDeclaration( storage );
+    std::optional<Declaration> declaration = parseLocalDeclaration();
     if ( !declaration.has_value() )
     {
       return std::nullopt;
@@ -1240,9 +1350,7 @@ std::optional<Statement> Parser::parseControl()
     // docs/decisions/0160-a-declaration-where-a-statement-begins-one.md.
     if ( declarationAhead() )
     {
-      std::optional<Token> const storage =
-          atKeyword( Keyword::STATIC ) ? std::optional<Token>{ advance() } : std::optional<Token>{};
-      std::optional<Declaration> declared = parseDeclaration( storage );
+      std::optional<Declaration> declared = parseLocalDeclaration();
       if ( !declared.has_value() )
       {
         recover( false );
@@ -1313,9 +1421,7 @@ ExpressionPtr Parser::parseCondition( Statement* initialised )
   {
     if ( declarationAhead() )
     {
-      std::optional<Token> const storage =
-          atKeyword( Keyword::STATIC ) ? std::optional<Token>{ advance() } : std::optional<Token>{};
-      std::optional<Declaration> declared = parseDeclaration( storage );
+      std::optional<Declaration> declared = parseLocalDeclaration();
       if ( !declared.has_value() )
       {
         return nullptr;
@@ -1378,6 +1484,7 @@ std::optional<EnumSpecifier> Parser::parseEnumSpecifier()
     return std::nullopt;
   }
   Token const name = advance();
+  unqualified( name );
   if ( !match( TokenKind::LEFT_BRACE ) )
   {
     fail( "`{`" );
@@ -1393,6 +1500,7 @@ std::optional<EnumSpecifier> Parser::parseEnumSpecifier()
       return abandon( "an enumerator" );
     }
     enumerators.push_back( advance() );
+    unqualified( enumerators.back() );
     // A comma may end the list, as C allows.
     if ( match( TokenKind::COMMA ) && !at( TokenKind::RIGHT_BRACE ) )
     {
@@ -1423,7 +1531,7 @@ bool Parser::atAttributes() const
   return at( TokenKind::LEFT_BRACKET ) && peekAhead( 1 ).kind == TokenKind::LEFT_BRACKET;
 }
 
-std::optional<std::vector<Attribute>> Parser::parseAttributes()
+std::optional<std::vector<Attribute>> Parser::parseAttributes( bool atTopLevel )
 {
   std::vector<Attribute> attributes;
   while ( atAttributes() )
@@ -1436,7 +1544,7 @@ std::optional<std::vector<Attribute>> Parser::parseAttributes()
       if ( !match( TokenKind::IDENTIFIER ) )
       {
         fail( "an attribute" );
-        recover( true );
+        recover( atTopLevel );
         return std::nullopt;
       }
       Attribute attribute{ .name = first, .prefix = std::nullopt, .hasArguments = false, .span = first.span() };
@@ -1446,7 +1554,7 @@ std::optional<std::vector<Attribute>> Parser::parseAttributes()
         if ( !match( TokenKind::IDENTIFIER ) )
         {
           fail( "an attribute" );
-          recover( true );
+          recover( atTopLevel );
           return std::nullopt;
         }
         attribute.prefix = first;
@@ -1484,7 +1592,7 @@ std::optional<std::vector<Attribute>> Parser::parseAttributes()
     if ( !match( TokenKind::RIGHT_BRACKET ) || !match( TokenKind::RIGHT_BRACKET ) )
     {
       fail( "`]]`" );
-      recover( true );
+      recover( atTopLevel );
       return std::nullopt;
     }
   }
@@ -1501,6 +1609,7 @@ std::optional<StructSpecifier> Parser::parseStructSpecifier()
     return std::nullopt;
   }
   Token const name = advance();
+  unqualified( name );
   if ( !match( TokenKind::LEFT_BRACE ) )
   {
     fail( "`{`" );
@@ -1512,7 +1621,7 @@ std::optional<StructSpecifier> Parser::parseStructSpecifier()
   };
   while ( !at( TokenKind::RIGHT_BRACE ) && !at( TokenKind::END_OF_FILE ) )
   {
-    if ( !isType( peek().keyword ) && !at( TokenKind::IDENTIFIER ) && !atQualifier() )
+    if ( !isType( peek().keyword ) && !at( TokenKind::IDENTIFIER ) && !atQualifier() && !isSpelledOtherwise( peek() ) )
     {
       fail( "a member" );
       recover( true );
@@ -1880,7 +1989,17 @@ ExpressionPtr Parser::parseUnary()
                                  .pointeeConst = type->pointeeConst,
                                  .pointeeVolatile = type->pointeeVolatile } );
   }
-  ExpressionPtr node = atKeyword( Keyword::SIZEOF ) ? parseSizeof() : parsePostfix();
+  // A step stands under a cast or another operator as C has it: `(u16)++sp`.
+  ExpressionPtr node;
+  if ( !operators.empty() && ( at( TokenKind::PLUS_PLUS ) || at( TokenKind::MINUS_MINUS ) ) )
+  {
+    Token const op = advance();
+    node = parseStep( op, parseUnary(), false );
+  }
+  else
+  {
+    node = atKeyword( Keyword::SIZEOF ) ? parseSizeof() : parsePostfix();
+  }
   for ( auto op = operators.rbegin(); node != nullptr && op != operators.rend(); ++op )
   {
     if ( node->depth == MAX_EXPRESSION_DEPTH )
@@ -1922,8 +2041,8 @@ std::optional<Parser::TypeName> Parser::parenthesisedType()
   };
   qualifiers();
   Token const keyword = peekAhead( ahead++ );
-  bool const spelledOtherwise = keyword.keyword == Keyword::INT || keyword.keyword == Keyword::CHAR;
-  if ( keyword.kind != TokenKind::KEYWORD || ( !isType( keyword.keyword ) && !spelledOtherwise ) )
+  bool const otherwise = isSpelledOtherwise( keyword );
+  if ( keyword.kind != TokenKind::KEYWORD || ( !isType( keyword.keyword ) && !otherwise ) )
   {
     return std::nullopt;
   }
@@ -1935,12 +2054,9 @@ std::optional<Parser::TypeName> Parser::parenthesisedType()
   {
     return std::nullopt;
   }
-  if ( spelledOtherwise )
+  if ( otherwise )
   {
-    mSink->add( diagnostic( diag::DiagnosticId::C_TYPE_SPELLED_OTHERWISE )
-                    .at( keyword.location, keyword.length )
-                    .arg( "found", std::string{ mSources->textOf( keyword.span() ) } )
-                    .arg( "spelling", std::string{ keyword.keyword == Keyword::INT ? "i16" : "u8" } ) );
+    spelledOtherwise( keyword );
   }
   return TypeName{ .keyword = keyword,
                    .pointer = pointer,
@@ -2115,20 +2231,21 @@ ExpressionPtr Parser::parsePrimary()
   case TokenKind::IDENTIFIER:
   {
     advance();
-    if ( !at( TokenKind::COLON_COLON ) )
+    if ( match( TokenKind::COLON_COLON ) )
+    {
+      fail( "a name" );
+      return nullptr;
+    }
+    if ( !isQualified( mSources->textOf( token.span() ) ) )
     {
       return makeExpression( ExpressionKind::IDENTIFIER, token, token.span() );
     }
-    advance();
-    Token const member = peek();
-    if ( !match( TokenKind::IDENTIFIER ) )
-    {
-      fail( "an enumerator" );
-      return nullptr;
-    }
-    ExpressionPtr node =
-        makeExpression( ExpressionKind::QUALIFIED_NAME, member, spanning( token.span(), member.span() ) );
-    node->left = makeExpression( ExpressionKind::IDENTIFIER, token, token.span() );
+    // Kept in its parts until the check knows whether the first names an
+    // `enum`, whose enumerator it then is; otherwise it is one name again —
+    // see docs/decisions/0230-c-names-a-namespace-with-two-colons.md.
+    auto const [prefix, member] = splitQualified( *mSources, token );
+    ExpressionPtr node = makeExpression( ExpressionKind::QUALIFIED_NAME, member, token.span() );
+    node->left = makeExpression( ExpressionKind::IDENTIFIER, prefix, prefix.span() );
     node->right = makeExpression( ExpressionKind::IDENTIFIER, member, member.span() );
     return node;
   }

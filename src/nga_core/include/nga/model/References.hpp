@@ -48,8 +48,8 @@ std::string_view nameOf( ReferenceKind kind );
 /// What one expression of a Chunk reaches, told to whoever asked.
 ///
 /// A Reference is a use of a Symbol inside a Chunk, and two Steps ask about
-/// the same ones: the type check, for where a Reference may point and where it
-/// holds a Movable Section still, and Prune, for what is kept. One walk serves
+/// the same ones: the type check, for where a Reference may point and which
+/// Phases name each Section, and Prune, for what is kept. One walk serves
 /// both, so that they cannot disagree about which names reach memory — a
 /// disagreement that would show up exactly on `x.runtimeSectionSize`, which
 /// reaches nothing, against `x.runtimeSectionAddress`, which does.
@@ -69,6 +69,15 @@ public:
 
   /// A local label, which is a position in the referrer's own Module.
   virtual void localReference( LabelPosition /*target*/ ) {}
+
+  /// A Section named for its linear address: kept, and present where the
+  /// referrer is, as any Reference is — but read by the medium and never
+  /// by the CPU through a Window, so a visitor that asks what the CPU
+  /// reaches skips it. See docs/decisions/0251-a-bank-has-a-linear-address.md.
+  virtual void linearReference( SymbolRef target )
+  {
+    reference( target );
+  }
 };
 
 /// Walks one expression as the Module `from` reads it, and reports every
@@ -79,8 +88,11 @@ public:
 /// a cycle among Constants has been reported by typing and is not followed
 /// here. A Section's size and its Residency are facts and not memory, so
 /// `.runtimeSectionSize` and `.resident` reach nothing; `.runtimeSectionAddress` reaches the
-/// Section. A name that resolves to nothing has been reported by typing and is
-/// skipped. Charsets are not memory.
+/// Section, and `.linearSectionAddress` and `.linearFamilyAddress` reach it
+/// as a linear Reference. A difference of two positions in one Section is a
+/// size too, and reaches nothing of that Section — see
+/// docs/decisions/0252-a-difference-in-one-section-reaches-nothing.md. A name that resolves to nothing has been
+/// reported by typing and is skipped. Charsets are not memory.
 void walkReferences( GlobalSymbols const& symbols,
                      diag::SourceManager const& sources,
                      ModuleIndex from,

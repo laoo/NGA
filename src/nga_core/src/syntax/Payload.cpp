@@ -1,5 +1,7 @@
 #include "nga/syntax/Payload.hpp"
 
+#include "nga/syntax/Literal.hpp"
+
 #include <algorithm>
 #include <cstddef>
 
@@ -30,19 +32,7 @@ int valueOf( Payload encoding, char c )
   switch ( encoding )
   {
   case Payload::HEX:
-    if ( c >= '0' && c <= '9' )
-    {
-      return c - '0';
-    }
-    if ( c >= 'a' && c <= 'f' )
-    {
-      return c - 'a' + 10;
-    }
-    if ( c >= 'A' && c <= 'F' )
-    {
-      return c - 'A' + 10;
-    }
-    return -1;
+    return hexDigitValue( c );
 
   case Payload::BINARY:
     return c == '0' || c == '1' ? c - '0' : -1;

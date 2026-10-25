@@ -35,7 +35,7 @@ address
 
 <!-- diagnostics 13-roots/nobody -->
 ```
-error[NGA4606]: the address of `handler` is taken and nothing says who follows it: `.own` if this section does, `.own NAME` if another does, `.root` if the hardware does
+error[NGA4606]: the address of `handler` is taken and nothing says who follows it: `.own` if this section does, `.own NAME` if another does, `.root HOLDER` if the hardware does
   --> call.asm:15:9
    |
 15 |         .word handler
@@ -55,6 +55,11 @@ Either one alone would be a guess, and the tool makes neither: an edge of the
 graph belongs to the taking, so a Section that jumps through a pointer and
 owns no address of code would jump nowhere, which is not something the model
 should be made to believe.
+
+An address of data needs none of this. A table taken to read or write through,
+`.word colors`, is fine with nothing said, even where it sits in a `.section`
+next to the code that uses it. What counts is the Label: one that stands at a
+`.byte`, a `.word` or a `.res` names data.
 
 ## Naming the follower
 
@@ -141,14 +146,14 @@ number of bytes, and they are not the same program:
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 1 of 128 bytes
   memory:    68 of 40960 bytes
-  $0080-$0080  pick.entry.band temporary          phase0  shares with entry.best
-  $0080-$0080  pick.entry.best temporary          phase0  shares with entry.band
-  $2000-$2004  pick.input      section            phase0
-  $2005-$2005  pick.out        section            phase0
-  $2006-$2043  pick.entry      proc               phase0
+  $0080-$0080  pick.entry.band temporary          (implicit)  shares with entry.best
+  $0080-$0080  pick.entry.best temporary          (implicit)  shares with entry.band
+  $2000-$2004  pick.input      section            (implicit)
+  $2005-$2005  pick.out        section            (implicit)
+  $2006-$2043  pick.entry      proc               (implicit)
 ```
 <!-- end -->
 
@@ -156,14 +161,14 @@ phase phase0 (0)
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 2 of 128 bytes
   memory:    68 of 40960 bytes
-  $0080-$0080  pick.entry.best temporary          phase0
-  $0081-$0081  pick.entry.band temporary          phase0
-  $2000-$2004  pick.input      section            phase0
-  $2005-$2005  pick.out        section            phase0
-  $2006-$2043  pick.entry      proc               phase0
+  $0080-$0080  pick.entry.best temporary          (implicit)
+  $0081-$0081  pick.entry.band temporary          (implicit)
+  $2000-$2004  pick.input      section            (implicit)
+  $2005-$2005  pick.out        section            (implicit)
+  $2006-$2043  pick.entry      proc               (implicit)
 ```
 <!-- end -->
 
@@ -181,28 +186,42 @@ Section that jumps through it, `.dispatch` says the same thing and keeps what
 
 ## What nothing reaches
 
-<!-- include 13-roots/dropped/screen.asm tag=dropped -->
+<!-- include 13-roots/dropped/os.asm -->
 ```asm
-; A display list is what ANTIC reads to know how to draw the screen, and the
-; screen it points at is forty bytes ANTIC reads as well. No instruction in
-; this program names either of them, because nothing in this program looks at
-; them: the hardware does.
-.section
-displayList
-        .byte $70, $70, $70, $42
-        .word row
-        .byte $41
-        .word displayList
+; The machine's OS keeps its variables in page two, and reads and writes them
+; on every interrupt. This program never touches them, so no instruction in it
+; names them.
+.section absolute at $0200
+osVars
+        .res $100
 .ends
+```
+<!-- end -->
 
+<!-- include 13-roots/dropped/program.asm -->
+```asm
+; A buffer of the program's own, placed wherever the solver finds room, and the
+; code that uses it.
 .section
-row
-        .res 40
+buffer
+        .res $100
 .ends
 
 .proc entry
+        lda #0
+        sta buffer
         rts
 .endp
+```
+<!-- end -->
+
+<!-- diagnostics 13-roots/dropped -->
+```
+warning[NGA4505]: `osVars` is pinned at $0200 and nothing reaches it, so it is dropped; mark it `root` if the hardware reads it
+ --> os.asm:4:1
+  |
+4 | .section absolute at $0200
+  | ^^^^^^^^
 ```
 <!-- end -->
 
@@ -210,45 +229,32 @@ row
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 0 of 128 bytes
-  memory:    1 of 40960 bytes
-  $2000-$2000  screen.entry proc               phase0
+  memory:    262 of 48640 bytes
+  $0200-$02FF  program.buffer section            (implicit)
+  $0300-$0305  program.entry  proc               (implicit)
 ```
 <!-- end -->
 
-The display list is gone, and so are the forty bytes it pointed at. One byte
-of program is left, which is the `rts`. Prune keeps what is reached from a
-Root and drops the rest, and here nothing in the program reaches either
-Section — correctly, since nothing in the program is meant to.
+The OS's variables are gone. Prune keeps what is reached from a Root and drops
+the rest, and nothing in the program reaches `osVars`. The solver then sees
+page two as free memory and puts `buffer` there, on top of the variables the OS
+keeps writing. The warning is there because of the pin: a Section pinned to an
+address is usually there because something expects it there.
 
-Which memory the hardware reads is a fact about the machine and about what the
-program is for. Nothing in the code says it, so it is declared:
+Which memory something outside the program uses is a fact about the machine.
+Nothing in the code says it, so it is declared:
 
-<!-- include 13-roots/kept/screen.asm tag=kept -->
+<!-- include 13-roots/kept/os.asm -->
 ```asm
-; A display list is what ANTIC reads to know how to draw the screen, and the
-; screen it points at is forty bytes ANTIC reads as well. No instruction in
-; this program names either of them, because nothing in this program looks at
-; them: the hardware does. One word says so, and it stands on the display
-; list alone — the forty bytes are reached from it, the way anything else is
-; reached from what names it.
-.section root
-displayList
-        .byte $70, $70, $70, $42
-        .word row
-        .byte $41
-        .word displayList
+; The machine's OS keeps its variables in page two, and reads and writes them
+; on every interrupt. Nothing in this program reaches them, so `root` says that
+; something outside the program does.
+.section absolute at $0200, root
+osVars
+        .res $100
 .ends
-
-.section
-row
-        .res 40
-.ends
-
-.proc entry
-        rts
-.endp
 ```
 <!-- end -->
 
@@ -256,18 +262,17 @@ row
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 0 of 128 bytes
-  memory:    50 of 40960 bytes
-  $2000-$2008  screen.displayList section root       phase0
-  $2009-$2030  screen.row         section            phase0
-  $2031-$2031  screen.entry       proc               phase0
+  memory:    518 of 48640 bytes
+  $0200-$02FF  os.osVars      section root       (implicit)
+  $0300-$03FF  program.buffer section            (implicit)
+  $0400-$0405  program.entry  proc               (implicit)
 ```
 <!-- end -->
 
-The word goes on the display list alone. The forty bytes come back with it,
-reached the way anything is reached from what names it, and the map says which
-Section was kept for a reason no Chunk gives.
+`osVars` stays in page two and `buffer` moves to page three. The map marks the
+Section `root`, since no Chunk reaches it.
 
 ## What the hardware follows
 
@@ -289,16 +294,16 @@ that is where the reader will look for it:
 <!-- include 13-roots/vbi/tick.asm tag=install -->
 ```asm
 ; `SETVBV` takes the stage in `A` and the routine in `X` and `Y`, so the
-; address is taken twice and each taking says who follows it. The hardware
-; does, and `.root` is how that is written.
+; address is taken twice and each taking says who follows it. The deferred
+; vertical blank does, and `.root vbd` is how that is written.
 .proc entry
         lda #0
         sta ticks
 
-        lda #6                          ; the deferred vertical blank
-        .root
+        lda #7                          ; the deferred vertical blank
+        .root vbd
         ldx #>onVerticalBlank
-        .root
+        .root vbd
         ldy #<onVerticalBlank
         jsr SETVBV
 
@@ -316,33 +321,70 @@ that is where the reader will look for it:
 ```
 <!-- end -->
 
-`.root` declares that the address goes to the hardware. What it names becomes
-a Root from there: kept by Prune, active in every state for Trace, and never
-the target of one of the program's own jumps — which is the difference from
-`.own`, and why a statement may not carry both.
+`.root vbd` declares that the address goes to the hardware, and names which
+hardware takes it. `vbd` is the deferred vertical blank, one of the **Holders**
+the machine declares with `holder` in its `target` block. A Holder is hardware
+that holds one Section at a time, and `atari/130xe.ngp` declares nine: `dlist`,
+`dli`, `vbi`, `vbd`, `nmi`, `irq`, `chbase`, `pmbase` and `dosini`. A `.root`
+always names one, and a name that is not one of them is an error.
 
-<!-- map 13-roots/vbi phase=phase0 rows=tick -->
+What a Holder is handed becomes a Root from there: kept by Prune, active in
+every state for Trace, and never the target of one of the program's own jumps.
+That is the difference from `.own`, and why a statement may not carry both.
+
+<!-- map 13-roots/vbi phase=(implicit) rows=tick -->
 ```
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 129 of 256 bytes
-  memory:    15660 of 56576 bytes
+  memory:    15719 of 40192 bytes
   ...
-  $0080-$0080  tick.ticks           section            phase0
+  $0080-$0080  tick.ticks            section            (implicit)
   ...
-  $2000-$2004  tick.onVerticalBlank proc root          phase0
-  $2005-$200B  tick.word            section            phase0
-  $200C-$202B  tick.entry           proc               phase0
+  $201F-$2023  tick.onVerticalBlank  proc root          (implicit)
+  $2024-$202A  tick.word             section            (implicit)
+  $202B-$204A  tick.entry            proc               (implicit)
   ...
 ```
 <!-- end -->
 
-`onVerticalBlank` is a Root, and no attribute on it says so; the two `.root`
+`onVerticalBlank` is a Root, and no attribute on it says so; the two `.root vbd`
 lines in the other Proc are what put it there. On the machine the program
 waits for the handler to have run fifty times and then writes to the screen,
 so the words appearing at all is the handler having been kept and having run.
 
 This is not new machinery arriving at chapter thirteen. The rows that map
-leaves out are the OS's, and every one of them is a Root — `atari/os.asm` has
-marked them so since chapter three, because the hardware and the OS reach that
+leaves out are the OS's, and every one of them is a Root — `atari/osram.asm`
+and `atari/osrom.asm` have marked them so since chapter three, because the hardware and the OS reach that
 memory with no Reference anywhere in any program, and without the word not one
 of them would survive Prune.
+
+## How long the hardware holds it
+
+A Holder lets go of a Section when it is given another one. ANTIC reads one
+display list, and an interrupt vector points at one handler. `.root dlist`
+hands ANTIC a display list:
+
+```asm
+        .root dlist
+        lda #<titleList
+        sta SDLSTL
+        .root dlist
+        lda #>titleList
+        sta SDLSTL+1
+```
+
+From here ANTIC holds `titleList`, and it keeps holding it until the program
+hands `dlist` another display list or writes `.release dlist`. The tool follows
+this through the code, across `.transition`, and keeps `titleList` and whatever
+it names, such as the screen memory it points at, in place in every Phase where
+ANTIC may still read it. A Phase that needs nothing of the title screen still
+keeps its display list if it was entered while ANTIC was showing it.
+
+The tool follows each path separately. If one path hands over one list before
+one `.transition` and another path hands over a second list before a different
+one, each Phase entered keeps only its own. A `.release` frees the Section only
+on the paths that pass through it.
+
+What a Holder holds is a whole Section. A display list that shares a Section
+with another one also holds whatever the other one names, so give a list you
+hand over a Section of its own.

@@ -51,37 +51,12 @@ std::vector<std::uint8_t> stubFor( std::uint32_t entry )
 
 PrgFile emitPrg( Patched const& build, diag::DiagnosticSink& sink )
 {
-  diag::SourceManager const& sources = build.sources();
-  GlobalSymbols const& symbols = build.symbols();
-
   // A Payload waits in storage for a Transition to read it, and this Container
   // carries no loader: a PET is handed one contiguous block and a line of
   // BASIC. So a Payload here is bytes nothing would ever put where they belong,
-  // which is a refusal and not a silence — as it is in a `bs93`.
-  bool refused = false;
-  Storage const& storage = build.storage();
-  for ( std::uint32_t module = 0; module < symbols.modules().size(); ++module )
-  {
-    Module const& one = symbols.modules()[module];
-    for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
-    {
-      SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
-      if ( !storage.hasPayload( where ) )
-      {
-        continue;
-      }
-      Section const& section = one.sections()[index];
-      sink.add( diag::diagnostic( diag::DiagnosticId::PRG_HAS_A_PAYLOAD )
-                    .at( section.span().begin, section.span().length )
-                    .arg( "section", one.displayNameOf( where.section, sources ) ) );
-      refused = true;
-    }
-  }
-
-  // Before the image, for the reason a `bs93` reports it before the image: a
-  // program refused for waiting in storage would otherwise also be told that
-  // its Phases share addresses, which is the same fault read a second way.
-  if ( refused )
+  // which is a refusal and not a silence — as it is in a `bs93`, and before the
+  // image for the same reason.
+  if ( refusedPayloads( build, diag::DiagnosticId::PRG_HAS_A_PAYLOAD, sink ) )
   {
     return PrgFile{};
   }
@@ -91,7 +66,6 @@ PrgFile emitPrg( Patched const& build, diag::DiagnosticSink& sink )
 
 PrgFile prgWith( Patched const& build, diag::DiagnosticSink& sink )
 {
-  Project const& project = build.project();
 
   // What the block carries: the Sections the entry Phase needs that emit
   // bytes, the driver and the decoders among them, laid end to end from the
@@ -102,6 +76,8 @@ PrgFile prgWith( Patched const& build, diag::DiagnosticSink& sink )
   std::vector<Resident> const carried = residentSections( build, {} );
   if ( carried.empty() )
   {
+    sink.add( diag::diagnostic( diag::DiagnosticId::NOTHING_TO_CARRY )
+                  .arg( "container", std::string{ nameOf( build.project().container ) } ) );
     return PrgFile{};
   }
   std::uint32_t begin = 0xFFFFFFFF;
@@ -132,17 +108,23 @@ PrgFile prgWith( Patched const& build, diag::DiagnosticSink& sink )
     return PrgFile{};
   }
 
-  std::optional<std::uint32_t> const entry = entryAddressOf( build, project.phases.entry, sink );
-  if ( !entry.has_value() )
+  std::optional<std::uint32_t> const found = startAddressOf( build, sink );
+  if ( !found.has_value() )
   {
     return PrgFile{};
   }
+  // Through the stub where there is one, so that the program's return reaches
+  // the driver's `finalize` before it reaches BASIC — see
+  // docs/decisions/0229-no-window-has-a-base.md.
+  std::optional<std::uint32_t> const run =
+      addressOfExported( build.symbols(), RUN_NAME, build.sizes(), build.layout() );
+  std::uint32_t const entry = run.value_or( *found );
 
   PrgFile file;
   file.bytes.reserve( PRG_STUB_SIZE + 2 + image.bytes.size() );
   file.bytes.push_back( static_cast<std::uint8_t>( PRG_LOAD_ADDRESS & 0xFF ) );
   file.bytes.push_back( static_cast<std::uint8_t>( PRG_LOAD_ADDRESS >> 8 ) );
-  std::vector<std::uint8_t> const stub = stubFor( *entry );
+  std::vector<std::uint8_t> const stub = stubFor( entry );
   file.bytes.insert( file.bytes.end(), stub.begin(), stub.end() );
 
   // The block is one run, so a program whose lowest Section stands well above

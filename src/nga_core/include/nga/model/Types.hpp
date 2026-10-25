@@ -1,9 +1,9 @@
 #pragma once
 
-#include "nga/model/PlacementClass.hpp"
 #include "nga/model/Project.hpp"
 #include "nga/model/Section.hpp"
 #include "nga/syntax/Expression.hpp"
+#include "nga/syntax/Statement.hpp"
 
 #include <cstdint>
 
@@ -14,11 +14,15 @@ namespace nga::model
 ///
 /// Runtime and storage are separate systems assigned by separate Steps, so
 /// mixing them is an error rather than a number. The tag is also what makes
-/// leaving the storage model unsettled safe rather than merely late.
+/// leaving the storage model unsettled safe rather than merely late. Linear is
+/// the medium's own memory behind a Window, which a blitter or a video chip
+/// reads and the CPU never does — see
+/// docs/decisions/0251-a-bank-has-a-linear-address.md.
 enum class Space : std::uint8_t
 {
   RUNTIME,
   STORAGE,
+  LINEAR,
 };
 
 std::string_view nameOf( Space space );
@@ -42,7 +46,7 @@ struct Type
   SectionRef section;
 
   /// Meaningful for ADDRESS.
-  PlacementClass placement = PlacementClass::ABSOLUTE;
+  syntax::PlacementClass placement = syntax::PlacementClass::ABSOLUTE;
 
   /// Meaningful for PANE: which Pane, and how many members it has — one for
   /// a Pane, more for a family, of which `member` is the one named so far.
@@ -77,7 +81,7 @@ struct Type
     return Type{ .kind = syntax::ExpressionType::STRING, .section = {} };
   }
 
-  static Type address( SectionRef where, PlacementClass placement, Space space = Space::RUNTIME )
+  static Type address( SectionRef where, syntax::PlacementClass placement, Space space = Space::RUNTIME )
   {
     return Type{ .kind = syntax::ExpressionType::ADDRESS, .space = space, .section = where, .placement = placement };
   }

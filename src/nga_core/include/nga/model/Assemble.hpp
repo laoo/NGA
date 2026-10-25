@@ -6,6 +6,7 @@
 #include "nga/model/Project.hpp"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace nga::model
@@ -20,6 +21,18 @@ Module assembleModule( diag::SourceManager const& sources,
                        std::string name,
                        Residency residency,
                        diag::DiagnosticSink& sink );
+
+/// Adds a Module the tool writes once the program's own are assembled:
+/// `nga.NAME` from `<nga>/NAME.asm`, assembled at once into `modules`, kept
+/// outside every Window as every generated Proc the driver's macros land in
+/// is, and needed by every Phase of `residency`. Its index.
+ModuleIndex addAssembledModule( diag::SourceManager& sources,
+                                Project& project,
+                                std::vector<Module>& modules,
+                                std::string_view name,
+                                std::string source,
+                                Residency const& residency,
+                                diag::DiagnosticSink& sink );
 
 /// The Assemble Step for a whole Project.
 ///

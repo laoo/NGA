@@ -16,9 +16,11 @@
 ; having is an edge written `fast`, whose images begin where a page does and cost
 ; no reads at all — see 0221.
 
-.driver open  cartOpen
-.driver read  cartRead
-.driver seek  forward
+.driver open   cartOpen
+.driver read   cartRead
+.driver unit   cartWantPage
+.driver offset cartWant
+.driver seek   forward
 
 .transform copy cartCopy
 
@@ -32,7 +34,9 @@
 
 ; Where the stream stands, which has to survive between one call and the next
 ; while nothing here is running — a plain Section and not Temporaries, as the
-; diskette's is.
+; diskette's is. `cartWant` and `cartWantPage` are also the cells the routine
+; writes a position into before it opens the stream, the offset and the unit,
+; which `open` turns into a page and an offset within it.
 .section zeropage
 cartPage        .res 1                  ; the page the shift register holds
 cartPos         .res 2                  ; how far into it the counter has walked
@@ -40,13 +44,22 @@ cartWant        .res 2                  ; the offset `open` was asked for
 cartWantPage    .res 1
 .ends
 
-; A = the unit, X the offset's low byte and Y its high one.
+; The stream to the position in cartWantPage and cartWant. An offset past the
+; page's end carries into the pages after, since the routine counts on in a
+; Frame without knowing where a unit ends; a page is a whole number of 256
+; bytes, so the offset's high byte alone says how far.
 .proc cartOpenStream
-        clc
-        adc #1                          ; the model's unit i is page i + 1
-        sta cartWantPage
-        stx cartWant
-        sty cartWant+1
+        inc cartWantPage                ; the model's unit i is page i + 1
+@carry
+        lda cartWant+1
+        cmp #>LYNX_PAGE_SIZE
+        bcc @within
+        sbc #>LYNX_PAGE_SIZE
+        sta cartWant+1
+        inc cartWantPage
+        jmp @carry
+@within
+        lda cartWantPage
         cmp cartPage
         bne @again
 

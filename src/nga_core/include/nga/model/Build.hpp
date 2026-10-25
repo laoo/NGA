@@ -10,7 +10,8 @@ namespace nga::model
 {
 
 class Bytes;
-class Freezes;
+class Referrers;
+class Holds;
 class Interference;
 class Layout;
 class Reachable;
@@ -104,41 +105,50 @@ private:
   Reachable const& mReachable;
 };
 
-/// Pruned, and which Temporaries Trace found never live at once. What the
-/// type check and Size are handed, though neither reads it: it stands here
-/// because Trace walks the References Prune walked and needs nothing of what
-/// comes after, and Place reads it.
+/// Pruned, and which Temporaries Trace found never live at once, and what the
+/// Holders hold. What the type check and Size are handed, though neither reads
+/// it: it stands here because Trace walks the References Prune walked and
+/// needs nothing of what comes after, and Place reads it.
 class Traced : public Pruned
 {
 public:
-  Traced( Pruned const& pruned, Interference const& interference ) : Pruned( pruned ), mInterference( interference ) {}
+  Traced( Pruned const& pruned, Interference const& interference, Holds const& holds )
+      : Pruned( pruned ), mInterference( interference ), mHolds( holds )
+  {
+  }
 
   [[nodiscard]] Interference const& interference() const
   {
     return mInterference;
   }
 
+  [[nodiscard]] Holds const& holds() const
+  {
+    return mHolds;
+  }
+
 private:
   Interference const& mInterference;
+  Holds const& mHolds;
 };
 
 /// Traced, and what the type check and Size produced. What Place is handed.
 ///
 /// The two arrive together because they are what stands between Trace and
 /// Place, and neither reads the other: the type check resolves References and
-/// records where a Movable Section is held still, Size resolves widths, and a
+/// records the Phases each Section is named from, Size resolves widths, and a
 /// Step that needs one of them has always run after both.
 class Sized : public Traced
 {
 public:
-  Sized( Traced const& traced, Freezes const& freezes, Sizes const& sizes )
-      : Traced( traced ), mFreezes( freezes ), mSizes( sizes )
+  Sized( Traced const& traced, Referrers const& referrers, Sizes const& sizes )
+      : Traced( traced ), mReferrers( referrers ), mSizes( sizes )
   {
   }
 
-  [[nodiscard]] Freezes const& freezes() const
+  [[nodiscard]] Referrers const& referrers() const
   {
-    return mFreezes;
+    return mReferrers;
   }
 
   [[nodiscard]] Sizes const& sizes() const
@@ -147,7 +157,7 @@ public:
   }
 
 private:
-  Freezes const& mFreezes;
+  Referrers const& mReferrers;
   Sizes const& mSizes;
 };
 

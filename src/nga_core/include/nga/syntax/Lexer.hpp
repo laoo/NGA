@@ -47,12 +47,10 @@ private:
   Token lexPunctuation( std::uint32_t begin, bool startsLine );
   Token lexUnexpected( std::uint32_t begin, bool startsLine );
 
-  /// Consumes one character of text content, reporting ill-formed UTF-8 and,
-  /// when `plainAscii`, anything outside ASCII. `reportedNonAscii` latches, so
-  /// a literal complains about its encoding at most once.
   /// One character of a comment or a literal. Invalid UTF-8 is reported here
-  /// because it is a fact about the bytes; whether a non-ASCII character is
-  /// allowed is a fact about where the literal stands, and belongs above.
+  /// because it is a fact about the bytes, once per comment or literal, which
+  /// `reportedInvalid` latches; whether a non-ASCII character is allowed is a
+  /// fact about where the literal stands, and belongs above.
   void consumeTextCharacter( bool& reportedInvalid );
 
   diag::SourceManager const* mSources;

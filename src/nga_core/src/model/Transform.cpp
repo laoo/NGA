@@ -1,11 +1,14 @@
 #include "nga/model/Transform.hpp"
 
 #include "nga/model/Assemble.hpp"
+#include "nga/model/InPlace.hpp"
+#include "nga/model/Segments.hpp"
 #include "nga/model/Transition.hpp"
 #include "nga/model/Zx0.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -131,12 +134,53 @@ std::vector<Storage::StoredPiece> piecesOf( Format const& format,
   return pieces;
 }
 
+/// A byte read and a byte written, the size bytes first, as `copy` reads it.
+std::optional<std::uint32_t> copyMargin( std::span<std::uint8_t const> form )
+{
+  InPlace stream{ form };
+  stream.read();
+  stream.read();
+  while ( stream.more() )
+  {
+    stream.read();
+    stream.wrote( 1 );
+  }
+  return stream.margin();
+}
+
+/// As `lib/stream/rle.asm` reads it: the size, then a control byte per packet,
+/// and a literal's bytes each written as it is read, or a run's one value
+/// written as many times as the packet counts.
+std::optional<std::uint32_t> rleMargin( std::span<std::uint8_t const> form )
+{
+  InPlace stream{ form };
+  stream.read();
+  stream.read();
+  while ( stream.more() )
+  {
+    std::uint8_t const control = stream.read();
+    std::uint32_t const count = control & MOST_PER_PACKET;
+    if ( ( control & RUN_FLAG ) != 0 )
+    {
+      stream.read();
+      stream.wrote( count );
+      continue;
+    }
+    for ( std::uint32_t i = 0; i < count && stream.more(); ++i )
+    {
+      stream.read();
+      stream.wrote( 1 );
+    }
+  }
+  return stream.margin();
+}
+
 /// The formats the tool encodes, by name. The number a block carries is not
 /// here: it is the position of the format's decoder in the Project's list,
 /// which the end of Assemble decides.
-constexpr std::array<Format, 3> FORMATS{ { { .name = "copy", .encode = &encodeCopy },
-                                           { .name = "rle", .encode = &encodeRle },
-                                           { .name = "zx0", .encode = &encodeZx0 } } };
+constexpr std::array<Format, 3> FORMATS{ { { .name = "copy", .encode = &encodeCopy, .margin = &copyMargin },
+                                           { .name = "rle", .encode = &encodeRle, .margin = &rleMargin },
+                                           { .name = "zx0", .encode = &encodeZx0, .margin = &zx0InPlaceMargin } } };
 
 } // namespace
 
@@ -160,20 +204,6 @@ Format const* formatNamed( std::string_view name )
 namespace
 {
 
-/// Where a Symbol of a Module is, by name.
-std::optional<std::uint32_t> symbolIndexOf( Module const& module, std::string_view name )
-{
-  std::vector<Symbol> const& symbols = module.symbols().symbols();
-  for ( std::uint32_t index = 0; index < symbols.size(); ++index )
-  {
-    if ( symbols[index].name == name )
-    {
-      return index;
-    }
-  }
-  return std::nullopt;
-}
-
 /// Numbers the decoders: `copy` first, then Project and declaration order,
 /// holding a format to one decoder and every decoder to a format the tool
 /// encodes. Only what the program can reach is numbered — `copy`, and every
@@ -194,7 +224,7 @@ void numberDecoders( Project& project, std::span<Module const> modules, diag::Di
   {
     for ( TransformDeclaration const& declaration : modules[index].transforms() )
     {
-      std::optional<std::uint32_t> const symbol = symbolIndexOf( modules[index], declaration.label );
+      std::optional<std::uint32_t> const symbol = modules[index].symbols().indexOf( declaration.label );
       if ( !symbol.has_value() || modules[index].symbols().symbols()[*symbol].kind != SymbolKind::LABEL )
       {
         // Reported by the Module, which found no Label of that name.
@@ -211,6 +241,13 @@ void numberDecoders( Project& project, std::span<Module const> modules, diag::Di
       { return other.declaration->format == declaration.format; };
       if ( auto const other = std::ranges::find_if( declared, same ); other != declared.end() )
       {
+        // The copy a compressed file decodes with while it loads is the same
+        // text as the resident decoder and is no second decoder of the
+        // format — see docs/decisions/0259-a-xex-may-be-compressed-segment-by-segment.md.
+        if ( project.loadModule == ModuleIndex{ index } )
+        {
+          continue;
+        }
         sink.add( diag::diagnostic( diag::DiagnosticId::FORMAT_ALREADY_DECODED )
                       .at( declaration.formatSpan.begin, declaration.formatSpan.length )
                       .arg( "format", std::string{ declaration.format } )
@@ -279,8 +316,18 @@ void resolveTransforms( diag::SourceManager const& /*sources*/,
     if ( formatNamed( request.transform ) == nullptr )
     {
       sink.add( diag::diagnostic( diag::DiagnosticId::NO_SUCH_TRANSFORM )
-                    .at( request.span.begin, request.span.length )
+                    .at( request.formatSpan.begin, request.formatSpan.length )
                     .arg( "transform", request.transform ) );
+      continue;
+    }
+    // Without storage only a `.xex` decodes anything, while it loads, so in
+    // any other Container there is no decoder to look for.
+    if ( !project.target.hasStorage() && project.container != Container::XEX && request.transform != "copy" )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::TRANSFORM_WITHOUT_LOADER )
+                    .at( request.span.begin, request.span.length )
+                    .arg( "section", request.section )
+                    .arg( "module", std::string{ modules[request.module.value].name() } ) );
       continue;
     }
     if ( !decoderOf( project, request.transform ).has_value() )
@@ -333,7 +380,14 @@ void resolveTransforms( diag::SourceManager const& /*sources*/,
   // rather than about the Section. Which Sections have a Payload is the load
   // set of every edge, which is what PlaceStorage will ask the same question
   // of later.
+  // And the cold start's, which loads the entry Phase from nowhere wherever a
+  // Container takes one — see
+  // docs/decisions/0236-a-xex-with-storage-brings-a-transformed-start-by-a-cold-start.md.
   std::vector<SectionRef> payloads;
+  if ( takesColdStart( project ) )
+  {
+    payloads = loadSetOf( project.phases, std::nullopt, project.phases.entry, modules );
+  }
   for ( std::uint32_t from = 0; from < project.phases.phases.size(); ++from )
   {
     for ( PhaseIndex const next : project.phases.phases[from].then )
@@ -347,6 +401,14 @@ void resolveTransforms( diag::SourceManager const& /*sources*/,
 
   for ( std::size_t index = 0; index < transformed.size(); ++index )
   {
+    // Without storage nothing is loaded by an edge: a `.xex` decodes the
+    // Section while it loads, which the load's own Step answers for, and no
+    // other Container was let this far — see
+    // docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+    if ( !project.target.hasStorage() )
+    {
+      continue;
+    }
     if ( std::ranges::find( payloads, transformed[index] ) != payloads.end() )
     {
       continue;
@@ -363,19 +425,11 @@ void transformPayloads( Sized const& build, Storage& storage, Bytes const& bytes
   Sizes const& sizes = build.sizes();
   std::span<Module const> const modules = build.modules();
 
-  // What one form may come to, where a driver is promised that nothing crosses
-  // a unit: the widest unit there is, since that is the ceiling an author is
-  // held to and the placement will find it. Zero where images may cross, and
-  // then nothing is ever cut.
-  Target const& target = build.project().target;
-  std::uint32_t ceiling = 0;
-  if ( build.project().driver.has_value() && build.project().driver->spansNothing )
-  {
-    for ( std::uint32_t unit = 0; target.bankSize() > 0 && unit * target.bankSize() < target.storageSize(); ++unit )
-    {
-      ceiling = std::max( ceiling, target.usableInUnit( unit ) );
-    }
-  }
+  // What one form may come to, where images stay inside one unit: the widest
+  // unit there is, since that is the ceiling an author is held to and the
+  // placement will find it. Zero where images may cross, and then nothing is
+  // ever cut.
+  std::uint32_t const ceiling = imagesStayInOneUnit( build.project() ) ? build.project().target.widestUsableUnit() : 0;
   for ( std::uint32_t module = 0; module < modules.size(); ++module )
   {
     Module const& one = modules[module];
@@ -393,14 +447,49 @@ void transformPayloads( Sized const& build, Storage& storage, Bytes const& bytes
       Format const& format = formats()[one.sections()[index].format()];
       TransformId const id = decoderOf( build.project(), format.name ).value_or( TRANSFORM_COPY );
       InitialisedExtent const extent = sizes.initialisedExtentOf( where );
-      std::span<std::uint8_t const> const content = bytes.of( where );
-      std::span<std::uint8_t const> const initialised =
-          content.subspan( std::min<std::size_t>( extent.begin, content.size() ),
-                           std::min<std::size_t>( extent.size(), content.size() - extent.begin ) );
+      std::span<std::uint8_t const> const initialised = contentOf( bytes, where, extent );
       storage.store( where, id, piecesOf( format, initialised, extent.begin, ceiling ) );
     }
   }
 }
+
+namespace
+{
+
+/// The glue a Container that loads through memory calls: a cell it writes a
+/// state's index into, and INITAD at the Proc that hands it to `showAt`.
+/// Roots, since nothing in the program names them, and only for the Container
+/// that does: a raw image would carry the resident bytes for nothing, and a
+/// Root where the program declared none would turn Prune on. Without a Window
+/// the stream reads through there is nothing to fill, and the Container says
+/// so when it is written. Nothing where there is nothing to write.
+std::string loaderGlueOf( Project const& project )
+{
+  if ( project.container != Container::XEX || !project.driver.has_value() || !project.driver->stream.has_value() )
+  {
+    return {};
+  }
+  std::string const window = project.target.windows[project.driver->stream->value].name;
+  bool const wide = stateBytesOf( project, *project.driver->stream ) > 1;
+  std::string source = ".export ngaLoadUnit, ngaLoadMap\n"
+                       ".section root\n"
+                       "ngaLoadUnit\n";
+  source += wide ? "        .res 2\n" : "        .res 1\n";
+  source += ".ends\n"
+            ".proc ngaLoadMap, root\n"
+            "        ldx ngaLoadUnit\n";
+  if ( wide )
+  {
+    source += "        ldy ngaLoadUnit+1\n";
+  }
+  source += "        nga.showAt " + window +
+            "\n"
+            "        rts\n"
+            ".endp\n";
+  return source;
+}
+
+} // namespace
 
 void addTransformDispatcher( diag::SourceManager& sources,
                              Project& project,
@@ -414,75 +503,17 @@ void addTransformDispatcher( diag::SourceManager& sources,
   // The driver's roles are macros of the driver's Module, used here as
   // `nga.show` and `nga.showAt` and expanded once this Module exists, which
   // is why it is assembled before the expansion. The Window the stream reads
-  // through, and which state is its base, are the Target's; the driver has
-  // been resolved by now, so both are known where this text is written.
+  // through is the Target's; the driver has been resolved by now, so it is
+  // known where this text is written.
   std::string source = "; The dispatcher over the decoders the program declared, in the order the\n"
                        "; tool numbered them. See docs/spec/transition.md.\n";
-  std::optional<std::string> streamWindow;
-  if ( project.driver.has_value() && project.driver->stream.has_value() )
-  {
-    streamWindow = project.target.windows[project.driver->stream->value].name;
-  }
-  bool const xex = project.container == Container::XEX;
-  std::vector<WindowIndex> const order = baseOrderOf( project );
 
-  // The bases the entered Phase gives every Window, which the routine calls
-  // for at the end of every Transition: read from the Frame, one byte per
-  // Window in the order the Frame lists them, and shown through `showAt` —
-  // the stream's Window last, since showing its base takes the stream away.
-  // Without a driver there is nothing to show, and the routine is not built.
-  source += ".export ngaShowBases\n.proc ngaShowBases\n";
-  if ( project.driver.has_value() )
-  {
-    for ( WindowIndex const window : order )
-    {
-      source += "        nga.read\n        tax\n        nga.showAt " + project.target.windows[window.value].name + "\n";
-    }
-  }
-  source += "        rts\n.endp\n";
-
-  // Base memory as the program starts: the entry Phase's base in every
-  // Window, known where this text is written, which a Container that loads
-  // through memory calls last — a Root then, since nothing in the program
-  // names it and the routine may be dropped.
-  source += ".export ngaRestore\n.proc ngaRestore";
-  source += xex ? ", root\n" : "\n";
-  if ( project.driver.has_value() )
-  {
-    for ( WindowIndex const window : order )
-    {
-      std::optional<std::uint32_t> const base = baseIn( project, project.phases.entry, window );
-      if ( base.has_value() )
-      {
-        source +=
-            "        nga.show " + project.target.windows[window.value].name + ", " + std::to_string( *base ) + "\n";
-      }
-    }
-  }
-  source += "        rts\n.endp\n";
-
-  // The glue a Container that loads through memory calls: a cell it writes
-  // a state's index into, and INITAD at the Proc that hands it to `showAt`.
-  // Roots, since nothing in the program names them, and only for the
-  // Container that does: a raw image would carry the resident bytes for
-  // nothing, and a Root where the program declared none would turn Prune on.
-  // Without a Window the stream reads through there is nothing to fill, and
-  // the Container says so when it is written.
-  if ( xex && streamWindow.has_value() )
-  {
-    source += ".export ngaLoadUnit, ngaLoadMap\n"
-              ".section root\n"
-              "ngaLoadUnit\n"
-              "        .res 1\n"
-              ".ends\n"
-              ".proc ngaLoadMap, root\n"
-              "        ldx ngaLoadUnit\n"
-              "        nga.showAt " +
-              *streamWindow +
-              "\n"
-              "        rts\n"
-              ".endp\n";
-  }
+  // Whether the routine hands the driver the set of ROMs a Phase needs, which
+  // its text asks under `.if` since it is written before the driver is read —
+  // see docs/decisions/0229-no-window-has-a-base.md.
+  bool const selects = project.driver.has_value() && project.driver->select.has_value();
+  source += ".export ngaSelects\nngaSelects = " + std::string{ selects ? "1" : "0" } + "\n";
+  source += loaderGlueOf( project );
   source += ".export ngaTransform\n.proc ngaTransform\n";
   for ( std::size_t index = 0; index < project.decoders.size(); ++index )
   {
@@ -497,25 +528,8 @@ void addTransformDispatcher( diag::SourceManager& sources,
   source += "        brk\n.endp\n";
 
   std::size_t const phaseCount = project.phases.phases.size();
-  diag::FileId const file = sources.addFile( "<nga>/transforms.asm", std::move( source ) );
-  ModuleIndex const index{ static_cast<std::uint32_t>( modules.size() ) };
-  diag::DiagnosticSink found{ sink.policy() };
-  modules.push_back( assembleModule( sources, file, "nga.transforms", Residency::all( phaseCount ), found ) );
-  modules.back().keepOutsideWindow();
-  sink.merge( std::move( found ) );
-
-  project.modules.push_back( ProjectModule{ .name = "nga.transforms",
-                                            .file = file,
-                                            .residency = Residency::all( phaseCount ),
-                                            .generated = Generated::NONE,
-                                            .outsideWindow = true } );
-  for ( Phase& phase : project.phases.phases )
-  {
-    if ( std::ranges::find( phase.needs, index ) == phase.needs.end() )
-    {
-      phase.needs.push_back( index );
-    }
-  }
+  addAssembledModule(
+      sources, project, modules, "nga.transforms", std::move( source ), Residency::all( phaseCount ), sink );
 }
 
 void addDriverInit( diag::SourceManager& sources,
@@ -523,7 +537,10 @@ void addDriverInit( diag::SourceManager& sources,
                     std::vector<Module>& modules,
                     diag::DiagnosticSink& sink )
 {
-  if ( !project.driver.has_value() || !project.driver->init.has_value() )
+  // Only for the Container that calls it: a raw image is started by nothing
+  // of the tool's, and a Root nothing calls would turn Prune on in a program
+  // that declared none.
+  if ( !project.driver.has_value() || !project.driver->init.has_value() || project.container != Container::XEX )
   {
     return;
   }
@@ -534,7 +551,6 @@ void addDriverInit( diag::SourceManager& sources,
   // has to reach the hardware before its first `.with`. A Root, since nothing
   // in the program names it — the Container calls it by address — and outside
   // the Window, as every generated Proc that the driver's macros land in is.
-  std::size_t const phaseCount = project.phases.phases.size();
   std::string source = "; The driver's `init`, wrapped so that a Container has an address to call.\n"
                        "; See docs/spec/transition.md and docs/spec/xex.md.\n"
                        ".export ngaInit\n"
@@ -542,25 +558,133 @@ void addDriverInit( diag::SourceManager& sources,
                        "        nga.init\n"
                        "        rts\n"
                        ".endp\n";
-  diag::FileId const file = sources.addFile( "<nga>/init.asm", std::move( source ) );
-  ModuleIndex const index{ static_cast<std::uint32_t>( modules.size() ) };
-  diag::DiagnosticSink found{ sink.policy() };
-  modules.push_back( assembleModule( sources, file, "nga.init", Residency::all( phaseCount ), found ) );
-  modules.back().keepOutsideWindow();
-  sink.merge( std::move( found ) );
+  // Not in a `final` Phase other than the entry, which nothing enters from
+  // the Container — see
+  // docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  addAssembledModule( sources, project, modules, "nga.init", std::move( source ), notFinal( project.phases ), sink );
+}
 
-  project.modules.push_back( ProjectModule{ .name = "nga.init",
-                                            .file = file,
-                                            .residency = Residency::all( phaseCount ),
-                                            .generated = Generated::NONE,
-                                            .outsideWindow = true } );
-  for ( Phase& phase : project.phases.phases )
+void addUnitsGlue( diag::SourceManager& sources,
+                   Project& project,
+                   std::vector<Module>& modules,
+                   diag::DiagnosticSink& sink )
+{
+  // Where there is a dispatcher it holds the glue. A program with storage has
+  // one only where it has a Transition, so one with a single Phase is here as
+  // one without storage is. What has a Bank to be shown is a Pane the solver
+  // gives one of the units the stream reads: the Container writes a Section
+  // with bytes there, and a Pane of reservations alone is still a Bank whose
+  // state only the driver can turn into hardware, which is what the glue asks
+  // it — the suite included. A Pane pinned to a named state has no Bank, and
+  // is filled through the same glue only where it holds bytes — see
+  // docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md and
+  // docs/decisions/0256-a-named-state-is-filled-where-a-xex-can-show-it.md.
+  if ( project.transitionRoutine.has_value() || !project.driver.has_value() || !project.driver->stream.has_value() )
   {
-    if ( std::ranges::find( phase.needs, index ) == phase.needs.end() )
-    {
-      phase.needs.push_back( index );
-    }
+    return;
   }
+  WindowIndex const stream = *project.driver->stream;
+  Target const& target = project.target;
+  bool const filled =
+      std::ranges::any_of( modules,
+                           [&target, stream]( Module const& module )
+                           {
+                             return std::ranges::any_of(
+                                 module.sections(),
+                                 [&target, stream]( Section const& section )
+                                 {
+                                   // A unit set's Section with bytes is filled
+                                   // through the Window that shows the set.
+                                   if ( std::optional<UnitSetIndex> const set = section.unitSet(); set.has_value() )
+                                   {
+                                     return section.emitsBytes() && target.unitSetShownBy( stream ) == set;
+                                   }
+                                   if ( !section.pane().has_value() )
+                                   {
+                                     return false;
+                                   }
+                                   Pane const& pane = target.panes[section.pane()->value];
+                                   return pane.window == stream && ( !pane.state.has_value() || section.emitsBytes() );
+                                 } );
+                           } );
+  std::string source = loaderGlueOf( project );
+  if ( !filled || source.empty() )
+  {
+    return;
+  }
+  source = "; What a `.xex` without a Transition fills a Pane's Bank through. See docs/spec/xex.md.\n" + source;
+  std::size_t const phaseCount = project.phases.phases.size();
+  addAssembledModule( sources, project, modules, "nga.units", std::move( source ), Residency::all( phaseCount ), sink );
+}
+
+void addRunStub( diag::SourceManager& sources,
+                 Project& project,
+                 std::vector<Module>& modules,
+                 diag::DiagnosticSink& sink )
+{
+  // Two reasons to start a program through a stub: a return that must reach
+  // `finalize`, and the ROMs the entry Phase needs, which are selected before
+  // a byte of it runs. A Container whose program cannot return has a cold
+  // start of its own for the second, where it has one at all.
+  bool const returns = project.container == Container::XEX || project.container == Container::PRG;
+  bool const finishes = returns && project.driver.has_value() && project.driver->finalize.has_value();
+  bool const selects = returns && project.driver.has_value() && project.driver->select.has_value();
+  if ( !finishes && !selects )
+  {
+    return;
+  }
+  std::size_t const phaseCount = project.phases.phases.size();
+  auto const add = [&]( std::string_view name, std::string source, Residency const& residency )
+  { addAssembledModule( sources, project, modules, name, std::move( source ), residency, sink ); };
+
+  // Where the program returns to, from whichever Phase it is in by then: the
+  // driver's `finalize`, and the return to what started the program. Not in
+  // a `final` Phase other than the entry, which the program never returns
+  // from — see docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  if ( finishes )
+  {
+    add( "nga.finish",
+         "; Where a program that returns ends: the driver's `finalize`, then back to\n"
+         "; what started it. See docs/decisions/0229-no-window-has-a-base.md.\n"
+         ".export ngaFinish\n"
+         ".proc ngaFinish, root\n"
+         "        nga.finalize\n"
+         "        rts\n"
+         ".endp\n",
+         notFinal( project.phases ) );
+  }
+
+  // The start, in the entry Phase alone since it names the entry: the entry
+  // Phase's ROMs selected, and a `jsr` without the call, so that the entry's
+  // return lands on `ngaFinish` and not here, which a Transition may have
+  // taken out of memory by then.
+  std::string source = "; How the program is started: the ROMs its entry Phase needs selected, and\n"
+                       "; where it ends left on the stack, so that its return lands on ngaFinish\n"
+                       "; from whichever Phase it returns. See\n"
+                       "; docs/decisions/0229-no-window-has-a-base.md.\n"
+                       ".export ngaRun\n"
+                       ".proc ngaRun, root\n";
+  if ( selects )
+  {
+    source += "        lda #" + std::to_string( romsOf( project, project.phases.entry ) ) + "\n        nga.select\n";
+  }
+  if ( finishes )
+  {
+    source += "        .own                    ; followed by the rts the program returns with\n"
+              "        lda #>( ngaFinish - 1 )\n"
+              "        pha\n"
+              "        .own\n"
+              "        lda #<( ngaFinish - 1 )\n"
+              "        pha\n";
+  }
+  // Into the cold start where the program takes one, which enters the entry
+  // Phase as every Phase is entered and leaves the stack as it found it, so
+  // the entry's return still lands on ngaFinish — see
+  // docs/decisions/0236-a-xex-with-storage-brings-a-transformed-start-by-a-cold-start.md.
+  source += takesColdStart( project ) ? "        jmp ngaStart\n.endp\n" : "        jmp nga.entry\n.endp\n";
+  Residency entry{ phaseCount };
+  entry.add( project.phases.entry );
+  add( "nga.run", std::move( source ), entry );
 }
 
 } // namespace nga::model

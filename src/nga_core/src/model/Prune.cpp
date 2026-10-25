@@ -2,6 +2,7 @@
 
 #include "nga/model/Evaluate.hpp"
 #include "nga/model/References.hpp"
+#include "nga/model/Slots.hpp"
 #include "nga/model/Transition.hpp"
 
 #include <spdlog/spdlog.h>
@@ -52,18 +53,6 @@ bool Reachable::includes( SectionRef where ) const
 namespace
 {
 
-/// The Section a Symbol's memory is in: a Label's, or the Section itself.
-/// Nothing for a Constant, a Charset or a Slot, which are not memory.
-std::optional<SectionRef> memoryOf( GlobalSymbols const& symbols, SymbolRef where )
-{
-  Symbol const& symbol = symbols.at( where );
-  if ( auto const* const label = std::get_if<LabelPosition>( &symbol.value ); label != nullptr )
-  {
-    return SectionRef{ .module = where.module, .section = label->section };
-  }
-  return std::nullopt;
-}
-
 /// The walk: a worklist of Sections reached, each visited once for what its
 /// Chunks name.
 class Pruner final : public ReferenceVisitor
@@ -85,7 +74,7 @@ public:
     {
       return;
     }
-    if ( std::optional<SectionRef> const memory = memoryOf( mBuild->symbols(), *where ); memory.has_value() )
+    if ( std::optional<SectionRef> const memory = sectionNamedBy( mBuild->symbols(), *where ); memory.has_value() )
     {
       reach( *memory );
     }
@@ -159,8 +148,27 @@ public:
         reachSymbol( mBuild->symbols().find( TRANSITION_ROUTINE_NAME ) );
         if ( transition->target.has_value() )
         {
+          // Without storage there is no routine, and the stub of the Phase
+          // entered is what the statement jumps to.
+          reachSymbol( mBuild->symbols().find( entryStubName( *transition->target ) ) );
           reachEntryOf( *transition->target );
         }
+      }
+      else if ( auto const* const stub = std::get_if<PhaseEntryContent>( &chunk.content ); stub != nullptr )
+      {
+        // What a Frame would have named, which the stub writes as code: the
+        // Proc around `select`, every Slot's Cell, the Cell, and the entry.
+        reachSymbol( mBuild->symbols().find( SELECT_ROMS_NAME ) );
+        for ( SymbolRef const slot : slotsOf( mBuild->modules() ) )
+        {
+          if ( auto const* const declaration = std::get_if<SlotDeclaration>( &mBuild->symbols().at( slot ).value );
+               declaration != nullptr && declaration->cell.has_value() )
+          {
+            reach( *declaration->cell );
+          }
+        }
+        reachSymbol( mBuild->symbols().find( TRANSITION_CELL_NAME ) );
+        reachEntryOf( stub->phase );
       }
       else if ( auto const* const cell = std::get_if<SlotCellContent>( &chunk.content ); cell != nullptr )
       {
@@ -193,6 +201,16 @@ private:
 
 } // namespace
 
+Reachable reachedFrom( Merged const& build, std::span<SectionRef const> from )
+{
+  Pruner pruner{ build };
+  for ( SectionRef const where : from )
+  {
+    pruner.reach( where );
+  }
+  return pruner.run();
+}
+
 Reachable prune( Merged const& build, diag::DiagnosticSink& sink )
 {
   std::span<Module const> const modules = build.modules();
@@ -204,6 +222,17 @@ Reachable prune( Merged const& build, diag::DiagnosticSink& sink )
   {
     pruner.reachSymbol( entry );
     anyRoot = true;
+  }
+  // What the load needs is the machine's memory while a `.xex` loads, which
+  // the `load` block names and nothing references — see
+  // docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+  for ( ModuleIndex const module : build.project().loadNeeds )
+  {
+    for ( std::uint32_t index = 0; index < modules[module.value].sections().size(); ++index )
+    {
+      pruner.reach( SectionRef{ .module = module, .section = SectionIndex{ index } } );
+      anyRoot = true;
+    }
   }
   for ( std::uint32_t module = 0; module < modules.size(); ++module )
   {
@@ -238,8 +267,7 @@ Reachable prune( Merged const& build, diag::DiagnosticSink& sink )
       {
         continue;
       }
-      spdlog::debug( "prune: `{}` is reached by nothing and dropped",
-                     one.displayNameOf( where.section, build.sources() ) );
+      spdlog::debug( "prune: `{}` is reached by nothing and dropped", one.displayNameOf( where.section ) );
       if ( section.pinnedAddress() == nullptr )
       {
         continue;
@@ -247,12 +275,18 @@ Reachable prune( Merged const& build, diag::DiagnosticSink& sink )
       // A pin is a claim that something reaches this address, and the
       // something may be hardware that no Chunk names — which is the one
       // thing this Step cannot see and the author can say.
+      // A pin with no value is a fault of its own, told where it is written,
+      // and there is no address to say this one at.
       std::optional<std::int64_t> const address = declaredValueOf(
           build.sources(), build.symbols(), &build.charsets(), where.module, *section.pinnedAddress() );
+      if ( !address.has_value() )
+      {
+        continue;
+      }
       sink.add( diag::diagnostic( diag::DiagnosticId::UNREACHABLE_PIN )
                     .at( section.span().begin, section.span().length )
-                    .arg( "section", one.displayNameOf( where.section, build.sources() ) )
-                    .arg( "address", address.value_or( 0 ) ) );
+                    .arg( "section", one.displayNameOf( where.section ) )
+                    .arg( "address", *address ) );
     }
   }
 
@@ -270,7 +304,7 @@ public:
 
   void reference( SymbolRef target ) override
   {
-    if ( std::optional<SectionRef> const memory = memoryOf( *mSymbols, target ); memory.has_value() )
+    if ( std::optional<SectionRef> const memory = sectionNamedBy( *mSymbols, target ); memory.has_value() )
     {
       named.push_back( *memory );
     }
@@ -302,7 +336,7 @@ void markRoots( diag::SourceManager const& sources,
       Section const& holder = modules[module].sections()[index];
       auto const take = [&]( Chunk const& chunk )
       {
-        if ( chunk.taking != Taking::ROOT )
+        if ( chunk.taking != syntax::Taking::ROOT )
         {
           return;
         }

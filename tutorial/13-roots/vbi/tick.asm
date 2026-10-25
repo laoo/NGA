@@ -22,16 +22,16 @@ wordEnd
 
 ; tag install
 ; `SETVBV` takes the stage in `A` and the routine in `X` and `Y`, so the
-; address is taken twice and each taking says who follows it. The hardware
-; does, and `.root` is how that is written.
+; address is taken twice and each taking says who follows it. The deferred
+; vertical blank does, and `.root vbd` is how that is written.
 .proc entry
         lda #0
         sta ticks
 
-        lda #6                          ; the deferred vertical blank
-        .root
+        lda #7                          ; the deferred vertical blank
+        .root vbd
         ldx #>onVerticalBlank
-        .root
+        .root vbd
         ldy #<onVerticalBlank
         jsr SETVBV
 

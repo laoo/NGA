@@ -102,6 +102,12 @@ private:
   /// Whether this expression has been refused as too deep, after which the
   /// parser says nothing more about it.
   bool mTooDeep = false;
+
+  /// Whether an operand of this expression has been reported missing. The
+  /// token that stood there is left for the grammar, and when it is an
+  /// operator, as `*` is in `jmp *`, the operand it then wants is missing
+  /// too: one gap, said once.
+  bool mMissingOperand = false;
 };
 
 } // namespace nga::syntax

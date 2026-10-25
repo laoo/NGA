@@ -20,6 +20,20 @@ constexpr std::array<CatalogEntry, static_cast<std::size_t>( DiagnosticId::COUNT
 
 } // namespace
 
+std::string_view severityName( Severity severity )
+{
+  switch ( severity )
+  {
+  case Severity::ERROR:
+    return "error";
+  case Severity::WARNING:
+    return "warning";
+  case Severity::NOTE:
+    return "note";
+  }
+  return "error";
+}
+
 CatalogEntry const& catalogEntryFor( DiagnosticId id )
 {
   return CATALOG.at( static_cast<std::size_t>( id ) );

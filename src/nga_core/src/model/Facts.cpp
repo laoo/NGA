@@ -203,6 +203,19 @@ void appendProject( std::string& out, Facts const& facts )
   appendField( out, "optimize", nameOf( project.intent ) );
   out.append( ",\n    " );
   appendField( out, "cpu", nameOf( project.target.cpu ) );
+  out.append( ",\n    " );
+  appendField( out, "library", project.library );
+
+  out.append( ",\n    \"groups\": [" );
+  for ( std::size_t i = 0; i < project.groups.size(); ++i )
+  {
+    out.append( i == 0 ? "\n      { " : ",\n      { " );
+    appendField( out, "name", project.groups[i].name );
+    out.append( ", \"members\": " );
+    appendNames( out, project.groups[i].members );
+    out.append( " }" );
+  }
+  out.append( project.groups.empty() ? "]" : "\n    ]" );
 
   out.append( ",\n    \"phases\": [\n" );
   for ( std::size_t i = 0; i < project.phases.phases.size(); ++i )
@@ -273,10 +286,127 @@ void appendProject( std::string& out, Facts const& facts )
     out.append( " }" );
     out.append( i + 1 < project.target.regions.size() ? ",\n" : "\n" );
   }
-  out.append( "    ]\n  }" );
+  out.append( "    ],\n" );
+
+  Target const& target = project.target;
+  out.append( "    \"unitSets\": [" );
+  for ( std::size_t i = 0; i < target.unitSets.size(); ++i )
+  {
+    UnitSet const& set = target.unitSets[i];
+    out.append( i == 0 ? "\n      { " : ",\n      { " );
+    appendField( out, "name", set.name );
+    out.append( ", " );
+    appendNumber( out, "count", set.count );
+    if ( set.linear.has_value() )
+    {
+      out.append( ", \"linear\": [" )
+          .append( std::to_string( set.linear->begin ) )
+          .append( ", " )
+          .append( std::to_string( set.linear->end ) )
+          .append( "]" );
+    }
+    out.append( " }" );
+  }
+  out.append( target.unitSets.empty() ? "],\n" : "\n    ],\n" );
+
+  // A state is named in a byte by its index, which is what a Pane's
+  // `paneState` is, so every entry says where it starts: a unit set is one
+  // state per Bank from `index`.
+  out.append( "    \"windows\": [" );
+  for ( std::size_t i = 0; i < target.windows.size(); ++i )
+  {
+    Window const& window = target.windows[i];
+    out.append( i == 0 ? "\n      { " : ",\n      { " );
+    appendField( out, "name", window.name );
+    out.append( ", \"ranges\": [" );
+    for ( std::size_t r = 0; r < window.ranges.size(); ++r )
+    {
+      out.append( "[" )
+          .append( std::to_string( window.ranges[r].begin ) )
+          .append( ", " )
+          .append( std::to_string( window.ranges[r].end ) )
+          .append( r + 1 < window.ranges.size() ? "], " : "]" );
+    }
+    out.append( "], \"states\": [" );
+    std::uint64_t index = 0;
+    for ( std::size_t s = 0; s < window.states.size(); ++s )
+    {
+      WindowState const& state = window.states[s];
+      out.append( s == 0 ? "{ " : ", { " );
+      appendNumber( out, "index", index );
+      out.append( ", " );
+      if ( state.units.has_value() )
+      {
+        UnitSet const& set = target.unitSets[state.units->value];
+        appendField( out, "units", set.name );
+        out.append( ", " );
+        appendNumber( out, "count", set.count );
+        index += set.count;
+      }
+      else
+      {
+        appendField( out, "name", state.name );
+        ++index;
+      }
+      out.append( " }" );
+    }
+    out.append( "] }" );
+  }
+  out.append( target.windows.empty() ? "],\n" : "\n    ],\n" );
+
+  out.append( "    \"panes\": [" );
+  for ( std::size_t i = 0; i < target.panes.size(); ++i )
+  {
+    Pane const& pane = target.panes[i];
+    out.append( i == 0 ? "\n      { " : ",\n      { " );
+    appendField( out, "name", pane.name );
+    out.append( ", " );
+    appendField( out, "window", target.windows[pane.window.value].name );
+    if ( pane.state.has_value() )
+    {
+      out.append( ", " );
+      appendNumber( out, "state", *pane.state );
+    }
+    if ( pane.count > 1 )
+    {
+      out.append( ", " );
+      appendNumber( out, "count", pane.count );
+    }
+    out.append( " }" );
+  }
+  out.append( target.panes.empty() ? "]" : "\n    ]" );
+
+  // Absent where there is no storage: a field that would say nothing is left
+  // out. `units` names the set where storage is one, which is what finds the
+  // Window that shows a unit and the linear address it starts at.
+  if ( target.unitCount > 0 )
+  {
+    out.append( ",\n    \"storage\": { " );
+    if ( target.storageUnits.has_value() )
+    {
+      appendField( out, "units", target.unitSets[target.storageUnits->value].name );
+      out.append( ", " );
+    }
+    appendNumber( out, "count", target.unitCount );
+    out.append( ", " );
+    appendNumber( out, "size", target.unitSize );
+    out.append( " }" );
+  }
+  out.append( "\n  }" );
 }
 
-void appendMap( std::string& out, MemoryMap const& map )
+void appendSite( std::string& out, diag::SourceManager const& sources, SymbolSite const& site )
+{
+  out.append( "{ " );
+  appendField( out, "path", site.length == 0 && site.offset == 0 ? std::string_view{} : sources.pathOf( site.file ) );
+  out.append( ", " );
+  appendNumber( out, "offset", site.offset );
+  out.append( ", " );
+  appendNumber( out, "length", site.length );
+  out.append( " }" );
+}
+
+void appendMap( std::string& out, diag::SourceManager const& sources, MemoryMap const& map )
 {
   out.append( "  \"map\": {\n    " );
   appendField( out, "unit", map.unitWord );
@@ -288,6 +418,28 @@ void appendMap( std::string& out, MemoryMap const& map )
   appendNumber( out, "romUsed", map.romUsed );
   out.append( ",\n    " );
   appendNumber( out, "romSize", map.pools.readOnlySize() );
+
+  // What the solver allocates from, half-open as every range here is: what a
+  // page of the map shades behind the Sections.
+  out.append( ",\n    \"pools\": { " );
+  auto const ranges = [&out]( std::string_view name, std::vector<AddressRange> const& pool, bool last )
+  {
+    json::appendString( out, name );
+    out.append( ": [" );
+    for ( std::size_t i = 0; i < pool.size(); ++i )
+    {
+      out.append( "[" )
+          .append( std::to_string( pool[i].begin ) )
+          .append( ", " )
+          .append( std::to_string( pool[i].end ) );
+      out.append( i + 1 < pool.size() ? "], " : "]" );
+    }
+    out.append( last ? "]" : "], " );
+  };
+  ranges( "zeroPage", map.pools.zeroPage, false );
+  ranges( "general", map.pools.general, false );
+  ranges( "readOnly", map.pools.readOnly, true );
+  out.append( " }" );
 
   out.append( ",\n    \"phases\": [\n" );
   for ( std::size_t i = 0; i < map.phases.size(); ++i )
@@ -323,12 +475,49 @@ void appendMap( std::string& out, MemoryMap const& map )
     // map is the one place both ends are inclusive, because that is how a
     // reader expects to see a range of addresses.
     appendNumber( out, "end", entry.end );
-    out.append( ", " );
+    out.append( ", \"initialised\": [" )
+        .append( std::to_string( entry.initialisedBegin ) )
+        .append( ", " )
+        .append( std::to_string( entry.initialisedEnd ) )
+        .append( "], " );
     appendPhase( out, "firstPhase", entry.firstPhase );
     out.append( ", " );
     appendPhase( out, "lastPhase", entry.lastPhase );
     out.append( ", \"root\": " ).append( entry.root ? "true" : "false" );
-    out.append( ", \"movable\": " ).append( entry.movable ? "true" : "false" );
+    if ( entry.kept )
+    {
+      out.append( ", \"kept\": true" );
+    }
+    if ( entry.hidden )
+    {
+      out.append( ", \"hidden\": true" );
+    }
+
+    // What the text asked for, beside where the solver put it.
+    if ( entry.pinned )
+    {
+      out.append( ", \"pinned\": true" );
+    }
+    if ( entry.alignment.has_value() )
+    {
+      out.append( ", " );
+      appendNumber( out, "align", *entry.alignment );
+    }
+    if ( entry.boundary.has_value() )
+    {
+      out.append( ", " );
+      appendNumber( out, "within", *entry.boundary );
+    }
+    if ( !entry.then.empty() )
+    {
+      out.append( ", " );
+      appendField( out, "then", entry.then );
+    }
+    if ( !entry.regions.empty() )
+    {
+      out.append( ", \"in\": " );
+      appendNames( out, entry.regions );
+    }
     out.append( ", \"shares\": " );
     appendNames( out, entry.shares );
 
@@ -338,6 +527,11 @@ void appendMap( std::string& out, MemoryMap const& map )
       appendField( out, "pane", entry.pane );
       out.append( ", " );
       appendNumber( out, "paneState", entry.paneState );
+    }
+    if ( !entry.units.empty() )
+    {
+      out.append( ", " );
+      appendField( out, "units", entry.units );
     }
 
     if ( !entry.waits.empty() )
@@ -367,6 +561,32 @@ void appendMap( std::string& out, MemoryMap const& map )
 
     out.append( " }" );
     out.append( i + 1 < map.entries.size() ? ",\n" : "\n" );
+  }
+  out.append( "    ],\n" );
+
+  // What Prune dropped stands nowhere, so it has no address to be ordered
+  // by; what a reader needs of it is where it is written.
+  out.append( "    \"pruned\": [\n" );
+  for ( std::size_t i = 0; i < map.pruned.size(); ++i )
+  {
+    MapPruned const& pruned = map.pruned[i];
+    out.append( "      { " );
+    appendField( out, "name", pruned.name );
+    out.append( ", " );
+    appendField( out, "module", pruned.module );
+    out.append( ", " );
+    appendField( out, "kind", kindName( pruned.kind ) );
+    out.append( ", \"text\": [" );
+    for ( std::size_t piece = 0; piece < pruned.text.size(); ++piece )
+    {
+      appendSite( out, sources, pruned.text[piece] );
+      if ( piece + 1 < pruned.text.size() )
+      {
+        out.append( ", " );
+      }
+    }
+    out.append( "] }" );
+    out.append( i + 1 < map.pruned.size() ? ",\n" : "\n" );
   }
   out.append( "    ],\n" );
 
@@ -423,6 +643,10 @@ void appendSources( std::string& out, diag::SourceManager const& sources, std::v
     out.append( "    { " );
     appendField( out, "module", held.module );
     out.append( ", " );
+    // What every other set names the file by: without it a use in `symbols`
+    // that points into the runtime has nothing here to be joined to.
+    appendField( out, "path", held.path );
+    out.append( ", " );
     appendField( out, "role", held.role );
     out.append( ", " );
     appendField( out, "grammar", grammarName( held.grammar ) );
@@ -467,17 +691,6 @@ void appendTokens( std::string& out,
   out.append( "  ]" );
 }
 
-void appendSite( std::string& out, diag::SourceManager const& sources, SymbolSite const& site )
-{
-  out.append( "{ " );
-  appendField( out, "path", site.length == 0 && site.offset == 0 ? std::string_view{} : sources.pathOf( site.file ) );
-  out.append( ", " );
-  appendNumber( out, "offset", site.offset );
-  out.append( ", " );
-  appendNumber( out, "length", site.length );
-  out.append( " }" );
-}
-
 void appendSymbols( std::string& out, diag::SourceManager const& sources, std::vector<SymbolFacts> const& symbols )
 {
   out.append( "  \"symbols\": [\n" );
@@ -490,6 +703,35 @@ void appendSymbols( std::string& out, diag::SourceManager const& sources, std::v
     appendField( out, "module", symbol.module );
     out.append( ", " );
     appendField( out, "kind", symbol.kind );
+    if ( symbol.exported )
+    {
+      out.append( ", \"exported\": true" );
+    }
+    if ( !symbol.section.empty() )
+    {
+      out.append( ", " );
+      appendField( out, "section", symbol.section );
+    }
+    if ( symbol.address.has_value() )
+    {
+      out.append( ", \"address\": " ).append( std::to_string( *symbol.address ) );
+    }
+    if ( symbol.value.has_value() )
+    {
+      out.append( ", \"value\": " ).append( std::to_string( *symbol.value ) );
+    }
+    if ( !symbol.pane.empty() )
+    {
+      out.append( ", " );
+      appendField( out, "pane", symbol.pane );
+      out.append( ", " );
+      appendNumber( out, "paneState", symbol.paneState );
+    }
+    if ( !symbol.units.empty() )
+    {
+      out.append( ", " );
+      appendField( out, "units", symbol.units );
+    }
     out.append( ", \"definition\": " );
     appendSite( out, sources, symbol.definition );
     out.append( ", \"uses\": [" );
@@ -534,6 +776,20 @@ void appendRun( std::string& out, diag::SourceManager const& sources, ByteRun co
     out.append( ", " );
     appendNumber( out, "length", run.source.length );
     out.append( " }" );
+  }
+  if ( !run.data.empty() )
+  {
+    // Two hex digits a byte, which a reader shows as the listing does.
+    static constexpr std::string_view DIGITS = "0123456789abcdef";
+    std::string data;
+    data.reserve( run.data.size() * 2 );
+    for ( std::uint8_t const byte : run.data )
+    {
+      data.push_back( DIGITS[byte >> 4U] );
+      data.push_back( DIGITS[byte & 0x0FU] );
+    }
+    out.append( ", " );
+    appendField( out, "data", data );
   }
   out.append( " }" );
 }
@@ -620,7 +876,7 @@ std::string renderFactsJson( diag::SourceManager const& sources,
                              std::set<FactSet> const& wanted )
 {
   std::string out;
-  out.append( "{\n  \"schema\": 1,\n  " );
+  out.append( "{\n  \"schema\": 2,\n  " );
   appendField( out, "nga", versionString() );
 
   // Always, whatever was asked for: a document of a build that failed and
@@ -634,19 +890,19 @@ std::string renderFactsJson( diag::SourceManager const& sources,
     appendProject( out, facts );
   }
 
-  if ( wanted.contains( FactSet::MAP ) && facts.map != nullptr )
+  if ( wanted.contains( FactSet::MAP ) && facts.map.has_value() )
   {
     out.append( ",\n" );
-    appendMap( out, *facts.map );
+    appendMap( out, sources, *facts.map );
   }
 
-  if ( wanted.contains( FactSet::SYMBOLS ) && facts.symbols != nullptr )
+  if ( wanted.contains( FactSet::SYMBOLS ) && facts.symbols.has_value() )
   {
     out.append( ",\n" );
     appendSymbols( out, sources, *facts.symbols );
   }
 
-  if ( wanted.contains( FactSet::BYTES ) && facts.bytes != nullptr )
+  if ( wanted.contains( FactSet::BYTES ) && facts.bytes.has_value() )
   {
     out.append( ",\n" );
     appendBytes( out, sources, *facts.bytes );

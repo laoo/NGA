@@ -13,8 +13,8 @@ levelTitle
 .ends
 ; end fills
 
-; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`
-; shown, which is what lets it name what the Pane holds.
+; A Trampoline: it stands outside the Window, but runs with `level` shown,
+; which is what lets it name what the Pane holds.
 .proc drawMap, under level
 at      .ztemp 2
 left    .ztemp 1

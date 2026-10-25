@@ -1,0 +1,180 @@
+{
+  "name": "nga",
+  "displayName": "NGA",
+  "description": "The NGA 6502 assembler and its C subset: what the tool knows about a build, where the code is written.",
+  "version": "0.0.0",
+  "publisher": "laoo",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/laoo/NGA"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/Client.cjs",
+  "activationEvents": [
+    "workspaceContains:**/*.ngp"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nga-project",
+        "aliases": [
+          "NGA Project"
+        ],
+        "extensions": [
+          ".ngp"
+        ],
+        "configuration": "./languages/assembler.json"
+      },
+      {
+        "id": "nga-c",
+        "aliases": [
+          "NGA C"
+        ],
+        "extensions": [
+          ".ngc"
+        ],
+        "configuration": "./languages/c.json"
+      },
+      {
+        "id": "nga-asm",
+        "aliases": [
+          "NGA Assembler"
+        ],
+        "configuration": "./languages/assembler.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nga-project",
+        "scopeName": "source.nga.project",
+        "path": "./syntaxes/project.tmLanguage.json"
+      },
+      {
+        "language": "nga-c",
+        "scopeName": "source.nga.c",
+        "path": "./syntaxes/c.tmLanguage.json"
+      },
+      {
+        "language": "nga-asm",
+        "scopeName": "source.nga.asm",
+        "path": "./syntaxes/assembler.tmLanguage.json"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "nga.containerBytes",
+          "name": "NGA Container",
+          "when": "nga.active"
+        }
+      ]
+    },
+    "semanticTokenTypes": [
+      {
+        "id": "directive",
+        "superType": "macro",
+        "description": "A directive of the assembler, such as `.section`, or the dot that opens it."
+      }
+    ],
+    "commands": [
+      {
+        "command": "nga.chooseProject",
+        "title": "Choose the Project of this file",
+        "category": "NGA"
+      },
+      {
+        "command": "nga.openWritten",
+        "title": "Open the text the tool wrote for this Project",
+        "category": "NGA"
+      },
+      {
+        "command": "nga.showMap",
+        "title": "Show the memory map of this Project",
+        "category": "NGA",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "nga.showCompiled",
+        "title": "Show what this C compiled to",
+        "category": "NGA",
+        "icon": "$(split-horizontal)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "nga.showMap",
+          "when": "resourceLangId == nga-asm || resourceLangId == nga-c || resourceLangId == nga-project",
+          "group": "navigation"
+        },
+        {
+          "command": "nga.showCompiled",
+          "when": "resourceLangId == nga-c",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "nga.showCompiled",
+          "when": "editorLangId == nga-c"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "NGA",
+      "properties": {
+        "nga.listing": {
+          "type": "string",
+          "enum": [ "hover", "always", "off" ],
+          "enumDescriptions": [
+            "Beside the statement the pointer rests on, in a column of its own.",
+            "Beside every statement, as an inlay hint.",
+            "Not at all."
+          ],
+          "default": "hover",
+          "markdownDescription": "Where the listing — the address and the bytes of a statement — is shown."
+        },
+        "nga.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The `nga` to run. Empty runs the one the extension carries, and where it carries none, the one on `PATH`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/client/Client.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --outfile=dist/Client.cjs && esbuild src/server/Server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/Server.cjs && esbuild src/MapPageCli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/MapPage.cjs",
+    "typecheck": "tsc --noEmit",
+    "format": "dprint fmt",
+    "format-check": "dprint check",
+    "lint": "eslint .",
+    "test": "npm run build && node --test --test-timeout=60000 \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run format-check && npm run lint && npm test",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2",
+    "vscode-languageserver": "10.1.2",
+    "vscode-languageserver-textdocument": "1.0.15"
+  },
+  "devDependencies": {
+    "@dprint/typescript": "0.96.1",
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.0.0",
+    "dprint": "0.60.1",
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vscode-jsonrpc": "9.0.3"
+  }
+}

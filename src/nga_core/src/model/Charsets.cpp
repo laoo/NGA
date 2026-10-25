@@ -2,6 +2,7 @@
 #include "nga/model/Merge.hpp"
 #include "nga/syntax/Literal.hpp"
 
+#include <set>
 #include <string>
 #include <utility>
 
@@ -40,8 +41,8 @@ private:
   /// misspelt Constant would otherwise be reported as "not a declared value",
   /// which names the consequence rather than the mistake.
   bool reportUnknownNames( ModuleIndex home, syntax::Expression const& node );
-  void applyBase( CharsetRef where, CharsetBase const& base, Charset& into );
-  void applyEntry( ModuleIndex home, CharsetEntry const& entry, Charset& into, bool derived );
+  void applyBase( CharsetRef where, syntax::CharsetBase const& base, Charset& into );
+  void applyEntry( ModuleIndex home, syntax::CharsetEntry const& entry, Charset& into, std::set<char32_t>& mappedHere );
 
   [[nodiscard]] std::string_view textOf( diag::SourceSpan span ) const
   {
@@ -118,11 +119,21 @@ Charset const* Resolver::tableOf( CharsetRef where )
 
 bool Resolver::reportUnknownNames( ModuleIndex home, syntax::Expression const& node )
 {
+  // A dotted name that is a Symbol, a member of a Namespace, is found as the
+  // evaluator finds it, and what stands left of its dot is no name of its own.
+  if ( node.kind == syntax::ExpressionKind::ATTRIBUTE )
+  {
+    std::optional<std::string> const dotted = syntax::dottedNameOf( *mSources, node );
+    if ( dotted.has_value() && mSymbols->resolveText( home, syntax::leftmostOf( node ), *dotted ).has_value() )
+    {
+      return false;
+    }
+  }
   bool reported = false;
   if ( node.kind == syntax::ExpressionKind::NAME )
   {
     std::string_view const name = textOf( node.token.span() );
-    if ( !mSymbols->lookup( home, name ).has_value() )
+    if ( !mSymbols->resolveText( home, node, name ).has_value() )
     {
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_SYMBOL )
                   .at( node.span.begin, node.span.length )
@@ -149,13 +160,17 @@ void Resolver::resolve( CharsetRef where, Charset& into )
   {
     applyBase( where, *declaration.base, into );
   }
-  for ( CharsetEntry const& entry : declaration.entries )
+  // What this block's own entries mapped, apart from the table: in a derived
+  // block the table already holds every mapping of the base, which an entry
+  // overrides once and only a second entry contradicts.
+  std::set<char32_t> mappedHere;
+  for ( syntax::CharsetEntry const& entry : declaration.entries )
   {
-    applyEntry( where.module, entry, into, declaration.base.has_value() );
+    applyEntry( where.module, entry, into, mappedHere );
   }
 }
 
-void Resolver::applyBase( CharsetRef where, CharsetBase const& base, Charset& into )
+void Resolver::applyBase( CharsetRef where, syntax::CharsetBase const& base, Charset& into )
 {
   std::string_view const name = textOf( base.name.span() );
   std::optional<SymbolRef> const found = mSymbols->lookup( where.module, name );
@@ -220,7 +235,10 @@ void Resolver::applyBase( CharsetRef where, CharsetBase const& base, Charset& in
   }
 }
 
-void Resolver::applyEntry( ModuleIndex home, CharsetEntry const& entry, Charset& into, bool derived )
+void Resolver::applyEntry( ModuleIndex home,
+                           syntax::CharsetEntry const& entry,
+                           Charset& into,
+                           std::set<char32_t>& mappedHere )
 {
   if ( containsError( *entry.start ) )
   {
@@ -255,12 +273,14 @@ void Resolver::applyEntry( ModuleIndex home, CharsetEntry const& entry, Charset&
   std::int64_t byte = *start;
   for ( char32_t const point : points )
   {
-    // A derived block's entries override the base, so only a second entry in
-    // this block is a contradiction. Two code points sharing one byte is not:
-    // a font with only uppercase glyphs wants exactly that.
-    bool const fresh = derived ? ( into.remap( point, static_cast<std::uint8_t>( byte ) ), true )
-                               : into.map( point, static_cast<std::uint8_t>( byte ) );
-    if ( !fresh )
+    // A second entry for one code point in one block is a contradiction, and
+    // the first one stands. Two code points sharing one byte is not: a font
+    // with only uppercase glyphs wants exactly that.
+    if ( mappedHere.insert( point ).second )
+    {
+      into.remap( point, static_cast<std::uint8_t>( byte ) );
+    }
+    else
     {
       report( diag::diagnostic( diag::DiagnosticId::DUPLICATE_CHARSET_ENTRY )
                   .at( entry.characters.location, entry.characters.length )
@@ -276,11 +296,6 @@ std::optional<std::uint8_t> Charset::byteFor( char32_t codePoint ) const
 {
   auto const found = mBytes.find( codePoint );
   return found == mBytes.end() ? std::nullopt : std::optional{ found->second };
-}
-
-bool Charset::map( char32_t codePoint, std::uint8_t byte )
-{
-  return mBytes.emplace( codePoint, byte ).second;
 }
 
 void Charset::remap( char32_t codePoint, std::uint8_t byte )

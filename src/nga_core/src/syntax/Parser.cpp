@@ -4,7 +4,11 @@
 #include "nga/syntax/Literal.hpp"
 
 #include <algorithm>
+#include <array>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -26,6 +30,41 @@ bool startsLabelDefinition( Token const& token )
     return false;
   }
 }
+
+/// A word a Section says of itself, which takes nothing after it.
+struct SectionFlag
+{
+  std::string_view word;
+  bool SectionAttributes::* member;
+};
+
+constexpr std::array<SectionFlag, 4> SECTION_FLAGS{ {
+    // How long the bytes are the Section's own.
+    { .word = "temporary", .member = &SectionAttributes::temporary },
+    // Whether the bytes ever change, not where they are.
+    { .word = "readonly", .member = &SectionAttributes::readOnly },
+    // Which master of the address space reads the bytes, not where they are —
+    // see docs/decisions/0220-a-foreign-section.md.
+    { .word = "foreign", .member = &SectionAttributes::foreign },
+    // What reaches the Section, not where it stands.
+    { .word = "root", .member = &SectionAttributes::root },
+} };
+
+/// A word a Proc says of itself, which takes the name after it.
+struct SectionName
+{
+  std::string_view word;
+  std::optional<Token> SectionAttributes::* member;
+};
+
+constexpr std::array<SectionName, 2> SECTION_NAMES{ {
+    // `as TYPE`: the Proc's arguments are the Temporaries of the Proc named —
+    // see docs/decisions/0065-handlers.md.
+    { .word = "as", .member = &SectionAttributes::as },
+    // `under PANE`: the Proc runs while the Pane is shown — see
+    // docs/decisions/0098-a-proc-declares-what-is-shown.md.
+    { .word = "under", .member = &SectionAttributes::under },
+} };
 
 } // namespace
 
@@ -82,10 +121,15 @@ bool Parser::expectLineEnd()
     return true;
   }
 
+  // A token the lexer refused is reported already, and here it is read as
+  // whatever ended the statement before it: one finding per mistake.
   Token const here = mCursor->current();
-  report( diag::diagnostic( diag::DiagnosticId::TRAILING_TOKENS )
-              .at( here.location, here.length )
-              .arg( "token", describe( here ) ) );
+  if ( here.kind != TokenKind::UNKNOWN )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::TRAILING_TOKENS )
+                .at( here.location, here.length )
+                .arg( "token", describe( here ) ) );
+  }
   recover();
   return false;
 }
@@ -141,6 +185,12 @@ void Parser::parseModule()
     mBuilder->dropTaking();
     mPendingTaking.reset();
   }
+  if ( mAltPending )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::ALT_NEEDS_INSTRUCTION ).at( mAltToken.location, mAltToken.length ) );
+    mBuilder->dropAlternatives();
+    mAltPending = false;
+  }
   if ( mDeclarePending )
   {
     report( diag::diagnostic( diag::DiagnosticId::DECLARE_NEEDS_TEMPORARY )
@@ -166,7 +216,7 @@ void Parser::parseBranch( Token directive, bool isElse )
   {
     report( diag::diagnostic( diag::DiagnosticId::UNMATCHED_CONDITIONAL_END )
                 .at( directive.location, directive.length )
-                .arg( "directive", "." + std::string{ textOf( directive ) } ) );
+                .arg( "directive", std::string{ textOf( directive ) } ) );
     recover();
     return;
   }
@@ -183,7 +233,7 @@ void Parser::parseBranch( Token directive, bool isElse )
     report( diag::diagnostic( isElse ? diag::DiagnosticId::UNMATCHED_CONDITIONAL_END
                                      : diag::DiagnosticId::ELSIF_AFTER_ELSE )
                 .at( directive.location, directive.length )
-                .arg( "directive", "." + std::string{ textOf( directive ) } ) );
+                .arg( "directive", std::string{ textOf( directive ) } ) );
   }
 
   ExpressionPtr condition;
@@ -206,7 +256,7 @@ void Parser::parseConditionalEnd( Token directive, std::string_view spelling )
   {
     report( diag::diagnostic( diag::DiagnosticId::UNMATCHED_CONDITIONAL_END )
                 .at( directive.location, directive.length )
-                .arg( "directive", "." + std::string{ spelling } ) );
+                .arg( "directive", std::string{ spelling } ) );
     recover();
     return;
   }
@@ -220,6 +270,25 @@ void Parser::parseConditionalEnd( Token directive, std::string_view spelling )
   }
   mBuilder->endConditional( directive.span() );
   endStatement( false );
+}
+
+namespace
+{
+
+constexpr std::array<std::string_view, 47> DIRECTIVE_WORDS = {
+  "alt",        "assert",   "base64",    "binary",       "byte",       "case",       "charset", "declare",
+  "dispatch",   "driver",   "else",      "elsif",        "endch",      "endcharset", "endi",    "endif",
+  "endm",       "endmacro", "endmatch",  "endnamespace", "endns",      "endp",       "endproc", "ends",
+  "endsection", "export",   "hex",       "if",           "implements", "macro",      "match",   "namespace",
+  "off",        "own",      "proc",      "release",      "res",        "root",       "section", "slot",
+  "source",     "temp",     "transform", "transition",   "with",       "word",       "ztemp",
+};
+
+} // namespace
+
+std::span<std::string_view const> directiveWords()
+{
+  return DIRECTIVE_WORDS;
 }
 
 bool Parser::isConditionalWord( std::string_view word )
@@ -282,7 +351,7 @@ void Parser::parseMatchEnd( Token directive, std::string_view spelling )
   {
     report( diag::diagnostic( diag::DiagnosticId::UNMATCHED_MATCH_END )
                 .at( directive.location, directive.length )
-                .arg( "directive", "." + std::string{ spelling } ) );
+                .arg( "directive", std::string{ spelling } ) );
     recover();
     return;
   }
@@ -343,6 +412,11 @@ bool Parser::refusedOutsideBody( Token at, std::string_view what )
     mBuilder->dropTaking();
     mTakingHanded = false;
   }
+  if ( mAltHanded )
+  {
+    mBuilder->dropAlternatives();
+    mAltHanded = false;
+  }
   recover();
   return true;
 }
@@ -359,11 +433,14 @@ bool Parser::statementAllowed()
   return false;
 }
 
+bool Parser::atJoiningPrefix() const
+{
+  return atOffDirective() || atWithDirective() || atTakingDirective() || atAltDirective();
+}
+
 bool Parser::nextIsAdjacent() const
 {
-  Token const& first = mCursor->current();
-  Token const& second = mCursor->peek( 1 );
-  return second.location.rawOffset() == first.location.rawOffset() + first.length;
+  return touches( mCursor->current(), mCursor->peek( 1 ) );
 }
 
 bool Parser::parsePattern( Pattern& into, Token after )
@@ -436,21 +513,22 @@ bool Parser::atQualifiedUse() const
 {
   // `one.fill` at the head of a statement is one unbroken name, as a mnemonic
   // is one word. The dot has to touch both neighbours, which is what tells it
-  // from `lda .count`: a mnemonic, then an operand read at the top level. The
-  // lexer drops whitespace, so adjacency is read from the tokens' own extents
-  // and nothing new is kept for it.
-  auto const adjacent = []( Token const& first, Token const& second )
-  { return second.location.rawOffset() == first.location.rawOffset() + first.length; };
-
+  // from `lda .count`: a mnemonic, then an operand read at the top level.
   return mCursor->at( TokenKind::IDENTIFIER ) && mCursor->peek( 1 ).kind == TokenKind::DOT &&
-         mCursor->peek( 2 ).kind == TokenKind::IDENTIFIER && adjacent( mCursor->current(), mCursor->peek( 1 ) ) &&
-         adjacent( mCursor->peek( 1 ), mCursor->peek( 2 ) );
+         mCursor->peek( 2 ).kind == TokenKind::IDENTIFIER && touches( mCursor->current(), mCursor->peek( 1 ) ) &&
+         touches( mCursor->peek( 1 ), mCursor->peek( 2 ) );
 }
 
 bool Parser::atOffDirective() const
 {
   return mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER &&
          textOf( mCursor->peek( 1 ) ) == "off";
+}
+
+bool Parser::atAltDirective() const
+{
+  return mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER &&
+         textOf( mCursor->peek( 1 ) ) == "alt";
 }
 
 bool Parser::atWithDirective() const
@@ -500,18 +578,21 @@ bool Parser::atInstructionOrData() const
   return word == "byte" || word == "word";
 }
 
-void Parser::parseTaking( Token directive, model::Taking kind )
+void Parser::parseTaking( Token directive, Taking kind )
 {
   // One taking per statement: an address is followed by this Section or by
   // the hardware, and the first said wins.
   if ( mPendingTaking.has_value() && *mPendingTaking != kind )
   {
+    // What the refused directive names goes with it, so it is no stray token.
     report( diag::diagnostic( diag::DiagnosticId::OWN_AND_ROOT ).at( directive.location, directive.length ) );
-    expectLineEnd();
+    recover();
     return;
   }
   // `.own` may name who follows the address, one name or a list; `.root`
-  // hands it to the hardware, which has no name.
+  // hands it to the hardware, and names the one Holder that takes it — see
+  // docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md
+  // and docs/decisions/0248-the-hardware-that-takes-an-address-is-named.md.
   std::vector<Token> followers;
   while ( mCursor->at( TokenKind::IDENTIFIER ) )
   {
@@ -529,14 +610,47 @@ void Parser::parseTaking( Token directive, model::Taking kind )
       return;
     }
   }
-  if ( kind == model::Taking::ROOT && !followers.empty() )
+  if ( kind == Taking::ROOT && followers.size() != 1 )
   {
-    report( diag::diagnostic( diag::DiagnosticId::ROOT_TAKES_NO_NAME ).at( directive.location, directive.length ) );
-    followers.clear();
+    report( diag::diagnostic( diag::DiagnosticId::ROOT_NAMES_ONE_HOLDER )
+                .at( directive.location, directive.length )
+                .arg( "count", followers.empty() ? "none" : "more" ) );
+    if ( followers.size() > 1 )
+    {
+      followers.resize( 1 );
+    }
   }
   mBuilder->taking( kind, std::move( followers ), directive.span() );
   mPendingTaking = kind;
   mTakingToken = directive;
+  expectLineEnd();
+}
+
+void Parser::parseAlternatives( Token directive )
+{
+  // A list of mnemonics and nothing else: each takes the operand the
+  // instruction below is written with, so none is written here. Which of
+  // them the processor has in that form is the model's to say, since the
+  // grammar never sees the instruction set.
+  std::vector<Token> mnemonics;
+  std::string after = ".alt";
+  do
+  {
+    if ( !mCursor->at( TokenKind::IDENTIFIER ) )
+    {
+      Token const here = mCursor->current();
+      report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
+                  .at( here.location, here.length )
+                  .arg( "after", after ) );
+      recover();
+      return;
+    }
+    mnemonics.push_back( mCursor->advance() );
+    after = ",";
+  } while ( mCursor->match( TokenKind::COMMA ) );
+  mBuilder->alternatives( std::move( mnemonics ), directive.span() );
+  mAltPending = true;
+  mAltToken = directive;
   expectLineEnd();
 }
 
@@ -562,11 +676,41 @@ void Parser::parseDeclare( Token directive )
   {
     report( diag::diagnostic( diag::DiagnosticId::DECLARE_NEEDS_KIND )
                 .at( kindToken.location, kindToken.length )
-                .arg( "token", std::string{ textOf( kindToken ) } ) );
+                .arg( "token", describe( kindToken ) ) );
     recover();
     return;
   }
   mCursor->advance();
+
+  // Or the result of another Proc, by its dotted name: read where that Proc
+  // leaves it, with no reservation of this one below — see
+  // docs/decisions/0278-a-result-may-be-another-procs-result.md.
+  if ( mCursor->at( TokenKind::IDENTIFIER ) && mCursor->peek( 1 ).kind == TokenKind::DOT )
+  {
+    Token const first = mCursor->advance();
+    Token last = first;
+    std::string name{ textOf( first ) };
+    while ( mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER )
+    {
+      mCursor->advance();
+      last = mCursor->advance();
+      name.append( "." ).append( textOf( last ) );
+    }
+    diag::SourceSpan const written = spanning( first.span(), last.span() );
+    if ( kindWord == "arg" )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::DECLARE_ARGUMENT_ELSEWHERE )
+                  .at( written.begin, written.length )
+                  .arg( "name", name ) );
+      recover();
+      return;
+    }
+    mBuilder->declareResultElsewhere( std::move( name ), written, directive.span() );
+    mDeclaredInRegisters = true;
+    mRegisterToken = directive;
+    expectLineEnd();
+    return;
+  }
 
   // The type is optional: where none is written the shape of the
   // reservation answers, and where one is, the two are held to each other —
@@ -574,7 +718,7 @@ void Parser::parseDeclare( Token directive )
   // its stead, a letter for each byte from the low one: `a`, `x` or `y` for a
   // register, `m` for a byte of the reservation below — see
   // docs/decisions/0145-an-argument-in-a-register.md.
-  std::optional<model::DeclaredType> type;
+  std::optional<DeclaredType> type;
   std::string place;
   if ( mCursor->at( TokenKind::IDENTIFIER ) )
   {
@@ -604,8 +748,7 @@ void Parser::parseDeclare( Token directive )
   }
 
   bool const inRegisters = !place.empty() && !place.contains( 'm' );
-  mBuilder->declare(
-      kindWord == "arg" ? model::Declaring::ARGUMENT : model::Declaring::RESULT, type, place, directive.span() );
+  mBuilder->declare( kindWord == "arg" ? Declaring::ARGUMENT : Declaring::RESULT, type, place, directive.span() );
   if ( inRegisters )
   {
     mDeclaredInRegisters = true;
@@ -630,30 +773,30 @@ bool Parser::isPlace( std::string_view word )
   return letters && std::ranges::any_of( word, []( char c ) { return c != 'm'; } );
 }
 
-std::optional<model::DeclaredType> Parser::parseDeclaredType()
+std::optional<DeclaredType> Parser::parseDeclaredType()
 {
   Token const name = mCursor->advance();
   std::string_view const word = textOf( name );
-  std::optional<model::DeclaredType::Kind> kind;
+  std::optional<DeclaredType::Kind> kind;
   if ( word == "u8" )
   {
-    kind = model::DeclaredType::Kind::U8;
+    kind = DeclaredType::Kind::U8;
   }
   else if ( word == "i8" )
   {
-    kind = model::DeclaredType::Kind::I8;
+    kind = DeclaredType::Kind::I8;
   }
   else if ( word == "u16" )
   {
-    kind = model::DeclaredType::Kind::U16;
+    kind = DeclaredType::Kind::U16;
   }
   else if ( word == "i16" )
   {
-    kind = model::DeclaredType::Kind::I16;
+    kind = DeclaredType::Kind::I16;
   }
   else if ( word == "bool" )
   {
-    kind = model::DeclaredType::Kind::BOOL;
+    kind = DeclaredType::Kind::BOOL;
   }
 
   if ( !kind.has_value() )
@@ -665,7 +808,7 @@ std::optional<model::DeclaredType> Parser::parseDeclaredType()
   }
   if ( !mCursor->at( TokenKind::LEFT_BRACKET ) )
   {
-    return model::DeclaredType{ .kind = *kind, .count = 1, .span = name.span() };
+    return DeclaredType{ .kind = *kind, .count = 1, .span = name.span() };
   }
 
   // `u8[N]` is the one type with a count, and the count is a literal: the
@@ -675,11 +818,11 @@ std::optional<model::DeclaredType> Parser::parseDeclaredType()
   Token const count = mCursor->current();
   std::optional<std::int64_t> const value =
       count.kind == TokenKind::NUMBER ? numericValueOf( textOf( count ) ) : std::nullopt;
-  if ( *kind != model::DeclaredType::Kind::U8 || !value.has_value() || *value < 1 || *value > 0xFFFF )
+  if ( *kind != DeclaredType::Kind::U8 || !value.has_value() || *value < 1 || *value > 0xFFFF )
   {
     report( diag::diagnostic( diag::DiagnosticId::DECLARE_UNKNOWN_TYPE )
                 .at( name.location, name.length )
-                .arg( "name", std::string{ word } + "[" + std::string{ textOf( count ) } + "]" ) );
+                .arg( "name", std::string{ word } + "[" + describe( count ) + "]" ) );
     return std::nullopt;
   }
   mCursor->advance();
@@ -687,32 +830,33 @@ std::optional<model::DeclaredType> Parser::parseDeclaredType()
   {
     report( diag::diagnostic( diag::DiagnosticId::DECLARE_UNKNOWN_TYPE )
                 .at( name.location, name.length )
-                .arg( "name", std::string{ word } + "[" + std::string{ textOf( count ) } ) );
+                .arg( "name", std::string{ word } + "[" + describe( count ) ) );
     return std::nullopt;
   }
   Token const close = mCursor->advance();
-  return model::DeclaredType{ .kind = model::DeclaredType::Kind::BYTES,
-                              .count = static_cast<std::uint32_t>( *value ),
-                              .span = spanning( name.span(), close.span() ) };
+  return DeclaredType{ .kind = DeclaredType::Kind::BYTES,
+                       .count = static_cast<std::uint32_t>( *value ),
+                       .span = spanning( name.span(), close.span() ) };
 }
 
 void Parser::parseWith( Token directive )
 {
-  // `.with NAME`, `.with NAME, x` or `.with NAME = STATE`: what is named is
-  // the Builder's to tell apart, and `x` is recognised by position, as it
-  // is inside an operand.
+  // `.with NAME`, `.with NAME, x`, `.with NAME, xy` or `.with NAME = STATE`:
+  // what is named is the Builder's to tell apart, and `x` and `xy` are
+  // recognised by position, as `x` is inside an operand.
   ExpressionPtr what = parseExpression();
   if ( containsError( *what ) )
   {
     recover();
     return;
   }
-  model::WithForm form = model::WithForm::SHOW;
+  WithForm form = WithForm::SHOW;
   std::optional<Token> state;
   diag::SourceSpan span = spanning( directive.span(), what->span );
   if ( Token const comma = mCursor->current(); mCursor->match( TokenKind::COMMA ) )
   {
-    if ( !( mCursor->at( TokenKind::IDENTIFIER ) && textOf( mCursor->current() ) == "x" ) )
+    if ( !( mCursor->at( TokenKind::IDENTIFIER ) &&
+            ( textOf( mCursor->current() ) == "x" || textOf( mCursor->current() ) == "xy" ) ) )
     {
       report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
                   .at( comma.location, comma.length )
@@ -721,7 +865,7 @@ void Parser::parseWith( Token directive )
       return;
     }
     Token const x = mCursor->advance();
-    form = model::WithForm::AT;
+    form = textOf( x ) == "xy" ? WithForm::AT_XY : WithForm::AT;
     span = spanning( directive.span(), x.span() );
   }
   else if ( Token const equals = mCursor->current(); mCursor->match( TokenKind::EQUAL ) )
@@ -735,7 +879,7 @@ void Parser::parseWith( Token directive )
       return;
     }
     state = mCursor->advance();
-    form = model::WithForm::STATE;
+    form = WithForm::STATE;
     span = spanning( directive.span(), state->span() );
   }
   mBuilder->with( form, std::move( what ), state, span );
@@ -780,7 +924,7 @@ void Parser::parseSource( Token directive )
   {
     report( diag::diagnostic( diag::DiagnosticId::SOURCE_TAKES_PATH_AND_LINE )
                 .at( found.location, found.length )
-                .arg( "token", std::string{ textOf( found ) } ) );
+                .arg( "token", describe( found ) ) );
     recover();
   };
   if ( !mCursor->at( TokenKind::STRING ) || !quotedOf( textOf( mCursor->current() ) ).charset.empty() )
@@ -807,17 +951,21 @@ void Parser::parseLine()
     return;
   }
 
-  // Whatever this line holds is the statement a pending `.off` applies to,
-  // unless it is another `.off`, which joins the queue. A pending `.with`
-  // applies to the same line, if it is an instruction or a macro use, and
-  // is refused by whatever else it is; another `.with` or an `.off` joins.
-  if ( !atOffDirective() )
+  // Whatever this line holds is the statement every pending prefix applies
+  // to, unless it is another prefix — `.off`, `.with`, `.own`, `.root` or
+  // `.alt` — which joins them and waits for the same statement. A pending
+  // `.off` is armed for that statement's line; a pending `.with` applies to
+  // it if it is an instruction or a macro use, and is refused by whatever
+  // else it is.
+  bool const joins = atJoiningPrefix();
+  if ( !joins )
   {
     flushPendingOffs( mCursor->current().location );
   }
   mWithsHanded = false;
   mTakingHanded = false;
-  if ( mWithPending && !atOffDirective() && !atWithDirective() && !atTakingDirective() )
+  mAltHanded = false;
+  if ( mWithPending && !joins )
   {
     Token const first = mCursor->current();
     bool const code = startsLabelDefinition( first ) ? mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER
@@ -831,8 +979,8 @@ void Parser::parseLine()
     mWithPending = false;
   }
   // A pending `.own` or `.root` applies to the same line, if it is an
-  // instruction or data; another of them, a `.with` or an `.off` joins.
-  if ( mPendingTaking.has_value() && !atOffDirective() && !atWithDirective() && !atTakingDirective() )
+  // instruction or data.
+  if ( mPendingTaking.has_value() && !joins )
   {
     mTakingHanded = atInstructionOrData();
     if ( !mTakingHanded )
@@ -843,6 +991,22 @@ void Parser::parseLine()
       mBuilder->dropTaking();
     }
     mPendingTaking.reset();
+  }
+  // A pending `.alt` applies to the instruction on the same line. Whether
+  // what stands there is an instruction or a macro use is the model's to
+  // tell.
+  if ( mAltPending && !joins )
+  {
+    Token const first = mCursor->current();
+    mAltHanded = startsLabelDefinition( first ) ? mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER
+                                                : first.kind == TokenKind::IDENTIFIER;
+    if ( !mAltHanded )
+    {
+      report(
+          diag::diagnostic( diag::DiagnosticId::ALT_NEEDS_INSTRUCTION ).at( mAltToken.location, mAltToken.length ) );
+      mBuilder->dropAlternatives();
+    }
+    mAltPending = false;
   }
   // A pending `.declare` applies to the `.ztemp` or `.temp` below it and to
   // nothing else, so an instruction standing there is a mistake — but a
@@ -1024,6 +1188,20 @@ void Parser::parseStatement( std::optional<Token> label )
   }
 
   Token const here = mCursor->current();
+  if ( label.has_value() && here.kind == TokenKind::COLON )
+  {
+    // A label as other assemblers write it. The Label is defined already,
+    // and what follows the colon is read as the statement it was meant to be.
+    report( diag::diagnostic( diag::DiagnosticId::LABEL_WITH_COLON ).at( here.location, here.length ) );
+    mCursor->advance();
+    if ( mCursor->atLineEnd() )
+    {
+      mCursor->match( TokenKind::LINE_END );
+      return;
+    }
+    parseStatement( std::nullopt );
+    return;
+  }
   if ( label.has_value() )
   {
     // The name was almost certainly meant to be an instruction, and whatever
@@ -1056,9 +1234,21 @@ void Parser::parseDirective()
                          .startsLine = dot.startsLine,
                          .direction = Direction::NONE,
                          .location = dot.location,
-                         .length = dot.length + name.length };
+                         .length = spanning( dot.span(), name.span() ).length };
   std::string_view const spelling = textOf( directive );
   std::string_view const word = textOf( name );
+
+  // A word no directive has is said to be none before anything asks what it
+  // may do where it stands. `.end` is a word of its own, refused below with a
+  // message that says which end was meant.
+  if ( word != "end" && std::ranges::find( DIRECTIVE_WORDS, word ) == DIRECTIVE_WORDS.end() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_DIRECTIVE )
+                .at( directive.location, directive.length )
+                .arg( "name", std::string{ word } ) );
+    recover();
+    return;
+  }
 
   // A body holds instructions and data: the directives that emit data pass,
   // the ones that close the body pass, and `.macro` is refused with a word of
@@ -1100,7 +1290,8 @@ void Parser::parseDirective()
   // What emits, reserves or opens a branch that would, stands in a Section.
   // A `.if` refused here still opens, so that its branches and its end pair
   // with it and what it holds is refused without a word each.
-  if ( ( isDataWord( word ) || word == "res" || word == "transition" || word == "dispatch" || word == "if" ) &&
+  if ( ( isDataWord( word ) || word == "res" || word == "transition" || word == "release" || word == "dispatch" ||
+         word == "if" ) &&
        refusedOutsideBody( directive, spelling ) )
   {
     if ( word == "if" )
@@ -1189,6 +1380,10 @@ void Parser::parseDirective()
   {
     parseTransition( directive );
   }
+  else if ( word == "release" )
+  {
+    parseRelease( directive );
+  }
   else if ( word == "dispatch" )
   {
     parseDispatch( directive );
@@ -1217,6 +1412,10 @@ void Parser::parseDirective()
   {
     parseOff( directive );
   }
+  else if ( word == "alt" )
+  {
+    parseAlternatives( directive );
+  }
   else if ( word == "source" )
   {
     parseSource( directive );
@@ -1227,11 +1426,11 @@ void Parser::parseDirective()
   }
   else if ( word == "own" )
   {
-    parseTaking( directive, model::Taking::OWN );
+    parseTaking( directive, Taking::OWN );
   }
   else if ( word == "root" )
   {
-    parseTaking( directive, model::Taking::ROOT );
+    parseTaking( directive, Taking::ROOT );
   }
   else if ( word == "declare" )
   {
@@ -1274,17 +1473,12 @@ void Parser::parseDirective()
                 .arg( "directive", std::string{ spelling } ) );
     recover();
   }
-  else if ( word == "end" )
-  {
-    report(
-        diag::diagnostic( diag::DiagnosticId::AMBIGUOUS_END_DIRECTIVE ).at( directive.location, directive.length ) );
-    recover();
-  }
   else
   {
-    report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_DIRECTIVE )
-                .at( directive.location, directive.length )
-                .arg( "name", std::string{ word } ) );
+    // Every other word of DIRECTIVE_WORDS has a branch above, and a word that
+    // is none of them was refused before anything else: `.end` is what is left.
+    report(
+        diag::diagnostic( diag::DiagnosticId::AMBIGUOUS_END_DIRECTIVE ).at( directive.location, directive.length ) );
     recover();
   }
 }
@@ -1302,15 +1496,11 @@ void Parser::parseSection( Token directive )
   // attributes follow the directive at once.
   SectionAttributes attributes;
   bool quiet = false;
-  if ( !parseSectionAttributes( attributes, quiet, false ) )
-  {
-    return;
-  }
+  parseSectionAttributes( directive, attributes, quiet, false );
 
   // A Temporary is not in a Pane, whose Bank has no room for the pair that
-  // shares; not movable, which the queue leaves undecided; and not a Root,
-  // which the hardware reaches at any time, so that its bytes are never
-  // another's. The other attribute is dropped and the Section stays a
+  // shares; and not a Root, which the hardware reaches at any time, so that
+  // its bytes are never another's. The other attribute is dropped and the Section stays a
   // Temporary.
   if ( attributes.temporary && attributes.pane.has_value() )
   {
@@ -1318,6 +1508,7 @@ void Parser::parseSection( Token directive )
                 .at( directive.location, directive.length )
                 .arg( "other", "in" ) );
     attributes.pane.reset();
+    attributes.alsoIn.clear();
   }
   // `as` names the type whose Temporaries hold a Proc's arguments; data has
   // no arguments.
@@ -1338,13 +1529,6 @@ void Parser::parseSection( Token directive )
                 .arg( "reason", "stands on a `.section`, and only a `.proc` runs" ) );
     attributes.under.reset();
   }
-  if ( attributes.temporary && attributes.movable )
-  {
-    report( diag::diagnostic( diag::DiagnosticId::TEMPORARY_EXCLUDES )
-                .at( directive.location, directive.length )
-                .arg( "other", "movable" ) );
-    attributes.movable = false;
-  }
   if ( attributes.temporary && attributes.root )
   {
     report( diag::diagnostic( diag::DiagnosticId::TEMPORARY_EXCLUDES )
@@ -1353,8 +1537,7 @@ void Parser::parseSection( Token directive )
     attributes.root = false;
   }
   // A Temporary holds reservations alone, so it has no bytes for `readonly` to
-  // be about; a Movable Section is copied from its Payload at every edge it
-  // survives at a different address, which is a write; and the zero page is
+  // be about; and the zero page is
   // the scarcest memory the machine has, which a Section nothing writes gains
   // nothing from — see
   // docs/decisions/0215-a-cartridge-is-rom-and-a-section-stands-in-it-when-nothing-writes-it.md.
@@ -1365,14 +1548,7 @@ void Parser::parseSection( Token directive )
                 .arg( "other", "readonly" ) );
     attributes.readOnly = false;
   }
-  if ( attributes.readOnly && attributes.movable )
-  {
-    report( diag::diagnostic( diag::DiagnosticId::READONLY_EXCLUDES )
-                .at( directive.location, directive.length )
-                .arg( "other", "movable" ) );
-    attributes.readOnly = false;
-  }
-  if ( attributes.readOnly && attributes.placement == model::PlacementClass::ZEROPAGE )
+  if ( attributes.readOnly && attributes.placement == PlacementClass::ZEROPAGE )
   {
     report( diag::diagnostic( diag::DiagnosticId::READONLY_EXCLUDES )
                 .at( directive.location, directive.length )
@@ -1381,9 +1557,8 @@ void Parser::parseSection( Token directive )
   }
 
   // What another master reads is not a Temporary, whose bytes are somebody
-  // else's between two visits; not Movable, since the routine rewrites one at
-  // every edge it survives at a new address; and not `readonly`, which asks to
-  // stand in ROM, where no master writes anything. Each of the three is a
+  // else's between two visits; and not `readonly`, which asks to stand in
+  // ROM, where no master writes anything. Each of the two is a
   // contradiction rather than a combination nobody wanted — see
   // docs/decisions/0220-a-foreign-section.md.
   if ( attributes.foreign && attributes.temporary )
@@ -1391,13 +1566,6 @@ void Parser::parseSection( Token directive )
     report( diag::diagnostic( diag::DiagnosticId::FOREIGN_EXCLUDES )
                 .at( directive.location, directive.length )
                 .arg( "other", "temporary" ) );
-    attributes.foreign = false;
-  }
-  if ( attributes.foreign && attributes.movable )
-  {
-    report( diag::diagnostic( diag::DiagnosticId::FOREIGN_EXCLUDES )
-                .at( directive.location, directive.length )
-                .arg( "other", "movable" ) );
     attributes.foreign = false;
   }
   if ( attributes.foreign && attributes.readOnly )
@@ -1421,7 +1589,7 @@ void Parser::parseSection( Token directive )
   endStatement( quiet );
 }
 
-bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet, bool leadingComma )
+void Parser::parseSectionAttributes( Token directive, SectionAttributes& attributes, bool& quiet, bool leadingComma )
 {
   bool placementGiven = false;
   // After a `.proc`'s name every attribute follows a comma; after `.section`
@@ -1436,77 +1604,38 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_SECTION_ATTRIBUTE )
                   .at( here.location, here.length )
                   .arg( "name", describe( here ) ) );
-      recover();
-      return false;
+      skipAttribute();
+      continue;
     }
 
     Token const attribute = mCursor->advance();
     std::string_view const word = textOf( attribute );
 
-    // `movable` is an attribute of its own beside the placement: it says how
-    // the Section lives across Phases, not where.
+    // `movable` is still read where it stood so that a program written
+    // before hears why: a Section has one address in every Phase it is in
+    // — see docs/decisions/0250-a-section-has-one-address.md.
     if ( word == "movable" )
     {
-      if ( attributes.movable )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
-      }
-      attributes.movable = true;
+      report( diag::diagnostic( diag::DiagnosticId::MOVABLE_GONE ).at( attribute.location, attribute.length ) );
       continue;
     }
 
-    // `temporary` likewise: how long the bytes are the Section's own.
-    if ( word == "temporary" )
+    // A word of the two tables said twice is warned about and stands.
+    auto const repeated = [&]
     {
-      if ( attributes.temporary )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
-      }
-      attributes.temporary = true;
-      continue;
-    }
-
-    // `readonly` likewise: whether the bytes ever change, not where they are.
-    if ( word == "readonly" )
+      report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
+                  .at( attribute.location, attribute.length )
+                  .arg( "name", std::string{ word } )
+                  .arg( "directive", std::string{ textOf( directive ) } ) );
+    };
+    auto const flag = std::ranges::find( SECTION_FLAGS, word, &SectionFlag::word );
+    if ( flag != SECTION_FLAGS.end() )
     {
-      if ( attributes.readOnly )
+      if ( attributes.*flag->member )
       {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
+        repeated();
       }
-      attributes.readOnly = true;
-      continue;
-    }
-
-    // `foreign` likewise: which master of the address space reads the bytes,
-    // not where they are — see docs/decisions/0220-a-foreign-section.md.
-    if ( word == "foreign" )
-    {
-      if ( attributes.foreign )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
-      }
-      attributes.foreign = true;
-      continue;
-    }
-
-    // `root` likewise: what reaches the Section, not where it stands.
-    if ( word == "root" )
-    {
-      if ( attributes.root )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
-      }
-      attributes.root = true;
+      attributes.*flag->member = true;
       continue;
     }
 
@@ -1519,72 +1648,50 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
         report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
                     .at( attribute.location, attribute.length )
                     .arg( "after", std::string{ word } ) );
-        recover();
-        return false;
+        skipAttribute();
+        continue;
       }
+      // Repeated, it names another Region the Section may stand in instead;
+      // whether the names are Regions or a Pane is the model's to say.
       if ( attributes.pane.has_value() )
       {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
+        attributes.alsoIn.push_back( mCursor->advance() );
+        continue;
       }
       attributes.pane = mCursor->advance();
       continue;
     }
 
-    // `as TYPE`: the Proc's arguments are the Temporaries of the Proc named —
-    // see docs/decisions/0065-handlers.md.
-    if ( word == "as" )
+    auto const named = std::ranges::find( SECTION_NAMES, word, &SectionName::word );
+    if ( named != SECTION_NAMES.end() )
     {
       if ( !mCursor->at( TokenKind::IDENTIFIER ) )
       {
         report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
                     .at( attribute.location, attribute.length )
                     .arg( "after", std::string{ word } ) );
-        recover();
-        return false;
+        skipAttribute();
+        continue;
       }
-      if ( attributes.as.has_value() )
+      if ( ( attributes.*named->member ).has_value() )
       {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
+        repeated();
       }
-      attributes.as = mCursor->advance();
-      continue;
-    }
-
-    // `under PANE`: the Proc runs while the Pane is shown — see
-    // docs/decisions/0098-a-proc-declares-what-is-shown.md.
-    if ( word == "under" )
-    {
-      if ( !mCursor->at( TokenKind::IDENTIFIER ) )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
-                    .at( attribute.location, attribute.length )
-                    .arg( "after", std::string{ word } ) );
-        recover();
-        return false;
-      }
-      if ( attributes.under.has_value() )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::REPEATED_SECTION_ATTRIBUTE )
-                    .at( attribute.location, attribute.length )
-                    .arg( "name", std::string{ word } ) );
-      }
-      attributes.under = mCursor->advance();
+      attributes.*named->member = mCursor->advance();
       continue;
     }
 
     if ( word != "zeropage" && word != "absolute" )
     {
       // `at` reaches here only when it was written without a placement in front
-      // of it, and "not an attribute" is exactly what it then is.
+      // of it, and "not an attribute" is exactly what it then is. Reported and
+      // dropped, as a second placement is below, so that the block still opens
+      // and what it holds is not refused for standing outside one.
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_SECTION_ATTRIBUTE )
                   .at( attribute.location, attribute.length )
                   .arg( "name", std::string{ word } ) );
-      recover();
-      return false;
+      skipAttribute();
+      continue;
     }
 
     // `at`, `align` and `within` complete the placement rather than being
@@ -1592,7 +1699,7 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
     // stands after a comma. Nothing becomes a keyword by this, exactly as
     // with `x` and `y` in an operand. Any order, each at most once.
     SectionAttributes given;
-    given.placement = word == "zeropage" ? model::PlacementClass::ZEROPAGE : model::PlacementClass::ABSOLUTE;
+    given.placement = word == "zeropage" ? PlacementClass::ZEROPAGE : PlacementClass::ABSOLUTE;
     while ( mCursor->at( TokenKind::IDENTIFIER ) )
     {
       std::string_view const qualifier = textOf( mCursor->current() );
@@ -1633,20 +1740,29 @@ bool Parser::parseSectionAttributes( SectionAttributes& attributes, bool& quiet,
     {
       report( diag::diagnostic( diag::DiagnosticId::DUPLICATE_SECTION_ATTRIBUTE )
                   .at( attribute.location, attribute.length )
-                  .arg( "name", std::string{ word } ) );
+                  .arg( "name", std::string{ word } )
+                  .arg( "directive", std::string{ textOf( directive ) } ) );
       continue;
     }
 
+    // Only the placement's own fields are taken, so that what was written
+    // before it, in any order, stays as it was.
     placementGiven = true;
-    given.movable = attributes.movable;
-    given.root = attributes.root;
-    given.pane = attributes.pane;
-    given.under = attributes.under;
-    given.as = attributes.as;
-    given.temporary = attributes.temporary;
-    attributes = std::move( given );
+    attributes.placement = given.placement;
+    attributes.pinnedAddress = std::move( given.pinnedAddress );
+    attributes.alignment = std::move( given.alignment );
+    attributes.boundary = std::move( given.boundary );
   }
-  return true;
+}
+
+void Parser::skipAttribute()
+{
+  // What follows an unknown word is its own, an operand perhaps, up to the
+  // comma before the next attribute.
+  while ( !mCursor->atLineEnd() && !mCursor->at( TokenKind::COMMA ) )
+  {
+    mCursor->advance();
+  }
 }
 
 void Parser::parseSectionEnd( Token directive, std::string_view spelling )
@@ -1692,10 +1808,7 @@ void Parser::parseProc( Token directive )
   Token const name = mCursor->advance();
   SectionAttributes attributes;
   bool quiet = false;
-  if ( !parseSectionAttributes( attributes, quiet ) )
-  {
-    return;
-  }
+  parseSectionAttributes( directive, attributes, quiet );
 
   // A Proc is code, and code stands wherever a Section may — on the zero
   // page too, where a small routine that patches itself is fastest — see
@@ -1933,6 +2046,7 @@ void Parser::parsePayload( Token directive, Payload encoding )
                 .at( literal.location, literal.length )
                 .arg( "encoding", spelling )
                 .arg( "group", static_cast<std::int64_t>( charactersPerGroup( encoding ) ) )
+                .arg( "bytes", encoding == Payload::BASE64 ? "3 bytes" : "the byte" )
                 .arg( "count", static_cast<std::int64_t>( decoded.characters ) ) );
   }
 
@@ -1981,15 +2095,15 @@ void Parser::parseTemporary()
   {
     // A local label is a position inside a Proc, and a Temporary is a
     // Section of its own; the name has to be one the whole Module can use.
-    report( diag::diagnostic( diag::DiagnosticId::TEMPORARY_NEEDS_NAME ).at( directive.location, directive.length ) );
+    // The name is what is wrong, so it is what is marked.
+    report( diag::diagnostic( diag::DiagnosticId::TEMPORARY_NEEDS_NAME ).at( name.location, name.length ) );
     recover();
     return;
   }
 
   // `.temp` is `.ztemp` off the zero page — see
   // docs/decisions/0085-a-section-may-stand-in-a-proc.md.
-  model::PlacementClass const placement =
-      textOf( directive ) == "temp" ? model::PlacementClass::ABSOLUTE : model::PlacementClass::ZEROPAGE;
+  PlacementClass const placement = textOf( directive ) == "temp" ? PlacementClass::ABSOLUTE : PlacementClass::ZEROPAGE;
   ExpressionPtr size = parseExpression();
   bool const quiet = containsError( *size );
   diag::SourceSpan const span = spanning( name.span(), size->span );
@@ -2020,6 +2134,30 @@ void Parser::parseExport( Token directive )
     }
 
     Token const name = mCursor->advance();
+
+    // An export names a Symbol of the scope it stands in, so a position inside
+    // a Proc is exported from inside the Proc. Said here, with the spelling
+    // that works, rather than as a stray `.` after the statement.
+    if ( mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER )
+    {
+      Token scopeEnd = name;
+      Token member = name;
+      while ( mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER )
+      {
+        scopeEnd = member;
+        mCursor->advance();
+        member = mCursor->advance();
+      }
+      diag::SourceSpan const whole = spanning( name.span(), member.span() );
+      diag::SourceSpan const scope = spanning( name.span(), scopeEnd.span() );
+      report( diag::diagnostic( diag::DiagnosticId::EXPORT_FROM_OUTSIDE_SCOPE )
+                  .at( whole.begin, whole.length )
+                  .arg( "name", std::string{ mSources->textOf( whole ) } )
+                  .arg( "scope", std::string{ mSources->textOf( scope ) } )
+                  .arg( "member", std::string{ textOf( member ) } ) );
+      continue;
+    }
+
     mBuilder->exportSymbol( name, name.span() );
   } while ( mCursor->match( TokenKind::COMMA ) );
 
@@ -2039,7 +2177,7 @@ bool Parser::atCharsetEnd() const
 void Parser::parseCharset( Token directive )
 {
   std::optional<Token> name;
-  std::optional<model::CharsetBase> base;
+  std::optional<CharsetBase> base;
   bool quiet = false;
 
   if ( mCursor->at( TokenKind::IDENTIFIER ) )
@@ -2065,7 +2203,7 @@ void Parser::parseCharset( Token directive )
         mask = parseExpression();
         quiet = quiet || containsError( *mask );
       }
-      base = model::CharsetBase{ .name = baseName, .mask = std::move( mask ) };
+      base = CharsetBase{ .name = baseName, .mask = std::move( mask ) };
     }
     else
     {
@@ -2082,7 +2220,7 @@ void Parser::parseCharset( Token directive )
   // and not statements. Nothing about the block is therefore open across a
   // line, and a `.section` cannot begin inside one without the block having
   // failed to close first.
-  std::vector<model::CharsetEntry> entries;
+  std::vector<CharsetEntry> entries;
   bool closed = false;
   while ( !mCursor->atEnd() )
   {
@@ -2120,7 +2258,7 @@ void Parser::parseCharset( Token directive )
   }
 }
 
-void Parser::parseCharsetEntry( std::vector<model::CharsetEntry>& into )
+void Parser::parseCharsetEntry( std::vector<CharsetEntry>& into )
 {
   Token const here = mCursor->current();
   if ( here.kind != TokenKind::STRING )
@@ -2157,7 +2295,7 @@ void Parser::parseCharsetEntry( std::vector<model::CharsetEntry>& into )
   bool const quiet = containsError( *start );
   if ( !reported )
   {
-    into.push_back( model::CharsetEntry{ .characters = characters, .start = std::move( start ) } );
+    into.push_back( CharsetEntry{ .characters = characters, .start = std::move( start ) } );
   }
   endStatement( quiet );
 }
@@ -2169,8 +2307,10 @@ void Parser::parseQualifiedUse()
   path.push_back( mCursor->advance() );
   mCursor->advance(); // `.`
   Token name = mCursor->advance();
+  // Every dot after the first held to what the first was: touching the name
+  // on either side of it, or the path has ended and an operand begun.
   while ( mCursor->at( TokenKind::DOT ) && mCursor->peek( 1 ).kind == TokenKind::IDENTIFIER &&
-          mCursor->current().location.rawOffset() == name.location.rawOffset() + name.length )
+          touches( name, mCursor->current() ) && touches( mCursor->current(), mCursor->peek( 1 ) ) )
   {
     mCursor->advance(); // `.`
     path.push_back( name );
@@ -2193,16 +2333,6 @@ void Parser::parseQualifiedUse()
 
   mBuilder->useMacro( std::move( path ), name, std::move( arguments ), span );
   endStatement( quiet );
-}
-
-bool Parser::atNamespaceEnd() const
-{
-  if ( !mCursor->at( TokenKind::DOT ) || mCursor->peek( 1 ).kind != TokenKind::IDENTIFIER )
-  {
-    return false;
-  }
-  std::string_view const word = textOf( mCursor->peek( 1 ) );
-  return word == "endnamespace" || word == "endns";
 }
 
 void Parser::parseNamespace( Token directive )
@@ -2241,7 +2371,8 @@ void Parser::parseNamespace( Token directive )
   }
 
   mOpenNamespaces.push_back( directive );
-  mBuilder->beginNamespace( std::move( path ), spanning( directive.span(), mCursor->peek( 0 ).span() ) );
+  diag::SourceSpan const span = spanning( directive.span(), path.back().span() );
+  mBuilder->beginNamespace( std::move( path ), span );
   expectLineEnd();
 }
 
@@ -2529,7 +2660,7 @@ void Parser::parseSlot( Token directive )
     return;
   }
 
-  model::PlacementClass placement = model::PlacementClass::ABSOLUTE;
+  PlacementClass placement = PlacementClass::ABSOLUTE;
   if ( mCursor->match( TokenKind::COMMA ) )
   {
     if ( !mCursor->at( TokenKind::IDENTIFIER ) )
@@ -2551,11 +2682,11 @@ void Parser::parseSlot( Token directive )
       recover();
       return;
     }
-    placement = word == "zeropage" ? model::PlacementClass::ZEROPAGE : model::PlacementClass::ABSOLUTE;
+    placement = word == "zeropage" ? PlacementClass::ZEROPAGE : PlacementClass::ABSOLUTE;
   }
 
   mBuilder->declareSlot( name,
-                         binding == "pointer" ? model::Binding::POINTER : model::Binding::VECTOR,
+                         binding == "pointer" ? Binding::POINTER : Binding::VECTOR,
                          placement,
                          spanning( directive.span(), name.span() ) );
   expectLineEnd();
@@ -2620,7 +2751,7 @@ void Parser::parseTwoNames( Token directive, void ( Builder::*take )( Token, Tok
 
 void Parser::parseDriver( Token directive )
 {
-  // A role and one or two names after it, every one recognised by position;
+  // A role and one to three names after it, every one recognised by position;
   // how many a role takes is the Builder's question, since the grammar does
   // not know the roles.
   if ( !mCursor->at( TokenKind::IDENTIFIER ) )
@@ -2633,7 +2764,7 @@ void Parser::parseDriver( Token directive )
   }
   Token const role = mCursor->advance();
   std::vector<Token> names;
-  while ( mCursor->at( TokenKind::IDENTIFIER ) && names.size() < 2 )
+  while ( mCursor->at( TokenKind::IDENTIFIER ) && names.size() < 3 )
   {
     names.push_back( mCursor->advance() );
   }
@@ -2647,6 +2778,21 @@ void Parser::parseDriver( Token directive )
   }
   diag::SourceSpan const span = spanning( directive.span(), names.back().span() );
   mBuilder->declareDriverRole( role, std::move( names ), span );
+  expectLineEnd();
+}
+
+void Parser::parseRelease( Token directive )
+{
+  if ( !mCursor->at( TokenKind::IDENTIFIER ) )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_NAME )
+                .at( directive.location, directive.length )
+                .arg( "after", std::string{ textOf( directive ) } ) );
+    recover();
+    return;
+  }
+  Token const name = mCursor->advance();
+  mBuilder->release( name, spanning( directive.span(), name.span() ) );
   expectLineEnd();
 }
 

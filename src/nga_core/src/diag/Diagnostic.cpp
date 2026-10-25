@@ -40,8 +40,9 @@ std::string toHex( std::int64_t value )
     bits >>= 4;
   } while ( bits != 0 );
 
-  // 6502 addresses read as $D301, not $d301 and not 0xD301.
-  if ( text.size() < 2 )
+  // 6502 addresses read as $D301, not $d301 and not 0xD301, and in whole
+  // bytes: $0800 and $05, not $800 and $5.
+  if ( text.size() % 2 != 0 )
   {
     text.push_back( '0' );
   }

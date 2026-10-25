@@ -54,20 +54,6 @@ std::uint16_t numberOf( std::string_view code )
   return value;
 }
 
-std::string_view severityName( Severity value )
-{
-  switch ( value )
-  {
-  case Severity::ERROR:
-    return "error";
-  case Severity::WARNING:
-    return "warning";
-  case Severity::NOTE:
-    return "note";
-  }
-  return "error";
-}
-
 } // namespace
 
 std::string_view stepOf( DiagnosticId id )

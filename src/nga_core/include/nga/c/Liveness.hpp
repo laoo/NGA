@@ -17,10 +17,12 @@ namespace nga::c
 ///
 /// Only whole bytes of the Proc: a `static` local is a Section and outlives the
 /// call, a local whose address is taken is a Section too, the result is read by
-/// the caller, and a member's parameters are its type's. A `switch` reads and
-/// writes the function's locals from Procs of its own, so it counts as reading
-/// every one.
+/// the caller, and a member's parameters are its type's.
 std::vector<std::set<std::string>> liveInOf( ir::Function const& function );
+
+/// The bytes `liveInOf` follows, by name: a byte not among them is one it says
+/// nothing of, and is never live by its answer however much is read of it.
+std::set<std::string> liveBytesOf( ir::Function const& function );
 
 /// Drops every store to a byte of the Proc's own that nothing reads afterwards,
 /// and the computation that fed it where nothing else does. First, a store

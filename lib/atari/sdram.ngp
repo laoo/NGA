@@ -1,0 +1,11 @@
+; Storage in a MariaCEL board's SDRAM, for an `atari/mariacel.ngp` program: the
+; Banks of the unit set `sdram`, read through the Window `cel8000`, and the
+; decoders the tool ships. A Project includes this beside the machine. The
+; driver is the machine's, since it brings the board up and shows a Pane's Bank
+; whether or not there is storage.
+storage { units sdram }
+
+; Every Transition calls the decoders, so they are resident; a decoder nothing
+; uses is dropped.
+modules { "stream/zx0.asm" }
+resident { zx0 }

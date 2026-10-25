@@ -1,0 +1,10 @@
+; The ROMs of an `atari/800xl.ngp` program switched through PORTB, for a program
+; without storage: the OS, the floating-point pack and BASIC, and nothing else.
+; A Project includes this beside the machine to have a Phase do without the OS,
+; and so keep what it needs in the RAM under it. Not beside `atari/disk.ngp`,
+; whose driver reads through the OS and is the program's one driver — see
+; docs/decisions/0242-a-driver-may-switch-roms-and-have-no-stream.md.
+; Resident, except in a `final` Phase other than the entry, which runs none of
+; its roles — see docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+modules { "atari/roms.asm" }
+resident { roms }

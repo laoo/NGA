@@ -3,22 +3,31 @@ add_library( nga_core
   src/Version.cpp
   src/PortabilityChecks.cpp
   src/c/Assigned.cpp
+  src/c/Check.cpp
   src/c/Compile.cpp
+  src/c/Copies.cpp
+  src/c/Fill.cpp
   src/c/Fold.cpp
   src/c/Hoist.cpp
   src/c/Inline.cpp
   src/c/Ir.cpp
   src/c/Lexer.cpp
+  src/c/Lines.cpp
   src/c/Liveness.cpp
   src/c/Loops.cpp
+  src/c/Lower.cpp
   src/c/Narrow.cpp
   src/c/Parser.cpp
+  src/c/Promote.cpp
   src/c/Ranges.cpp
   src/c/Result.cpp
   src/c/Reuse.cpp
   src/c/Select.cpp
   src/c/Token.cpp
+  src/c/Tracker.cpp
   src/c/Walk.cpp
+  src/c/Wrap.cpp
+  src/c/Write.cpp
   src/diag/Catalogue.cpp
   src/diag/Diagnostic.cpp
   src/diag/DiagnosticId.cpp
@@ -32,6 +41,7 @@ add_library( nga_core
   src/model/Bs93.cpp
   src/model/Car.cpp
   src/model/Charsets.cpp
+  src/model/Choose.cpp
   src/model/Emit.cpp
   src/model/Facts.cpp
   src/model/Generator.cpp
@@ -39,6 +49,7 @@ add_library( nga_core
   src/model/MemoryMap.cpp
   src/model/Evaluate.cpp
   src/model/Lnx.cpp
+  src/model/Load.cpp
   src/model/Isa.cpp
   src/model/Expand.cpp
   src/model/Merge.cpp
@@ -55,7 +66,6 @@ add_library( nga_core
   src/model/VerifyLayout.cpp
   src/model/Xex.cpp
   src/model/Zx0.cpp
-  src/model/PlacementClass.cpp
   src/model/Project.cpp
   src/model/Driver.cpp
   src/model/Panes.cpp
@@ -69,8 +79,14 @@ add_library( nga_core
   src/model/Prune.cpp
   src/model/ReadOnly.cpp
   src/model/Trace.cpp
+  src/model/TraceGraph.cpp
+  src/model/TraceHolds.cpp
+  src/model/TraceLiveness.cpp
+  src/model/TraceRunOff.cpp
   src/model/References.cpp
   src/model/ProjectFile.cpp
+  src/model/Overlay.cpp
+  src/model/Vocabulary.cpp
   src/model/Section.cpp
   src/model/Segments.cpp
   src/model/Size.cpp
@@ -90,6 +106,7 @@ add_library( nga_core
   src/syntax/Parser.cpp
   src/syntax/Payload.cpp
   src/syntax/ProjectParser.cpp
+  src/syntax/Statement.cpp
   src/syntax/Token.cpp
   src/syntax/TokenCursor.cpp )
 

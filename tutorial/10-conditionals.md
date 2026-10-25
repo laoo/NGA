@@ -42,11 +42,11 @@ at      .ztemp 1
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 1 of 128 bytes
   memory:    14 of 40960 bytes
-  $0080-$0080  skip.entry.at temporary          phase0
-  $2000-$200D  skip.entry    proc               phase0
+  $0080-$0080  skip.entry.at temporary          (implicit)
+  $2000-$200D  skip.entry    proc               (implicit)
 ```
 <!-- end -->
 
@@ -150,13 +150,13 @@ it, with nothing in the driver needing to know which machine it is.
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 0 of 128 bytes
   memory:    34 of 40960 bytes
-  $2000-$2005  pack.counts  section            phase0
-  $2006-$2008  pack.buffer  section            phase0
-  $2009-$200B  pack.shorter section            phase0
-  $200C-$2021  pack.entry   proc               phase0
+  $2000-$2005  pack.counts  section            (implicit)
+  $2006-$2008  pack.buffer  section            (implicit)
+  $2009-$200B  pack.shorter section            (implicit)
+  $200C-$2021  pack.entry   proc               (implicit)
 ```
 <!-- end -->
 

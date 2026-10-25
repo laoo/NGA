@@ -11,12 +11,13 @@ The program is chapter five's, and the Project gains one line.
 <!-- include 06-panes/in-a-bank/main.ngp -->
 ```ngp
 include "atari/130xe.ngp"
+include "atari/extension.ngp"
 
-modules { "print.asm" "shared.asm" "intro.asm" "level.asm" }
+modules { "print.asm" "intro.asm" "level.asm" }
 
 panes in ext { level }
 
-resident { print, shared }
+resident { print }
 
 phase intro { needs intro  then level  entry introStart }
 phase level { needs level             entry levelStart }
@@ -52,21 +53,20 @@ levelMapEnd
 
 ## What that changed
 
-<!-- map 06-panes/in-a-bank phase=level rows=level,shared -->
+<!-- map 06-panes/in-a-bank phase=level rows=level -->
 ```
 phase level (1)
   zero page: 143 of 256 bytes
-  memory:    16623 of 56576 bytes
+  memory:    16201 of 40192 bytes
   ...
   $0083-$0084  level.drawMap.at             temporary          level  shares with ngaDst ngaPtr portbDst
   ...
   $0085-$0085  level.drawMap.left           temporary          level  shares with ngaOffset ngaValue portbSize
   ...
-  $20DF-$2103  level.drawMap                proc               level  waits in bank 0 at $0012 (copy, 39 bytes)
-  $2104-$2113  level.levelStart             proc               level  waits in bank 0 at $0039 (copy, 18 bytes)
+  $20F9-$211D  level.drawMap                proc               level  waits in bank 0 at $0011 (copy, 39 bytes)
+  $211E-$2128  level.levelStart             proc               level  waits in bank 0 at $0038 (copy, 13 bytes)
   ...
-  $4000-$4171  level.levelMap               section            level  in pane level (state 4)
-  $4000-$403F  shared.spare                 section root       intro..level
+  $4000-$4171  level.levelMap               section kept       intro..level  in pane level (state 4)
   ...
 ```
 <!-- end -->
@@ -77,28 +77,34 @@ Section with a **Payload** there, and this one has none:
 <!-- map 06-panes/in-a-bank storage -->
 ```
 storage
-  bank 0: 75 of 16384 bytes
-    $0000-$0011  frame intro -> level          live intro
-    $0012-$0038  level.drawMap                copy (39 bytes)  live intro
-    $0039-$004A  level.levelStart             copy (18 bytes)  live intro
+  bank 0: 69 of 16384 bytes
+    $0000-$0010  frame intro -> level          live intro
+    $0011-$0037  level.drawMap                copy (39 bytes)  live intro
+    $0038-$0044  level.levelStart             copy (13 bytes)  live intro
   bank 1: 0 of 16384 bytes
   bank 2: 0 of 16384 bytes
   bank 3: 0 of 16384 bytes
+  bank 4: 0 of 16384 bytes
 ```
 <!-- end -->
 
-Seventy-five bytes where chapter five had four hundred and thirty-one. The
-three hundred and seventy of the map are not in storage at all. A Pane's
-Section with bytes is written into its Bank by the Container, once, when the
-program is loaded, and no Transition copies it again: it is already at the
-address it is read from, and the switch is what brings it there.
+Sixty-nine bytes where chapter five had four hundred and thirty. The three
+hundred and seventy of the map are not in storage at all. A Pane's Section with
+bytes is written into its Bank by the Container, once, when the program is
+loaded, and no Transition copies it again: it is already at the address it is
+read from, and the switch is what brings it there.
+
+The Pane is in state 4, the fifth Bank, which is the machine's own memory at
+`$4000-$7FFF`. The solver gives a Pane the highest Bank it can, and the fifth is
+a Bank like the other four: nothing in the program or the map treats it
+differently.
 
 ## Who may name what
 
 The Bank is only at `$4000` while it is shown. The rest of the time those
-addresses are base RAM, so code that reads `levelMap` without having shown the
-Pane would read whatever base RAM holds. The tool therefore refuses the name,
-not the read:
+addresses show whatever was shown last, so code that reads `levelMap` without
+having shown the Pane would read another Bank's bytes. The tool therefore
+refuses the name, not the read:
 
 <!-- include 06-panes/outside/level.asm tag=outside -->
 ```asm
@@ -128,9 +134,9 @@ Pane shown, and that is what the `under` attribute declares:
 
 <!-- include 06-panes/in-a-bank/level.asm tag=draw -->
 ```asm
-; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`
-; shown — which is what lets it name what the Pane holds. Chapter five's loop,
-; moved here whole.
+; A Trampoline: it stands outside the Window, but runs with `level` shown —
+; which is what lets it name what the Pane holds. Chapter five's loop, moved
+; here whole.
 .proc drawMap, under level
 at      .ztemp 2
 left    .ztemp 1
@@ -166,24 +172,21 @@ left    .ztemp 1
 ```
 <!-- end -->
 
-`.proc drawMap, under level` is a **Trampoline**: it stands in base RAM, out of
-the Window, so the switch does not take it away, and it runs with `level`
-shown, so it may name what the Pane holds. `.with level` over the `jsr` is what
-shows the Pane and puts the base back afterwards — a `.with` covers the one
-statement that follows it, and the statement it covers here is the call.
+`.proc drawMap, under level` is a **Trampoline**: it stands outside the Window,
+so the switch does not take it away, and it runs with `level` shown, so it may
+name what the Pane holds. `.with level` over the `jsr` is what shows the Pane.
+A `.with` covers the one statement that follows it, and the statement it covers
+here is the call. Nothing is switched back after it: the Window keeps showing
+`level` until something shows another state, and code that names a Pane after
+that needs a `.with` of its own.
 
-## Two Sections at one address
+## Nothing else in the Window
 
-Look at the first map again. `shared.spare` and `level.levelMap` both begin at
-`$4000`, both in Phase `level`, and neither moved. Chapter four said two
-Sections may share bytes when they are never in memory at once; that was half
-of the rule. This is the other half. A **View** is one state of one Window, and
-two Sections collide only when their Phases overlap **and** their Views can be
-seen together. A Section in no Pane is in the Window's base state; the map is
-in a Bank; one switch stands between them, so the same address serves both.
-
-`shared.spare` is in the program for no reason other than to show it. Nothing
-names it, which is why it is `root`, and nothing would miss it.
+Every other Section of the program stands below `$4000` or above `$7FFF`. The
+solver gives a Window's addresses to Panes and to storage and to nothing else,
+and a pin there is refused, because what the Window shows outside a `.with` is
+whatever was shown last. Code in a Pane, a routine of a family, the map: each is
+at `$4000-$7FFF` only because something shows it there when it is used.
 
 ## More than one of the same thing
 
@@ -194,6 +197,7 @@ same address.
 <!-- include 06-panes/a-family/main.ngp -->
 ```ngp
 include "atari/130xe.ngp"
+include "atari/extension.ngp"
 
 modules { "print.asm" "intro.asm" "rows.asm" }
 
@@ -245,21 +249,25 @@ slotRow
 ```
 phase level (1)
   zero page: 145 of 256 bytes
-  memory:    16273 of 56576 bytes
+  memory:    16212 of 40192 bytes
   ...
   $0088-$0089  rows.mark                    section            level
   ...
-  $20DF-$212D  rows.levelStart              proc               level  waits in bank 0 at $000C (copy, 81 bytes)
+  $20F9-$2133  rows.levelStart              proc               level  waits in bank 0 at $000B (copy, 61 bytes)
   ...
   $4000-$4024  rows.slotRow                 section            level  in pane slots (state 2)
-  $4025-$402F  rows.fillRow                 proc               level  in pane slots (state 2)
-  $4030-$4039  rows.showRow                 proc               level  in pane slots (state 2)
+  $4025-$402F  rows.fillRow                 proc kept          intro..level  in pane slots (state 2)
+  $4030-$4039  rows.showRow                 proc kept          intro..level  in pane slots (state 2)
   ...
 ```
 <!-- end -->
 
 One row and two routines, each at one address, and the map names `state 2` for
-all three — which is the **first** member's. The other two members are the
+all three — which is the **first** member's. Three Banks hold `slotRow` at
+`$4000` in the same Phase. That is the other half of chapter four's rule: two
+Sections may share bytes when their Phases never meet, and also when what shows
+them never does. A **View** is one state of one Window, and two Sections collide
+only when their Phases overlap **and** their Views can be seen together. The other two members are the
 states after it and no row says so, because a Pane's Sections are not in
 storage: the Container writes them into each member's Bank when the program is
 loaded, once per member, and no Transition copies them again.

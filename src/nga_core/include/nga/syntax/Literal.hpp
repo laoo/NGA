@@ -9,6 +9,11 @@
 namespace nga::syntax
 {
 
+/// What a hexadecimal digit is worth, either case, or -1 for any other
+/// character. A digit of a lower base is worth the same, so the value also
+/// tells whether it is one of that base.
+int hexDigitValue( char c );
+
 /// The value of a numeric literal.
 ///
 /// Nothing only when the text is not a literal this lexer would accept — a
@@ -70,5 +75,10 @@ std::optional<std::int64_t> plainCharacterValueOf( std::string_view text );
 /// The bytes of an untranslated string literal, escapes resolved. Nothing when
 /// the literal names a character set: those bytes come from the table.
 std::optional<std::vector<std::uint8_t>> plainBytesOf( std::string_view text );
+
+/// Text as a string literal spells it, quotes included: what a tool writes
+/// where it puts a path or a name of the author's into text the lexer reads,
+/// so that a `"` or a `\` in it is read as itself.
+std::string quotedLiteral( std::string_view text );
 
 } // namespace nga::syntax

@@ -50,8 +50,7 @@ void addSlotCells( Project& project, std::vector<Module>& modules, diag::Diagnos
   {
     Symbol& symbol = modules[slot.module.value].symbols().at( slot.index );
     auto& declaration = std::get<SlotDeclaration>( symbol.value );
-    Section section{ declaration.placement, nullptr,          nullptr, nullptr, false, false,
-                     SectionKind::PLAIN,    symbol.definition };
+    Section section{ declaration.placement, nullptr, nullptr, nullptr, false, SectionKind::PLAIN, symbol.definition };
     section.appendChunk( SlotCellContent{ .module = slot.module, .symbol = slot.index, .binding = declaration.binding },
                          symbol.definition,
                          {} );
@@ -82,7 +81,7 @@ std::optional<SymbolRef> implementationIn( GlobalSymbols const& symbols, SymbolR
   for ( ResolvedImplementation const& implementation : symbols.implementationsOf( slot ) )
   {
     Residency const& residency = symbols.moduleAt( implementation.target.module ).residency();
-    if ( residency.phaseCount() > phase.value && residency.includes( phase ) )
+    if ( residency.includes( phase ) )
     {
       return implementation.target;
     }
@@ -90,7 +89,7 @@ std::optional<SymbolRef> implementationIn( GlobalSymbols const& symbols, SymbolR
   return std::nullopt;
 }
 
-std::optional<std::uint32_t> addressOfImplementation( Placed const& build, SymbolRef target, PhaseIndex phase )
+std::optional<std::uint32_t> addressOfImplementation( Placed const& build, SymbolRef target )
 {
   Layout const& layout = build.layout();
   Symbol const& symbol = build.symbols().at( target );
@@ -101,7 +100,7 @@ std::optional<std::uint32_t> addressOfImplementation( Placed const& build, Symbo
     {
       return std::nullopt;
     }
-    return layout.addressIn( where, phase ) + build.sizes().offsetOf( where, label->chunk );
+    return layout.addressOf( where ) + build.sizes().offsetOf( where, label->chunk );
   }
   return std::nullopt;
 }

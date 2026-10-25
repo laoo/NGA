@@ -128,6 +128,7 @@ left    .ztemp 1
 <!-- include 04-phases/two-phases/main.ngp -->
 ```ngp
 include "atari/800xl.ngp"
+include "atari/disk.ngp"
 
 modules { "print.asm" "intro.asm" "level.asm" }
 
@@ -146,9 +147,10 @@ A `phase` block names the Modules the Phase **needs**, the Phases it may go
 starts in. `resident` names Modules that are in memory in every Phase, and
 `print` is one: both Phases call it.
 
-Two lines are new. `include` takes the machine from the tool's library, which
-here is an Atari 800XL with a disk drive — the Regions, the registers, and the
-driver that reads the diskette, none of which this Project writes. And
+Three lines are new. The first `include` takes the machine from the tool's
+library, which here is an Atari 800XL: its Regions and its registers, none of
+which this Project writes. The second takes the machine's storage, which is a
+disk drive: the diskette's sectors, and the driver that reads them. And
 `container atr` is that diskette: the program now has a part that has to wait
 somewhere until it is wanted, and a diskette is somewhere.
 
@@ -158,8 +160,8 @@ somewhere until it is wanted, and a diskette is somewhere.
 ```
 phase intro (0)
   zero page: 144 of 256 bytes
-  memory:    16487 of 62592 bytes
-  $0000-$007F  os.osZero                    section root       intro..level
+  memory:    16496 of 62592 bytes
+  $0000-$007F  osram.osZero                 section root       intro..level
   $0080-$0083  disk.diskAt                  section            intro..level
   $0084-$0085  disk.diskDst                 temporary          intro..level  shares with ngaDst ngaPtr levelStart.at
   $0084-$0085  nga.transition.ngaDst        temporary          intro..level  shares with diskDst ngaPtr levelStart.at
@@ -168,33 +170,32 @@ phase intro (0)
   $0086-$0087  nga.transition.ngaOffset     temporary          intro..level  shares with diskLeft ngaValue levelStart.left
   $0086-$0087  nga.transition.ngaValue      temporary          intro..level  shares with diskLeft ngaOffset levelStart.left
   $0088-$0089  nga.transition.ngaEntry      temporary          intro..level
-  $008A-$008B  nga.transition.ngaFramePos   temporary          intro..level
-  $008C-$008C  nga.transition.ngaWanted     temporary          intro..level
-  $008D-$008D  nga.transition.ngaCount      temporary          intro..level
-  $008E-$008E  nga.transition.ngaFrameUnit  temporary          intro..level
+  $008A-$008C  nga.transition.ngaFrameAt    temporary          intro..level
+  $008D-$008D  nga.transition.ngaWanted     temporary          intro..level
+  $008E-$008E  nga.transition.ngaCount      temporary          intro..level
   $008F-$008F  nga.transition.ngaUnit       temporary          intro..level
-  $0200-$06FF  os.osRam                     section root       intro..level
+  $0200-$06FF  osram.osRam                  section root       intro..level
   $0700-$0705  nga.boot.ngaBootRecord       section root       intro..level
   $0706-$07B9  nga.boot.ngaBootLoad         proc root          intro..level
   $087D-$087F  nga.boot.ngaBootImage        section root       intro..level
-  $0880-$0892  disk.diskOpenStream          proc               intro..level
-  $0893-$08AB  disk.diskReadByte            proc               intro..level
-  $08AC-$08D3  disk.diskFill                proc               intro..level
-  $08D4-$08EC  print.printLine              proc               intro..level
-  $08ED-$08F1  intro.introText              section            intro
-  $08F2-$08FB  nga.transition.ngaFrameOpen  proc               intro..level
-  $08FC-$08FC  nga.cell.ngaCurrentPhase     section            intro..level
-  $08FD-$08FD  nga.boot.ngaBootIdle         proc root          intro..level
-  $08FE-$08FE  nga.transforms.ngaShowBases  proc               intro..level
+  $0880-$088F  disk.diskOpenStream          proc               intro..level
+  $0890-$08A8  disk.diskReadByte            proc               intro..level
+  $08A9-$08D0  disk.diskFill                proc               intro..level
+  $08D1-$08FD  disk.diskCopy                proc               intro..level
+  $08FE-$08FE  nga.cell.ngaCurrentPhase     section            intro..level
+  $08FF-$08FF  nga.boot.ngaBootIdle         proc root          intro..level
   $0900-$09FF  disk.diskBuffer              section            intro..level
-  $0A00-$0A2C  disk.diskCopy                proc               intro..level
-  $0A2D-$0A3E  intro.introStart             proc               intro
-  $0BC6-$0C0E  nga.transition.ngaTransition proc               intro..level
-  $0C0F-$0C9F  nga.transition.ngaEnter      proc               intro..level
-  $0CA0-$0CA9  nga.transition.ngaFrameSkip  proc               intro..level
-  $0CAA-$0CB1  nga.transforms.ngaTransform  proc               intro..level
-  $C000-$CFFF  os.osRomLow                  section root       intro..level
-  $D800-$FFFF  os.osRomHigh                 section root       intro..level
+  $0A00-$0A18  print.printLine              proc               intro..level
+  $0A19-$0A1D  intro.introText              section            intro
+  $0A1E-$0A2F  intro.introStart             proc               intro
+  $0BB2-$0BFA  nga.transition.ngaTransition proc               intro..level
+  $0BFB-$0C8E  nga.transition.ngaEnter      proc               intro..level
+  $0C8F-$0C9E  nga.transition.ngaFrameOpen  proc               intro..level
+  $0C9F-$0CAC  nga.transition.ngaFrameSkip  proc               intro..level
+  $0CAD-$0CB4  nga.transforms.ngaTransform  proc               intro..level
+  $C000-$CFFF  osrom.osRomLow               section root       intro..level
+  $D800-$DFFF  mathpack.mathPack            section root       intro..level
+  $E000-$FFFF  osrom.osRomHigh              section root       intro..level
 ```
 <!-- end -->
 
@@ -202,16 +203,15 @@ phase intro (0)
 ```
 phase level (1)
   zero page: 144 of 256 bytes
-  memory:    16873 of 62592 bytes
+  memory:    16882 of 62592 bytes
   ...
   $0084-$0085  level.levelStart.at          temporary          level  shares with diskDst ngaDst ngaPtr
   ...
   $0086-$0086  level.levelStart.left        temporary          level  shares with diskLeft ngaOffset ngaValue
   ...
-  $08D4-$08EC  print.printLine              proc               intro..level
-  ...
-  $0A2D-$0B9E  level.levelMap               section            level  waits in unit 0 at $0010 (copy, 372 bytes)
-  $0B9F-$0BC5  level.levelStart             proc               level  waits in unit 0 at $0184 (copy, 41 bytes)
+  $0A00-$0A18  print.printLine              proc               intro..level
+  $0A19-$0B8A  level.levelMap               section            level  waits in unit 0 at $0010 (copy, 372 bytes)
+  $0B8B-$0BB1  level.levelStart             proc               level  waits in unit 0 at $0184 (copy, 41 bytes)
   ...
 ```
 <!-- end -->
@@ -265,7 +265,7 @@ which Sections this edge loads, where each waits, and where each lands.
 A **unit** is the model's word for a piece of storage, and it is the model's
 and not the medium's: the Project says how many there are and how big one is,
 a Payload is named by a unit and an offset in it, and the driver turns that
-into whatever the hardware understands. Here the variant asked for units of
+into whatever the hardware understands. Here `atari/disk.ngp` asked for units of
 65536 bytes, and the driver reads one as 256 sectors from sector 4 on, the
 first three being the boot record. So `unit 0 at $0010` is sixteen bytes into
 the fourth sector of the diskette, and the other two units are sectors the
@@ -347,7 +347,7 @@ Twenty-nine bytes. `transform` names the Sections whose Payload is turned into
 another form on its way into storage and back on its way out; a Section named
 in none is copied, which is a transform like the others and not the absence of
 one. The Section does not change and neither does the program: the decoder came
-with the machine's variant, the tool numbered it, and the Frame says which
+with the machine's storage, the tool numbered it, and the Frame says which
 number each block uses. What the screen shows is the same map either way, which
 is the only check worth having on a decoder.
 

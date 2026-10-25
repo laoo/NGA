@@ -77,6 +77,12 @@ target {
   register VIAPCR  $E84C
   register VIAIFR  $E84D
   register VIAIER  $E84E
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`. Only the vector pet/kernal.asm reserves: BRK's and the
+  ; NMI's, after it, are named by nothing verified here.
+  holder irq                        ; $90-$91: the ROM's stub dispatches through it
 }
 
 ; What the ROM keeps, the display's memory and the two codes for the letters,

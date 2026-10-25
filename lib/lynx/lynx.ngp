@@ -219,6 +219,12 @@ target {
   register BLUEREDF         $FDBF
   register MAPCTL           $FFF9
   register CPU_IRQ          $FFFE, 2
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`. No NMI, which has no source.
+  holder irq                            ; CPU_IRQ, where the ROM is mapped out
+  holder display                        ; DISPADR: the buffer the display reads
 }
 
 ; The one entry of the boot ROM a program of this tool wants, and the ROM has no

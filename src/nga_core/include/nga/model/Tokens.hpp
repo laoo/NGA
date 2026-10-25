@@ -4,6 +4,7 @@
 #include "nga/diag/SourceManager.hpp"
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +36,12 @@ enum class TokenClass : std::uint8_t
 };
 
 std::string_view nameOf( TokenClass value );
+
+/// Every word of the Project grammar, in alphabetical order: what a `.ngp` is
+/// coloured by, and what `--vocabulary` hands an editor. Listed beside the
+/// parser rather than read from it, which compares by name; a word this
+/// misses is drawn as a name, a colour too few and never one that lies.
+[[nodiscard]] std::span<std::string_view const> projectWords();
 
 /// Which grammar a file is read by, which is what the classifier needs to know
 /// and what a Module's extension says.

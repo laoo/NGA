@@ -19,14 +19,27 @@ Module buildConstantModule( diag::SourceManager const& sources,
     syntax::Token const token{ .kind = syntax::TokenKind::NUMBER,
                                .location = constant.valueSpan.begin,
                                .length = constant.valueSpan.length };
+    syntax::ExpressionPtr value = syntax::makeExpression( syntax::ExpressionKind::NUMBER, token, constant.valueSpan );
+    // A sign is the negation the assembler reads in `-1`, so a negative value
+    // is no new kind of value for anything that reads one.
+    if ( constant.signSpan.has_value() )
+    {
+      syntax::Token const sign{ .kind = syntax::TokenKind::MINUS,
+                                .location = constant.signSpan->begin,
+                                .length = constant.signSpan->length };
+      syntax::ExpressionPtr negated = syntax::makeExpression(
+          syntax::ExpressionKind::UNARY, sign, syntax::spanning( *constant.signSpan, constant.valueSpan ) );
+      negated->unaryOperator = syntax::UnaryOperator::NEGATE;
+      negated->left = std::move( value );
+      value = std::move( negated );
+    }
     // A name given a value twice was refused where the second was read, so
     // nothing here can fail to be added.
-    module.symbols().add(
-        Symbol{ .name = sources.textOf( constant.nameSpan ),
-                .kind = SymbolKind::CONSTANT,
-                .definition = constant.nameSpan,
-                .exported = true,
-                .value = syntax::makeExpression( syntax::ExpressionKind::NUMBER, token, constant.valueSpan ) } );
+    module.symbols().add( Symbol{ .name = sources.textOf( constant.nameSpan ),
+                                  .kind = SymbolKind::CONSTANT,
+                                  .definition = constant.nameSpan,
+                                  .exported = true,
+                                  .value = std::move( value ) } );
   }
   return module;
 }

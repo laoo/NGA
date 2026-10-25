@@ -27,6 +27,8 @@ cartUnitPages  = $20                    ; a unit, in pages: what an offset carri
 
 .driver open    cartOpen
 .driver read    cartRead
+.driver unit    cartUnit
+.driver offset  cartPtr
 .driver stream  switched
 .driver show    switched cartShow
 .driver showAt  switched cartShowAt
@@ -54,20 +56,20 @@ cartUnitPages  = $20                    ; a unit, in pages: what an offset carri
 
 ; The stream: where the next byte is, and which unit is in. A plain zero-page
 ; Section rather than Temporaries, because the value has to survive between one
-; call and the next while nothing here is running.
+; call and the next while nothing here is running. They are also the cells the
+; routine writes a position into before it opens the stream, `cartPtr` the
+; offset and `cartUnit` the unit.
 .section zeropage
 cartPtr         .res 2
 cartUnit        .res 1
 .ends
 
-; A = the unit, X/Y = the offset in it: the stream stands there. An offset past
-; the unit's end carries into the units after, since the routine counts on in a
+; The stream to the position in cartUnit and cartPtr. An offset past the
+; unit's end carries into the units after, since the routine counts on in a
 ; Frame without knowing where a unit ends: a unit is $2000 bytes, so the
 ; offset's top three bits are units.
 .proc cartOpenStream
-        sta cartUnit
-        stx cartPtr
-        tya
+        lda cartPtr+1
 @carry
         cmp #cartUnitPages
         bcc @within

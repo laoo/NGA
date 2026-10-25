@@ -15,4 +15,10 @@ namespace nga::c
 /// a constant may not be carried across.
 void foldConstants( ir::Unit& unit );
 
+/// Reads a pair a byte of the Proc's own was given halved, `store m, s >> 1`,
+/// and that the same block reads back doubled, `m << 1`, as `s & 0xFFFE`.
+/// After `reuseLoads`, which matches addresses as the source wrote them — see
+/// docs/decisions/0285-a-pair-halved-and-doubled-is-its-low-bit-cleared.md.
+void unshiftHalves( ir::Unit& unit );
+
 } // namespace nga::c

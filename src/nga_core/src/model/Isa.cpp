@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <set>
 #include <utility>
 
 namespace nga::model
@@ -338,6 +339,37 @@ std::span<Instruction const> instructionTable()
   return TABLE;
 }
 
+std::vector<std::string_view> mnemonicsOf( bool with65sc02 )
+{
+  std::set<std::string_view> found;
+  auto const has = [&found]( std::string_view mnemonic ) { return found.contains( mnemonic ); };
+  for ( Instruction const& entry : TABLE )
+  {
+    found.insert( entry.mnemonic );
+  }
+  if ( with65sc02 )
+  {
+    for ( Instruction const& entry : EXTRA65SC02 )
+    {
+      found.insert( entry.mnemonic );
+    }
+  }
+  for ( Jcc const& entry : JCCS )
+  {
+    found.insert( entry.mnemonic );
+  }
+  std::vector<std::string_view> certain;
+  for ( auto const& [name, branch] : CERTAIN )
+  {
+    if ( has( branch ) )
+    {
+      certain.push_back( name );
+    }
+  }
+  found.insert( certain.begin(), certain.end() );
+  return { found.begin(), found.end() };
+}
+
 bool isMnemonic( std::string_view mnemonic )
 {
   auto const named = [mnemonic]( Instruction const& entry ) { return entry.mnemonic == mnemonic; };
@@ -507,7 +539,8 @@ ControlFlow flowOf( std::string_view mnemonic )
   return ControlFlow::NEXT;
 }
 
-std::optional<AddressingMode> modeFor( std::string_view mnemonic, syntax::OperandShape shape, PlacementClass placement )
+std::optional<AddressingMode>
+modeFor( std::string_view mnemonic, syntax::OperandShape shape, syntax::PlacementClass placement )
 {
   auto const has = [mnemonic]( AddressingMode mode ) { return opcodeOf( mnemonic, mode ).has_value(); };
 
@@ -515,7 +548,7 @@ std::optional<AddressingMode> modeFor( std::string_view mnemonic, syntax::Operan
   // form; absolute otherwise. Widening is always correct — an absolute
   // instruction reaches a zero-page address — and narrowing never is.
   auto const direct = [&has, placement]( AddressingMode zeroPage, AddressingMode absolute )
-  { return placement == PlacementClass::ZEROPAGE && has( zeroPage ) ? zeroPage : absolute; };
+  { return placement == syntax::PlacementClass::ZEROPAGE && has( zeroPage ) ? zeroPage : absolute; };
 
   AddressingMode mode = AddressingMode::IMPLIED;
   switch ( shape )

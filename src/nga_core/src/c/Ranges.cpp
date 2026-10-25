@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace nga::c
@@ -27,6 +28,21 @@ std::int64_t lowerBitsMask( std::int64_t value )
     mask = ( mask << 1 ) | 1;
   }
   return mask;
+}
+
+/// `c | x` and `c ^ x` of a number and a value whose bits all lie below the
+/// lowest the number has: the two share no bit, so either is the sum —
+/// `1024 ^ (u16)byte` is 1024 to 1279. Nothing where they may share one.
+std::optional<Range> disjoint( Range left, Range right )
+{
+  for ( auto const [one, other] : { std::pair{ left, right }, std::pair{ right, left } } )
+  {
+    if ( one.min == one.max && one.min >= 0 && other.min >= 0 && ( one.min & lowerBitsMask( other.max ) ) == 0 )
+    {
+      return Range{ .min = one.min + other.min, .max = one.min + other.max };
+    }
+  }
+  return std::nullopt;
 }
 
 /// The exact range, or the type's where the exact one does not fit it: a
@@ -65,8 +81,8 @@ using Known = std::map<std::string, Held>;
 /// object forgets every byte of it.
 void write( Known& known, std::string const& name )
 {
-  std::string const base = baseOf( name );
-  std::erase_if( known, [&base]( auto const& entry ) { return baseOf( entry.first ) == base; } );
+  std::string const base = ir::baseOf( name );
+  std::erase_if( known, [&base]( auto const& entry ) { return ir::baseOf( entry.first ) == base; } );
 }
 
 /// What the edge into a block adds, where the block before it ends by
@@ -87,8 +103,8 @@ void refine( Known& known, ir::Block const& before, std::uint32_t into, std::set
   }
   auto const* const object = std::get_if<ir::Object>( &compare->left );
   auto const* const bound = std::get_if<ir::Constant>( &compare->right );
-  if ( object == nullptr || bound == nullptr || !bound->name.empty() || !own.contains( object->name ) ||
-       object->type != compare->type )
+  if ( object == nullptr || bound == nullptr || ( !bound->name.empty() && !bound->valued ) ||
+       !own.contains( object->name ) || object->type != compare->type )
   {
     return;
   }
@@ -163,6 +179,10 @@ Range rangeOfBinary( ir::BinaryOperator op, ir::Type type, Range left, Range rig
     }
     return rangeOfType( type );
   case ir::BinaryOperator::OR:
+    if ( std::optional<Range> const joined = disjoint( left, right ); joined.has_value() )
+    {
+      return fitted( *joined, type );
+    }
     if ( left.min >= 0 && right.min >= 0 )
     {
       return fitted(
@@ -171,6 +191,10 @@ Range rangeOfBinary( ir::BinaryOperator op, ir::Type type, Range left, Range rig
     }
     return rangeOfType( type );
   case ir::BinaryOperator::XOR:
+    if ( std::optional<Range> const joined = disjoint( left, right ); joined.has_value() )
+    {
+      return fitted( *joined, type );
+    }
     if ( left.min >= 0 && right.min >= 0 )
     {
       return fitted( Range{ .min = 0, .max = lowerBitsMask( std::max( left.max, right.max ) ) }, type );
@@ -221,8 +245,9 @@ Range rangeOf( ir::Operand const& operand, ir::Function const& function, std::ve
   if ( auto const* const constant = std::get_if<ir::Constant>( &operand ) )
   {
     // A constant the text writes by its name is the assembler's to resolve,
-    // and its type is all the compiler is promised of it.
-    if ( !constant->name.empty() )
+    // and its type is all the compiler is promised of it — but a `const` of
+    // the program's C is the value the compiler writes for it.
+    if ( !constant->name.empty() && !constant->valued )
     {
       return rangeOfType( constant->type );
     }
@@ -258,13 +283,17 @@ Known meet( Known const& one, Known const& other )
 }
 
 /// One sweep of the function in the order of its blocks, taking as given at
-/// each loop's header that its own bytes are no smaller than they were where
-/// the loop was entered — except those `refused` names for that header — and
-/// adding to `refused` each such byte a store of the loop may take below it.
+/// each loop's header that its own bytes hold what they held where the loop
+/// was entered — no more than that where they are not `unbounded` for that
+/// header, and nothing where they are `refused` — and adding to `unbounded`
+/// each such byte a store of the loop may take above it, and to `refused`
+/// each one a store may take below it.
 std::vector<Range> sweep( ir::Function const& function,
                           std::vector<std::vector<std::uint32_t>> const& before,
                           std::map<std::uint32_t, Loop> const& loops,
-                          std::map<std::uint32_t, std::set<std::string>>& refused )
+                          std::map<std::uint32_t, std::set<std::string>>& refused,
+                          std::map<std::uint32_t, std::set<std::string>>& unbounded,
+                          std::vector<std::optional<Range>>* bounds = nullptr )
 {
   std::vector<Range> ranges( function.values.size() );
   for ( std::size_t index = 0; index < ranges.size(); ++index )
@@ -273,8 +302,8 @@ std::vector<Range> sweep( ir::Function const& function,
   }
   std::set<std::string> const own = ownBytesOf( function );
 
-  // What each header takes as given: the byte and the least it may hold.
-  std::map<std::uint32_t, std::map<std::string, std::int64_t>> assumed;
+  // What each header takes as given: the byte and what it may hold.
+  std::map<std::uint32_t, std::map<std::string, Range>> assumed;
   std::vector<Known> atEnd( function.blocks.size() );
   for ( std::uint32_t index = 0; index < function.blocks.size(); ++index )
   {
@@ -295,34 +324,46 @@ std::vector<Range> sweep( ir::Function const& function,
     else if ( auto const loop = loops.find( index ); loop != loops.end() )
     {
       // A loop's header, entered from before it and from its own blocks
-      // jumping back: what was known on the way in, less its upper bounds.
+      // jumping back: what was known on the way in, less its upper bounds
+      // where a store of the loop may go above them — a bound the loop does
+      // not write keeps its most, `limit = 4096 ^ seed` its high byte. See
+      // docs/decisions/0290-a-high-byte-the-ranges-know-is-read-as-a-number.md.
       for ( auto const& [name, held] : atEnd[loop->second.entry] )
       {
         if ( !refused[index].contains( name ) )
         {
-          known[name] =
-              Held{ .type = held.type, .range = Range{ .min = held.range.min, .max = rangeOfType( held.type ).max } };
-          assumed[index][name] = held.range.min;
+          Range const range{ .min = held.range.min,
+                             .max = unbounded[index].contains( name ) ? rangeOfType( held.type ).max : held.range.max };
+          known[name] = Held{ .type = held.type, .range = range };
+          assumed[index][name] = range;
         }
       }
     }
 
-    // A store of the byte inside a loop whose header took its least as given
-    // must keep to it, or the header may not take it.
+    // A store of the byte inside a loop whose header took its range as given
+    // must keep to it, or the header may not take its least, or its most.
     auto const keepsTo = [&]( std::string const& name, std::optional<Range> stored )
     {
-      for ( auto const& [header, least] : assumed )
+      for ( auto const& [header, taken] : assumed )
       {
         Loop const& loop = loops.at( header );
         if ( index < loop.header || index > loop.last )
         {
           continue;
         }
-        for ( auto const& [byte, atLeast] : least )
+        for ( auto const& [byte, range] : taken )
         {
-          if ( baseOf( byte ) == baseOf( name ) && ( byte != name || !stored.has_value() || stored->min < atLeast ) )
+          if ( ir::baseOf( byte ) != ir::baseOf( name ) )
+          {
+            continue;
+          }
+          if ( byte != name || !stored.has_value() || stored->min < range.min )
           {
             refused[header].insert( byte );
+          }
+          else if ( stored->max > range.max )
+          {
+            unbounded[header].insert( byte );
           }
         }
       }
@@ -374,6 +415,13 @@ std::vector<Range> sweep( ir::Function const& function,
               write( known, operation.name );
               keepsTo( operation.name, std::nullopt );
             }
+            else if constexpr ( std::is_same_v<Operation, ir::Compare> )
+            {
+              if ( bounds != nullptr )
+              {
+                ( *bounds )[operation.result.index] = read( operation.right );
+              }
+            }
             else if constexpr ( std::is_same_v<Operation, ir::Copy> )
             {
               write( known, operation.to.name );
@@ -389,21 +437,14 @@ std::vector<Range> sweep( ir::Function const& function,
 
 } // namespace
 
-std::vector<Range> rangesOf( ir::Function const& function )
+namespace
 {
-  std::vector<std::vector<std::uint32_t>> before( function.blocks.size() );
-  for ( std::uint32_t index = 0; index < function.blocks.size(); ++index )
-  {
-    ir::Terminator const& end = function.blocks[index].terminator;
-    if ( end.kind == ir::TerminatorKind::JUMP || end.kind == ir::TerminatorKind::BRANCH )
-    {
-      before[end.target].push_back( index );
-    }
-    if ( end.kind == ir::TerminatorKind::BRANCH && end.otherwise != end.target )
-    {
-      before[end.otherwise].push_back( index );
-    }
-  }
+
+/// The sweeps of `rangesOf` to their fixed point, the last of them also
+/// answering what each comparison's right operand holds where it stands.
+std::vector<Range> swept( ir::Function const& function, std::vector<std::optional<Range>>* bounds )
+{
+  std::vector<std::vector<std::uint32_t>> const before = ir::predecessorsOf( function.blocks );
 
   // The loops whose header is entered from the block before it and otherwise
   // only from the loop's own blocks, each by its header, with its last block
@@ -429,15 +470,38 @@ std::vector<Range> rangesOf( ir::Function const& function )
   // header takes as given keep to it at every turn, so they held on the way
   // in and hold ever after. A sweep only ever takes back, so this ends.
   std::map<std::uint32_t, std::set<std::string>> refused;
+  std::map<std::uint32_t, std::set<std::string>> unbounded;
   while ( true )
   {
     std::map<std::uint32_t, std::set<std::string>> const was = refused;
-    std::vector<Range> ranges = sweep( function, before, loops, refused );
-    if ( refused == was )
+    std::map<std::uint32_t, std::set<std::string>> const wasUnbounded = unbounded;
+    std::vector<Range> ranges = sweep( function, before, loops, refused, unbounded );
+    if ( refused == was && unbounded == wasUnbounded )
     {
+      if ( bounds != nullptr )
+      {
+        bounds->assign( function.values.size(), std::nullopt );
+        std::map<std::uint32_t, std::set<std::string>> again = refused;
+        std::map<std::uint32_t, std::set<std::string>> againUnbounded = unbounded;
+        sweep( function, before, loops, again, againUnbounded, bounds );
+      }
       return ranges;
     }
   }
+}
+
+} // namespace
+
+std::vector<Range> rangesOf( ir::Function const& function )
+{
+  return swept( function, nullptr );
+}
+
+std::vector<std::optional<Range>> comparedBoundsOf( ir::Function const& function )
+{
+  std::vector<std::optional<Range>> bounds;
+  swept( function, &bounds );
+  return bounds;
 }
 
 } // namespace nga::c

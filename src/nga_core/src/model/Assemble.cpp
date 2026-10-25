@@ -8,6 +8,7 @@
 #include "nga/model/Merge.hpp"
 #include "nga/model/Panes.hpp"
 #include "nga/model/Regions.hpp"
+#include "nga/model/Runtime.hpp"
 
 #include "nga/model/Slots.hpp"
 
@@ -19,7 +20,10 @@
 #include "nga/syntax/Parser.hpp"
 #include "nga/syntax/TokenCursor.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <utility>
@@ -32,6 +36,25 @@ namespace nga::model
 namespace
 {
 
+/// How many bytes a state of the Window takes, as the driver's declaration
+/// says it: read off the declaration here because the compiler runs before the
+/// driver is resolved, which holds the place to the Window's count once it is —
+/// see docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+std::uint32_t declaredStateBytes( std::span<Module const> modules, std::string_view window )
+{
+  for ( Module const& module : modules )
+  {
+    for ( DriverRole const& role : module.driverRoles() )
+    {
+      if ( role.role == "showAt" && role.window == window )
+      {
+        return role.place == "xy" ? 2 : 1;
+      }
+    }
+  }
+  return 1;
+}
+
 /// The most bytes a name of the assembler is memory of in C: the address
 /// space.
 constexpr std::int64_t MAX_MEMORY = 65536;
@@ -40,12 +63,6 @@ constexpr std::int64_t MAX_MEMORY = 65536;
 /// names, which is more than a program writes and bounds a cycle, reported
 /// after Merge.
 constexpr std::uint32_t MAX_CHAIN = 64;
-
-bool isCompiled( diag::SourceManager const& sources, ProjectModule const& entry )
-{
-  return entry.generated == Generated::NONE &&
-         std::filesystem::path{ sources.pathOf( entry.file ) }.extension() == ".ngc";
-}
 
 /// Whether a Symbol is the entry of a `.proc` — a Label at the first Chunk of
 /// a Proc — which is the one thing of the assembler's that C may call.
@@ -122,7 +139,6 @@ c::ExternalName labelShape( diag::SourceManager const& sources,
   std::optional<syntax::DataWidth> width;
   bool reserves = false;
   std::uint32_t count = 0;
-  bool counted = true;
   for ( std::uint32_t index = position.chunk.value; index < end; ++index )
   {
     Chunk const& chunk = section.chunks()[index];
@@ -136,8 +152,12 @@ c::ExternalName labelShape( diag::SourceManager const& sources,
       width = data->width;
       for ( syntax::ExpressionPtr const& item : items )
       {
-        counted = counted && item->kind != syntax::ExpressionKind::STRING;
-        ++count;
+        // A Charset maps each character to one byte, an element of a `u8[]`.
+        // Among `.word` items a string is the assembler's error, which is
+        // left to say so rather than a finding of C's about the count.
+        count += item->kind == syntax::ExpressionKind::STRING
+                     ? syntax::characterCountOf( syntax::quotedOf( sources.textOf( item->token.span() ) ).body )
+                     : 1U;
       }
       continue;
     }
@@ -165,10 +185,7 @@ c::ExternalName labelShape( diag::SourceManager const& sources,
   name.kind = c::ExternalKind::MEMORY;
   name.type = width == syntax::DataWidth::WORD ? c::ir::Type::U16 : c::ir::Type::U8;
   name.isArray = true;
-  if ( counted )
-  {
-    name.count = count;
-  }
+  name.count = count;
   return name;
 }
 
@@ -309,7 +326,29 @@ std::optional<c::ExternalByte> declaredByte( diag::SourceManager const& sources,
                                              ModuleIndex home,
                                              Declared const& declared )
 {
+  // Another Proc's result: its bytes, as that Proc declares them — see
+  // docs/decisions/0278-a-result-may-be-another-procs-result.md.
+  if ( !declared.elsewhere.empty() )
+  {
+    std::optional<SymbolRef> const named = symbols.lookup( home, declared.elsewhere );
+    std::optional<DeclaredResult> const found = named.has_value() ? declaredResultAt( symbols, *named ) : std::nullopt;
+    return found.has_value() ? declaredByte( sources, symbols, found->module, *found->result ) : std::nullopt;
+  }
+
   Module const& module = symbols.moduleAt( home );
+  // The Label at the start of the reservation, which names it.
+  Symbol const* reservation = nullptr;
+  if ( declared.temporary.has_value() )
+  {
+    auto const found = std::ranges::find_if( module.symbols().symbols(),
+                                             [&]( Symbol const& symbol )
+                                             {
+                                               auto const* at = std::get_if<LabelPosition>( &symbol.value );
+                                               return symbol.kind == SymbolKind::LABEL && at != nullptr &&
+                                                      at->section == *declared.temporary && at->chunk.value == 0;
+                                             } );
+    reservation = found == module.symbols().symbols().end() ? nullptr : &*found;
+  }
 
   // Bytes in registers: as many as the place has letters, a `u8` or a
   // `u16`, and a name only where some of them are the reservation's — see
@@ -326,35 +365,18 @@ std::optional<c::ExternalByte> declaredByte( diag::SourceManager const& sources,
     {
       return placed;
     }
-    auto const holder = std::ranges::find_if( module.symbols().symbols(),
-                                              [&]( Symbol const& symbol )
-                                              {
-                                                auto const* at = std::get_if<LabelPosition>( &symbol.value );
-                                                return symbol.kind == SymbolKind::LABEL && at != nullptr &&
-                                                       at->section == *declared.temporary && at->chunk.value == 0;
-                                              } );
-    if ( holder == module.symbols().symbols().end() )
+    if ( reservation == nullptr )
     {
       return std::nullopt;
     }
-    placed.name = std::string{ holder->name };
+    placed.name = std::string{ reservation->name };
     return placed;
   }
-  if ( !declared.temporary.has_value() )
+  if ( !declared.temporary.has_value() || reservation == nullptr )
   {
     return std::nullopt;
   }
-  auto const named = std::ranges::find_if( module.symbols().symbols(),
-                                           [&]( Symbol const& symbol )
-                                           {
-                                             auto const* at = std::get_if<LabelPosition>( &symbol.value );
-                                             return symbol.kind == SymbolKind::LABEL && at != nullptr &&
-                                                    at->section == *declared.temporary && at->chunk.value == 0;
-                                           } );
-  if ( named == module.symbols().symbols().end() )
-  {
-    return std::nullopt;
-  }
+  Symbol const* const named = reservation;
   c::ExternalByte byte{ .name = std::string{ named->name },
                         .type = c::ir::Type::U8,
                         .isBytes = false,
@@ -367,21 +389,21 @@ std::optional<c::ExternalByte> declaredByte( diag::SourceManager const& sources,
     byte.bytes = declared.type->bytes();
     switch ( declared.type->kind )
     {
-    case DeclaredType::Kind::U8:
+    case syntax::DeclaredType::Kind::U8:
       break;
-    case DeclaredType::Kind::I8:
+    case syntax::DeclaredType::Kind::I8:
       byte.type = c::ir::Type::I8;
       break;
-    case DeclaredType::Kind::U16:
+    case syntax::DeclaredType::Kind::U16:
       byte.type = c::ir::Type::U16;
       break;
-    case DeclaredType::Kind::I16:
+    case syntax::DeclaredType::Kind::I16:
       byte.type = c::ir::Type::I16;
       break;
-    case DeclaredType::Kind::BOOL:
+    case syntax::DeclaredType::Kind::BOOL:
       byte.type = c::ir::Type::BOOL;
       break;
-    case DeclaredType::Kind::BYTES:
+    case syntax::DeclaredType::Kind::BYTES:
       byte.isBytes = true;
       break;
     }
@@ -517,11 +539,14 @@ externalOf( diag::SourceManager const& sources, GlobalSymbols const& symbols, Ta
     name.window = window.name;
     name.paneCount = pane.count;
     name.paneState = pane.state.has_value() ? stateNameOf( target, window, *pane.state ) : std::string{};
+    name.stateBytes = declaredStateBytes( symbols.modules(), window.name );
     return name;
   }
   case SymbolKind::WINDOW:
     name.kind = c::ExternalKind::WINDOW;
     name.reason = "a window";
+    name.stateBytes =
+        declaredStateBytes( symbols.modules(), target.windows[std::get<WindowIndex>( symbol.value ).value].name );
     return name;
   case SymbolKind::SLOT:
   case SymbolKind::MACRO:
@@ -550,48 +575,6 @@ Module assembleModule( diag::SourceManager const& sources,
   builder.finish();
 
   return module;
-}
-
-/// The Panes pinned to a state that is the base of their Window in every
-/// Phase the Module is present in — the variant's base for a Module in no
-/// Phase — which the compiler does not wrap a call into, since what the
-/// `.with` would show is shown already; where the Phases differ, nothing, and
-/// the `.with` the compiler then writes is what `NGA3010` refuses. See
-/// docs/decisions/0096-panes-in-c.md.
-std::vector<std::string> shownByBase( Project const& project, ProjectModule const& entry )
-{
-  Target const& target = project.target;
-  std::vector<std::string> shown;
-  for ( Pane const& pane : target.panes )
-  {
-    if ( !pane.state.has_value() )
-    {
-      continue;
-    }
-    std::optional<std::uint32_t> base;
-    bool any = false;
-    bool differs = false;
-    for ( std::uint32_t phase = 0; phase < entry.residency.phaseCount(); ++phase )
-    {
-      if ( !entry.residency.includes( PhaseIndex{ phase } ) )
-      {
-        continue;
-      }
-      std::optional<std::uint32_t> const here = baseIn( project, PhaseIndex{ phase }, pane.window );
-      differs = differs || ( any && here != base );
-      base = here;
-      any = true;
-    }
-    if ( !any )
-    {
-      base = target.windows[pane.window.value].base;
-    }
-    if ( !differs && base == pane.state )
-    {
-      shown.push_back( pane.name );
-    }
-  }
-  return shown;
 }
 
 std::vector<Module> assembleProject( diag::SourceManager& sources, Project& project, diag::DiagnosticSink& sink )
@@ -652,8 +635,7 @@ std::vector<Module> assembleProject( diag::SourceManager& sources, Project& proj
     ProjectModule const& entry = project.modules[index];
     if ( isCompiled( sources, entry ) )
     {
-      files.push_back(
-          c::SourceFile{ .file = entry.file, .path = entry.path, .shownByBase = shownByBase( project, entry ) } );
+      files.push_back( c::SourceFile{ .file = entry.file, .path = entry.path } );
       compiledAt.push_back( index );
       continue;
     }
@@ -699,8 +681,16 @@ std::vector<Module> assembleProject( diag::SourceManager& sources, Project& proj
     return c::Intent::FIT;
   };
   c::Cpu const cpu = project.target.cpu == Cpu::WDC65SC02 ? c::Cpu::WDC65SC02 : c::Cpu::MOS6502;
+  auto const compiling = std::chrono::steady_clock::now();
   std::vector<std::optional<std::string>> texts =
       c::compile( sources, files, externals, sink, registers, intentOf( project.intent ), cpu );
+  // Inside Assemble, which `--verbose` times as a whole: what the compiler
+  // took of it, where the program holds any C.
+  if ( !files.empty() )
+  {
+    spdlog::debug( "Assemble, compiling C: {:.1f} ms",
+                   std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - compiling ).count() );
+  }
   for ( std::size_t at = 0; at < texts.size(); ++at )
   {
     std::optional<std::string>& text = texts[at];
@@ -733,21 +723,56 @@ std::vector<Module> assembleProject( diag::SourceManager& sources, Project& proj
   // names a Section, the driver's roles are bound — all of which need every
   // Module in hand. A macro use waits for Expand, after Merge, since it is
   // looked up as any Symbol is — see docs/decisions/0049-recursive-macros.md.
+  // The Panes are bound first: a load set leaves out what stands in the
+  // medium, and a Section is known to stand there only once it is bound. The
+  // Transitions are resolved whether or not a Phase has an edge, since a
+  // `.transition` in a Project without one names nothing it can take.
   addSlotCells( project, modules, sink );
-  if ( project.transitionRoutine.has_value() )
-  {
-    resolveTransitions( sources, project, modules, sink );
-  }
+  resolvePanes( sources, project, modules, sink );
+  resolveTransitions( sources, project, modules, sink );
   resolveTransforms( sources, project, modules, sink );
   resolveDriver( sources, project, modules, sink );
-  resolvePanes( sources, project, modules, sink );
   if ( project.transitionRoutine.has_value() )
   {
     addTransformDispatcher( sources, project, modules, sink );
   }
+  addEntryStubs( sources, project, modules, sink );
+  addUnitsGlue( sources, project, modules, sink );
   addDriverInit( sources, project, modules, sink );
+  addRunStub( sources, project, modules, sink );
 
   return modules;
+}
+
+ModuleIndex addAssembledModule( diag::SourceManager& sources,
+                                Project& project,
+                                std::vector<Module>& modules,
+                                std::string_view name,
+                                std::string source,
+                                Residency const& residency,
+                                diag::DiagnosticSink& sink )
+{
+  diag::FileId const file =
+      sources.addFile( "<nga>/" + std::string{ name.substr( name.find( '.' ) + 1 ) } + ".asm", std::move( source ) );
+  ModuleIndex const index{ static_cast<std::uint32_t>( modules.size() ) };
+  diag::DiagnosticSink found{ sink.policy() };
+  modules.push_back( assembleModule( sources, file, std::string{ name }, residency, found ) );
+  modules.back().keepOutsideWindow();
+  sink.merge( std::move( found ) );
+  project.modules.push_back( ProjectModule{ .name = std::string{ name },
+                                            .file = file,
+                                            .residency = residency,
+                                            .generated = Generated::NONE,
+                                            .outsideWindow = true } );
+  for ( std::uint32_t phase = 0; phase < project.phases.phases.size(); ++phase )
+  {
+    std::vector<ModuleIndex>& needs = project.phases.phases[phase].needs;
+    if ( residency.includes( PhaseIndex{ phase } ) && std::ranges::find( needs, index ) == needs.end() )
+    {
+      needs.push_back( index );
+    }
+  }
+  return index;
 }
 
 } // namespace nga::model

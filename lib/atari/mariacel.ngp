@@ -6,29 +6,33 @@
 ; block of the SDRAM or any of the blitter's five BRAM blocks, and which is
 ; used for what is the program's choice. This variant makes that choice, since
 ; a Window must show one thing for the tool to place anything in it: `cel8000`
-; shows the **storage**, and `cel4000` the blitter's blocks, which is what the
+; shows the **SDRAM**, and `cel4000` the blitter's blocks, which is what the
 ; device's own example programs do — the sprite list stays in the low window
 ; for the whole of a frame, so the update loop switches nothing.
 ;
-; **Storage is 250 Banks and not 2048.** A state of a Window travels in one
-; byte, so there are at most 256 of them and a unit set is at most 256 Banks;
-; with the seven named states beside them this set is 250, which is 4 MB of the
-; 32. What lies above is reachable only by the program writing RAMMAP itself,
-; outside everything the tool knows — which is what the working memory for
-; sprite pixels is for.
+; **The SDRAM is 2047 Banks**: blocks one to 2047, which the board addresses
+; as one memory from $4000 to the end of its 32 MB — the blitter reads a
+; texture there by that address, `linearSectionAddress` — see
+; docs/decisions/0251-a-bank-has-a-linear-address.md. Block zero is what a
+; RAMMAP of zero means, the Atari's own memory at $8000-$BFFF, and that is not
+; reachable on this board at all, so it is no Bank. A unit's number and a state
+; of `cel8000` are two bytes each — see
+; docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md. A
+; program that wants SDRAM for working memory of its own, the sprite pixels'
+; above all, takes it from storage by declaring fewer Banks here, and reaches it
+; by writing RAMMAP itself, outside everything the tool knows.
 ;
-; **$8000-$BFFF stands in no Region at all.** It is the window the stream reads
-; through, so only storage belongs there, as $8000-$9FFF does on a XEGS
-; cartridge; a Payload the tool placed at those addresses would be overwritten
-; by the next block to arrive. $4000-$7FFF is `ram`, because under that window
-; is the machine's own memory and the base state shows it.
+; **Neither window's range holds anything but a Pane or storage**, as
+; $8000-$9FFF does on a XEGS cartridge: what a window shows outside a `.with` is
+; undefined, so the tool places nothing else there. $8000-$BFFF stands in no
+; Region; $4000-$7FFF is inside `ram`, which the windows are taken out of.
 ;
-; This board needs **BASIC switched off** for $A000-$BFFF to be the RAM the
-; window's base state promises, which is what a DOS of the 2.x family does and
-; what an emulator is told. `PORTB` is therefore not declared here: a Project
-; that wants to write it says so itself, as it says what its DOS holds.
+; `PORTB` is declared because the driver switches the OS ROM through its
+; bit 0, for a Phase that says `without osrom` — see 0229.
 ;
-; A Project gets the machine with `include "atari/mariacel.ngp"`.
+; A Project gets the machine with `include "atari/mariacel.ngp"`. It declares no
+; storage. A program that loads anything during a run includes
+; `atari/sdram.ngp` beside this, which makes the Banks its storage.
 
 target {
   cpu "6502"
@@ -38,11 +42,10 @@ target {
   ; `.xex` a DOS loads.
   containers xex
 
-  units  sdram 250
-  window cel4000 $4000 .. $7FFF  views main, sprlist, textab, derived, stripmap, strip  base main
-  window cel8000 $8000 .. $BFFF  views sdram, main  base main
+  units  sdram 2047  linear $4000 .. $1FFFFFF
+  window cel4000 $4000 .. $7FFF  views main, sprlist, textab, derived, stripmap, strip
+  window cel8000 $8000 .. $BFFF  views sdram
 }
-storage { units sdram }
 
 ; The blitter's two input tables, which `atari/mceltables.asm` holds the
 ; Sections of. Pinned to the state that shows each, so the solver has no say in
@@ -61,6 +64,23 @@ target {
   ; takes more says so with a `reserved` Region of its own.
   region dos    $0700 .. $1FFF  reserved
 
+  ; **Where the floating-point pack was.** A device on the parallel bus may
+  ; map its ROM over the whole of $D800-$DFFF, which is why `atari/os.asm`
+  ; cannot claim that range and why the pack is a Module of its own — one this
+  ; variant does not list. What this board actually maps is **one page**, at
+  ; $DF00, and the rest is whatever it leaves standing.
+  ;
+  ; So the first Region has no name: the tool allocates nothing there, and the
+  ; variant does not say whose those bytes are. On this board they are still
+  ; the pack; on another they would be its ROM, and neither is a fact a
+  ; program here may build on.
+  ;
+  ; `celPal` is a Region and not a `register`, because a register is one byte
+  ; or two and this is the whole page PBIRAMBANK chooses the bank of: its name
+  ; is the address it starts at, which is what a program indexes from.
+  region         $D800 .. $DEFF  reserved
+  region celPal  $DF00 .. $DFFF  register
+
   ; The registers the device's own example programs write, and no more. Two
   ; hundred and forty of them exist; a Project that wants one of the others —
   ; the sound chips, the multiplier, the SD card, the FAT32 path — declares it
@@ -75,9 +95,7 @@ target {
   register MEXTBNH      $D14D
 
   ; Which 256-byte bank answers at $DF00. The CEL palette is three of them,
-  ; one per component, and the driver exports their numbers; the page itself
-  ; is inside the OS ROM's addresses and appears there only while this device
-  ; is selected, so nothing of the tool's placement can be told about it.
+  ; one per component, and the driver exports their numbers.
   register PBIRAMBANK   $D14F
 
   ; What the driver writes to switch a window. Declared by name as well,
@@ -92,22 +110,39 @@ target {
   ; the driver's exports, and the rules that go with them are in its header.
   register CELCTL       $D1B2
 
-  ; Which device on the parallel bus is selected. The driver's `init` writes
-  ; it, and the OS's copy beside it — see 0227.
+  ; Which device on the parallel bus is selected, one bit a slot. The driver's
+  ; `init` writes it, once, before anything else the Container does — see 0227.
   register PDVREG       $D1FF
+
+  ; The XL's own, whose bit 0 is the OS ROM, which the driver's `select` writes.
+  register PORTB        $D301
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`: what it holds stays where it is for that long. See
+  ; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  holder dlist                          ; ANTIC's display list: SDLSTL, or DLISTL
+  holder dli                            ; the display list interrupt: VDSLST
+  holder vbi                            ; the immediate vertical blank: VVBLKI
+  holder vbd                            ; the deferred vertical blank: VVBLKD
+  holder nmi                            ; $FFFA, where the OS ROM is switched out
+  holder irq                            ; $FFFE, where the OS ROM is switched out
+  holder chbase                         ; the character set: CHBAS, or CHBASE
+  holder pmbase                         ; the player-missile memory: PMBASE
+  holder dosini                         ; DOSINI: called once a boot returns, and on every reset
 }
 
-; The OS, the blitter's tables, the driver for this storage and the decoders
-; the tool ships. Every Transition calls the driver and the decoders, so they
-; are resident; a decoder nothing uses is dropped. The tables are resident too,
-; and cost nothing by it: they hold no bytes and stand in the blitter's BRAM
-; rather than in the machine's memory, and the hardware has them in every Phase
-; whether a Project writes them or not.
+; The OS, the blitter's tables and the driver. The driver is here and not
+; beside the storage because it does more than read it: it brings the board up,
+; shows a Pane's Bank and switches the OS ROM, with or without storage. The
+; tables are resident too, and cost nothing by it: they hold no bytes and stand
+; in the blitter's BRAM rather than in the machine's memory, and the hardware
+; has them in every Phase whether a Project writes them or not.
 modules {
-  "atari/os.asm"
+  "atari/osram.asm"
+  "atari/osrom.asm"
   "atari/charsets.asm"
   "atari/mcel.asm"
   "atari/mceltables.asm"
-  "stream/zx0.asm"
 }
-resident { os, charsets, mcel, mceltables, zx0 }
+resident { osram, osrom, charsets, mcel, mceltables }

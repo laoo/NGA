@@ -1,6 +1,7 @@
 #include "nga/model/Size.hpp"
 
 #include "nga/model/Dispatch.hpp"
+#include "nga/model/Slots.hpp"
 #include "nga/model/Transition.hpp"
 
 #include "nga/model/Evaluate.hpp"
@@ -19,7 +20,6 @@ namespace nga::model
 namespace
 {
 
-constexpr std::int64_t ZERO_PAGE_LIMIT = 0x100;
 constexpr std::int64_t ADDRESS_LIMIT = 0x10000;
 constexpr std::int64_t BRANCH_NEAREST = -128;
 constexpr std::int64_t BRANCH_FARTHEST = 127;
@@ -232,7 +232,7 @@ private:
 
   /// The PlacementClass an operand carries, or nothing when it has none to
   /// carry — which is what the diagnostic is about.
-  std::optional<PlacementClass>
+  std::optional<syntax::PlacementClass>
   placementOf( SectionRef where, syntax::Expression const& operand, syntax::OperandShape shape );
 
   void report( diag::Diagnostic value ) const
@@ -249,54 +249,27 @@ private:
   std::vector<std::vector<std::optional<SectionIndex>>> mPrevious;
 };
 
-std::optional<PlacementClass>
+std::optional<syntax::PlacementClass>
 Sizer::placementOf( SectionRef where, syntax::Expression const& operand, syntax::OperandShape shape )
 {
-  // Only these three shapes have two widths to choose between. An immediate or
-  // an indirect operand is one byte or two whatever it names, so nothing about
-  // it has to be known here.
-  bool const widthDepends = shape == syntax::OperandShape::DIRECT || shape == syntax::OperandShape::DIRECT_X ||
-                            shape == syntax::OperandShape::DIRECT_Y;
-  if ( !widthDepends )
+  // Types have already been checked, so this asks rather than complains,
+  // and only an Integer is left to say why it gives no width.
+  OperandPlacement const found = operandPlacement( *mBuild, where.module, operand, shape );
+  if ( !found.placement.has_value() && found.type.is( syntax::ExpressionType::INTEGER ) )
   {
-    return PlacementClass::ABSOLUTE;
+    if ( !found.value.has_value() )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::PLACEMENT_CLASS_UNKNOWN )
+                  .at( operand.span.begin, operand.span.length ) );
+    }
+    else
+    {
+      report( diag::diagnostic( diag::DiagnosticId::ADDRESS_OUT_OF_RANGE )
+                  .at( operand.span.begin, operand.span.length )
+                  .arg( "value", *found.value ) );
+    }
   }
-
-  // Types have already been checked, so this asks rather than complains.
-  diag::SeverityPolicy policy;
-  diag::DiagnosticSink quiet{ policy };
-  Type const type = typeOf( *mBuild, where.module, operand, quiet );
-
-  if ( type.is( syntax::ExpressionType::ADDRESS ) )
-  {
-    // Declared where the Symbol was defined, which may be a Module this one
-    // never saw. Nothing here reads an address back.
-    return type.placement;
-  }
-  if ( !type.is( syntax::ExpressionType::INTEGER ) )
-  {
-    return std::nullopt;
-  }
-
-  // An Integer operand has no PlacementClass to inherit, so its value decides
-  // the width — and the value has to be one the author declared rather than
-  // one a Step produced.
-  std::optional<std::int64_t> const value =
-      declaredValueOf( mBuild->sources(), mBuild->symbols(), &mBuild->charsets(), where.module, operand );
-  if ( !value.has_value() )
-  {
-    report(
-        diag::diagnostic( diag::DiagnosticId::PLACEMENT_CLASS_UNKNOWN ).at( operand.span.begin, operand.span.length ) );
-    return std::nullopt;
-  }
-  if ( *value < 0 || *value >= ADDRESS_LIMIT )
-  {
-    report( diag::diagnostic( diag::DiagnosticId::ADDRESS_OUT_OF_RANGE )
-                .at( operand.span.begin, operand.span.length )
-                .arg( "value", *value ) );
-    return std::nullopt;
-  }
-  return *value < ZERO_PAGE_LIMIT ? PlacementClass::ZEROPAGE : PlacementClass::ABSOLUTE;
+  return found.placement;
 }
 
 std::uint32_t Sizer::sizeOfInstruction( SectionRef where, Chunk const& chunk, std::optional<AddressingMode>& mode )
@@ -313,14 +286,14 @@ std::uint32_t Sizer::sizeOfInstruction( SectionRef where, Chunk const& chunk, st
 
   std::span<syntax::ExpressionPtr const> const items =
       mBuild->symbols().moduleAt( where.module ).sectionAt( where.section ).itemsOf( chunk );
-  PlacementClass placement = PlacementClass::ABSOLUTE;
+  syntax::PlacementClass placement = syntax::PlacementClass::ABSOLUTE;
   if ( !items.empty() )
   {
     if ( containsError( *items.front() ) )
     {
       return 0;
     }
-    std::optional<PlacementClass> const found = placementOf( where, *items.front(), instruction.shape );
+    std::optional<syntax::PlacementClass> const found = placementOf( where, *items.front(), instruction.shape );
     if ( !found.has_value() )
     {
       return 0;
@@ -331,10 +304,22 @@ std::uint32_t Sizer::sizeOfInstruction( SectionRef where, Chunk const& chunk, st
   mode = modeFor( mnemonic, instruction.shape, placement );
   if ( !mode.has_value() )
   {
+    // `direct` stands for both widths, and where the zero-page form exists
+    // the one missing is the absolute one, which is what `stx buffer,y` asks
+    // of an absolute `buffer`.
+    std::string modeName{ nameOf( instruction.shape ) };
+    bool const direct = instruction.shape == syntax::OperandShape::DIRECT ||
+                        instruction.shape == syntax::OperandShape::DIRECT_X ||
+                        instruction.shape == syntax::OperandShape::DIRECT_Y;
+    if ( direct && placement == syntax::PlacementClass::ABSOLUTE &&
+         modeFor( mnemonic, instruction.shape, syntax::PlacementClass::ZEROPAGE ).has_value() )
+    {
+      modeName.replace( 0, std::string_view{ "direct" }.size(), "absolute" );
+    }
     report( diag::diagnostic( diag::DiagnosticId::NO_SUCH_MODE )
                 .at( chunk.span.begin, chunk.span.length )
                 .arg( "mnemonic", std::string{ mnemonic } )
-                .arg( "mode", std::string{ nameOf( instruction.shape ) } ) );
+                .arg( "mode", std::move( modeName ) ) );
     return 0;
   }
 
@@ -396,16 +381,29 @@ std::uint32_t Sizer::sizeOfReservation( SectionRef where, Chunk const& chunk )
   {
     // Types have already been checked, so an expression that types cleanly and
     // still has no value is one whose size depends on itself. One that does
-    // not type has been reported, and says nothing more here.
+    // not type, or that divides by zero or overflows, has been reported, and
+    // says nothing more here.
     diag::SeverityPolicy policy;
     diag::DiagnosticSink quiet{ policy };
-    if ( typeOf( *mBuild, where.module, *items.front(), quiet ).is( syntax::ExpressionType::INTEGER ) )
+    if ( typeOf( *mBuild, where.module, *items.front(), quiet ).is( syntax::ExpressionType::INTEGER ) &&
+         quiet.findings().empty() )
     {
       report( diag::diagnostic( diag::DiagnosticId::SIZE_CYCLE ).at( chunk.span.begin, chunk.span.length ) );
     }
     return 0;
   }
-  if ( *count < 0 || *count > ADDRESS_LIMIT )
+  // In a unit set a reservation is the medium's, which reaches as far as the
+  // set's Banks do — a screen of more than sixty-four kilobytes is one — see
+  // docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  std::int64_t limit = ADDRESS_LIMIT;
+  if ( std::optional<UnitSetIndex> const set = section.unitSet(); set.has_value() )
+  {
+    if ( std::optional<AddressRange> const banks = mBuild->target().linearBanksOf( *set ); banks.has_value() )
+    {
+      limit = std::max<std::int64_t>( limit, banks->size() );
+    }
+  }
+  if ( *count < 0 || *count > limit )
   {
     report( diag::diagnostic( diag::DiagnosticId::RESERVATION_NOT_A_COUNT )
                 .at( chunk.span.begin, chunk.span.length )
@@ -427,13 +425,23 @@ std::uint32_t Sizer::sizeOfChunk( SectionRef where, Chunk const& chunk, std::opt
   }
   if ( std::holds_alternative<TransitionContent>( chunk.content ) )
   {
+    // Without storage, a jump to the stub of the Phase entered.
+    if ( !mBuild->project().target.hasStorage() )
+    {
+      return TRANSITION_JUMP_SIZE;
+    }
     // An entry per Phase the Section is present in, which is its Module's
     // Residency and known before any size is.
-    return sizeOfTransition( mBuild->symbols().moduleAt( where.module ).residency() );
+    return sizeOfTransition( mBuild->symbols().moduleAt( where.module ).residency(),
+                             mBuild->project().target.unitBytes() );
   }
   if ( std::holds_alternative<TransitionCellContent>( chunk.content ) )
   {
     return TRANSITION_CELL_SIZE;
+  }
+  if ( std::holds_alternative<PhaseEntryContent>( chunk.content ) )
+  {
+    return sizeOfEntryStub( mBuild->project(), static_cast<std::uint32_t>( slotsOf( mBuild->modules() ).size() ) );
   }
   if ( std::holds_alternative<DispatchContent>( chunk.content ) )
   {
@@ -445,7 +453,7 @@ std::uint32_t Sizer::sizeOfChunk( SectionRef where, Chunk const& chunk, std::opt
   }
   if ( auto const* const cell = std::get_if<SlotCellContent>( &chunk.content ); cell != nullptr )
   {
-    return cell->binding == Binding::VECTOR ? VECTOR_CELL_SIZE : POINTER_CELL_SIZE;
+    return cell->binding == syntax::Binding::VECTOR ? VECTOR_CELL_SIZE : POINTER_CELL_SIZE;
   }
   if ( std::holds_alternative<MacroUseContent>( chunk.content ) )
   {
@@ -758,12 +766,6 @@ std::uint32_t Sizes::innerOffsetOf( SectionRef where, ChunkIndex chunk, std::uin
 {
   OneSection const& one = at( where );
   return one.offsets[chunk.value] + one.inner[chunk.value].offsets[inner];
-}
-
-std::uint32_t Sizes::innerSizeOf( SectionRef where, ChunkIndex chunk, std::uint32_t inner ) const
-{
-  InnerSizes const& inside = at( where ).inner[chunk.value];
-  return inside.offsets[inner + 1] - inside.offsets[inner];
 }
 
 std::optional<AddressingMode> Sizes::innerModeOf( SectionRef where, ChunkIndex chunk, std::uint32_t inner ) const

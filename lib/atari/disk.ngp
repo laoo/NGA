@@ -1,0 +1,16 @@
+; Storage on a double-density diskette, for an `atari/800xl.ngp` program whose
+; Container is the `.atr`: the diskette's sectors, the driver that reads them
+; and the decoders the tool ships. A Project includes this beside the machine.
+;
+; The sectors from the fourth: the boot record has the first three and the load
+; image whatever is left after the storage a program uses. A unit is 256
+; sectors, which is the one size the `.atr` takes, and three of them reach past
+; the 180 KB a double-density diskette holds. It is a ceiling and not a
+; reservation: what the image costs is what the program's Payloads came to.
+storage { units 3 size 65536 }
+
+; Every Transition calls the driver and the decoders, so they are resident. The
+; OS the driver calls into is resident already; a decoder nothing uses is
+; dropped.
+modules { "atari/disk.asm"  "stream/zx0.asm" }
+resident { disk, zx0 }

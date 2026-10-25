@@ -136,6 +136,7 @@ ExpressionPtr ExpressionParser::parse()
   mOperators = 0;
   mParentheses = 0;
   mTooDeep = false;
+  mMissingOperand = false;
   return parseAt( BindingPower::NONE );
 }
 
@@ -321,7 +322,11 @@ ExpressionPtr ExpressionParser::parsePrimary()
   }
 
   Token const here = mCursor->current();
-  report( diag::diagnostic( diag::DiagnosticId::EXPECTED_EXPRESSION ).at( here.location, here.length ) );
+  if ( !mMissingOperand )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::EXPECTED_EXPRESSION ).at( here.location, here.length ) );
+    mMissingOperand = true;
+  }
   // Deliberately does not consume: the statement grammar owns recovery, and
   // consuming here would swallow the token it needs to see.
   return errorAt( diag::SourceSpan{ .begin = here.location, .length = 0 } );

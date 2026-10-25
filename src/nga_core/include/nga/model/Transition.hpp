@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -41,13 +42,10 @@ void resolveTransitions( diag::SourceManager const& sources,
                          std::span<Module> modules,
                          diag::DiagnosticSink& sink );
 
-/// The Sections a Transition from `from` to `to` may have to load: those that
-/// emit bytes in the Modules `to` needs and `from` does not — the load set of
-/// 0016 — and every Movable Section present in both, which the edge copies
-/// again wherever the two Phases hold it at different addresses; in Project
-/// order. The one definition of it: PlaceStorage reads it for what waits in a
-/// Bank, Size for how long a table may be, and a table lists of it what the
-/// Layout then says moved — see docs/decisions/0030-movable-sections.md.
+/// The Sections a Transition from `from` to `to` loads: those that emit bytes
+/// in the Modules `to` needs and `from` does not — the load set of 0016 — in
+/// Project order. The one definition of it: PlaceStorage reads it for what
+/// waits in a Bank, and Size for how long a table is.
 /// `from` absent is the **cold start**: no Phase was left, so nothing was kept
 /// and everything the entered Phase needs that emits bytes is in the set.
 std::vector<SectionRef>
@@ -63,6 +61,12 @@ std::optional<SymbolRef> entrySymbolOf( PhaseGraph const& graph, PhaseIndex phas
 /// Nothing when reported, or when an earlier Step has already failed to place
 /// it.
 std::optional<std::uint32_t> entryAddressOf( Placed const& build, PhaseIndex phase, diag::DiagnosticSink& sink );
+
+/// Where a Container starts the program: the entry Phase's entry, as
+/// `entryAddressOf` has it. When some edge enters that Phase, Patch has
+/// resolved the same entry for a table and reported whatever was wrong with
+/// it, so it is not reported a second time here.
+std::optional<std::uint32_t> startAddressOf( Placed const& build, diag::DiagnosticSink& sink );
 
 /// Every Phase's entry address, resolved once and reported once however many
 /// tables name it.
@@ -104,12 +108,55 @@ constexpr std::string_view COLD_FRAME_NAME = "ngaColdFrame";
 /// Both in the dispatcher's Module, exported — see docs/spec/xex.md.
 constexpr std::string_view LOAD_UNIT_NAME = "ngaLoadUnit";
 constexpr std::string_view LOAD_MAP_NAME = "ngaLoadMap";
-constexpr std::string_view RESTORE_NAME = "ngaRestore";
+
+/// What a `.xex` without storage writes and calls to decode a Section while it
+/// loads: two words naming where the form stands and where it goes, and per
+/// format the glue that hands them to the decoder — see
+/// docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+constexpr std::string_view UNPACK_FROM_NAME = "ngaUnpackFrom";
+constexpr std::string_view UNPACK_TO_NAME = "ngaUnpackTo";
+
+/// What moves bytes under a ROM while a `.xex` loads, and the cell its batch's
+/// table is named in — see
+/// docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+constexpr std::string_view UNDER_NAME = "ngaUnder";
+constexpr std::string_view UNDER_TABLE_NAME = "ngaUnderTable";
+
+/// The ROMs the decode under a ROM puts back once it is done, which the
+/// `.xex` writes once before the first.
+constexpr std::string_view UNDER_PUT_BACK_NAME = "ngaUnderPutBack";
+
+/// What a `.xex` built from a `choose` block chooses with and changes its
+/// bytes with while it loads: the byte the program writes the Choice into, the
+/// routine the file calls, and the two words that say which of the list's
+/// entries it takes this time — see
+/// docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+constexpr std::string_view CHOICE_NAME = "ngaChoice";
+constexpr std::string_view PATCH_NAME = "ngaPatch";
+constexpr std::string_view PATCH_FROM_NAME = "ngaPatchFrom";
+constexpr std::string_view PATCH_TO_NAME = "ngaPatchTo";
+
+/// The glue of a format: `ngaUnpack` and the format's name with its first
+/// letter raised, `ngaUnpackZx0`.
+std::string loadGlueName( std::string_view format );
+
+/// The glue of a format that decodes a Section hidden under a ROM: the same
+/// decoder, called with every ROM out and the interrupts masked —
+/// `ngaUnderUnpack` and the format's name with its first letter in capitals.
+std::string underGlueName( std::string_view format );
 
 /// The driver's `init`, wrapped in a Proc so that a Container has an address
 /// to call: what the hardware takes before the driver can be used at all.
 /// Present only where the driver declares the role.
 constexpr std::string_view INIT_NAME = "ngaInit";
+
+/// What a Container whose program can return starts it through, where the
+/// driver declares `finalize`: `ngaRun` in the entry Phase, which leaves the
+/// return to `ngaFinish` on the stack and jumps to the entry, and `ngaFinish`,
+/// resident, which expands the role and returns to whatever started the
+/// program — see docs/decisions/0229-no-window-has-a-base.md.
+constexpr std::string_view RUN_NAME = "ngaRun";
+constexpr std::string_view FINISH_NAME = "ngaFinish";
 
 /// The runtime address of a Label, or nothing where it is not one or has no
 /// address yet.
@@ -118,23 +165,33 @@ addressOfLabel( GlobalSymbols const& symbols, SymbolRef where, Sizes const& size
 
 /// What a `.transition` emits before its entries — `jsr routine`, the Phase
 /// entered, the entry count — and what one entry costs: the Phase the code
-/// is in, and the unit and offset where the edge's Frame waits.
+/// is in, and the unit and offset where the edge's Frame waits, the unit as
+/// wide as the Target's.
 /// The layout is docs/spec/transition.md; these are here because Size needs
-/// them before a byte of it is written.
+/// them before a byte of it is written, and the routine's text is given them
+/// from here, so that what it steps over and what Patch writes are one fact.
 constexpr std::uint32_t TRANSITION_HEADER_SIZE = 5;
-constexpr std::uint32_t TRANSITION_ENTRY_SIZE = 4;
+
+constexpr std::uint32_t transitionEntrySize( std::uint32_t unitBytes )
+{
+  return 3 + unitBytes;
+}
 
 /// The bytes a `.transition` in a Section of this Residency emits: an entry
 /// per Phase the Section is present in, since at run time the code does not
 /// know which one it is in.
-std::uint32_t sizeOfTransition( Residency const& residency );
+std::uint32_t sizeOfTransition( Residency const& residency, std::uint32_t unitBytes );
 
 /// What a Frame holds before its blocks — the entered Phase's entry and the
 /// block count — what one block costs (the unit, the offset, the
 /// destination, the decoder's number), and after the blocks one byte
 /// counting the Cell writes and this many bytes each.
 constexpr std::uint32_t FRAME_HEADER_SIZE = 3;
-constexpr std::uint32_t FRAME_BLOCK_SIZE = 6;
+
+constexpr std::uint32_t frameBlockSize( std::uint32_t unitBytes )
+{
+  return 5 + unitBytes;
+}
 
 /// Two bytes in front of that where the Project said `frames held`: the
 /// address the descriptors are read into, or **zero** for an edge whose
@@ -160,15 +217,32 @@ constexpr std::uint32_t MOST_BLOCKS = 255;
 
 /// The bytes of an edge's Frame: sized for every Section the edge may have
 /// to load and every Slot it may have to write, since a shorter list leaves
-/// the rest unread, and one byte per Window of the Target for the base the
-/// entered Phase gives it — see docs/decisions/0056-a-phase-chooses-a-base.md.
-std::uint32_t sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t windows, bool held );
+/// the rest unread.
+std::uint32_t
+sizeOfFrame( std::uint32_t payloads, std::uint32_t cellWrites, std::uint32_t headerBytes, std::uint32_t unitBytes );
 
-/// The order the routine shows the entered Phase's bases in, and the Frame
-/// lists them in: every Window of the Target in its order, the one the
-/// stream reads through last, since showing its base takes the stream's
-/// Bank away and nothing is read after it.
-std::vector<WindowIndex> baseOrderOf( Project const& project );
+/// The header a Frame of this Project has: the entry and the count, two bytes
+/// more under `frames held`, and one more for the set of ROMs the entered Phase
+/// needs where the driver declares `select` — see
+/// docs/decisions/0229-no-window-has-a-base.md.
+std::uint32_t frameHeaderSizeOf( Project const& project );
+
+/// The set of ROMs a Phase needs, as the driver's `select` is handed it: bit
+/// *k* for the *k*-th of the driver's `rom` lines whose Module the Phase needs.
+std::uint32_t romsOf( Project const& project, PhaseIndex phase );
+
+/// How many bytes a state of this Window takes wherever the tool writes or
+/// passes one: two where the driver's `showAt` for it takes the high byte in
+/// `Y`, one otherwise and where no driver was resolved — see
+/// docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+std::uint32_t stateBytesOf( Project const& project, WindowIndex window );
+
+/// Whether the Container writes bytes into a named state of this Window
+/// while the program loads: only a `.xex`, and only into the Window its
+/// driver's stream reads through, since what shows a state there is the
+/// loader's glue around that Window's `showAt` — see
+/// docs/decisions/0256-a-named-state-is-filled-where-a-xex-can-show-it.md.
+bool fillsNamedStates( Project const& project, WindowIndex window );
 
 /// What a diagnostic calls a Frame: the edge it belongs to.
 /// What a finding and the map call a Frame. The cold start comes from no
@@ -183,8 +257,7 @@ struct EdgeBlock
 };
 
 /// The blocks an edge loads, **in the order the routine loads them**: the
-/// edge's load set less a Movable Section the Phase left already holds where
-/// the entered one wants it, one block per stored form, and — where the
+/// edge's load set, one block per stored form, and — where the
 /// Project said `frames held` — the largest of them moved to the end, since
 /// that is the block whose memory lends the routine its list of descriptors
 /// and it has to arrive after the rest. PlaceStorage packs the images in this
@@ -200,8 +273,49 @@ std::vector<EdgeBlock> edgeBlocksOf( FrameIndex frame, Placed const& build, Stor
 std::vector<std::uint8_t>
 frameBytesOf( FrameIndex frame, Placed const& build, Storage const& storage, EntryAddresses& entries );
 
-/// The byte naming the current Phase.
+/// The byte naming the current Phase, and the name it is exported under.
 constexpr std::uint32_t TRANSITION_CELL_SIZE = 1;
+constexpr std::string_view TRANSITION_CELL_NAME = "ngaCurrentPhase";
+
+/// Where a program without storage enters a Phase: one stub per Phase some
+/// `.transition` enters, exported under this prefix and the Phase's number,
+/// in a Module the tool adds at the end of Assemble. A `.transition` there is
+/// a `jmp` to it and nothing more — see
+/// docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+constexpr std::string_view ENTRY_STUB_PREFIX = "ngaInto";
+constexpr std::uint32_t TRANSITION_JUMP_SIZE = 3;
+
+/// The name of the stub of a Phase.
+std::string entryStubName( PhaseIndex phase );
+
+/// The driver's `select`, wrapped in a Proc so that a stub Patch writes byte
+/// by byte has an address to call it at. Present only in a program without
+/// storage whose driver declares the role.
+constexpr std::string_view SELECT_ROMS_NAME = "ngaSelectRoms";
+
+/// The bytes of a stub: `lda` and `jsr` to select the ROMs where the driver
+/// switches any, `lda` and `sta` twice for each Slot, the Phase's number into
+/// the Cell, and the `jmp` to the entry. Sized for every Slot, as a Frame is;
+/// a Slot the Phase has no Implementation of is not written, and what is left
+/// stands after the `jmp`, where nothing reaches it.
+std::uint32_t sizeOfEntryStub( Project const& project, std::uint32_t slots );
+
+/// The end of Assemble for a program without storage: a stub for every Phase
+/// some resolved `.transition` enters, present wherever such a statement runs
+/// and in every Phase from which one of those is reached, and the Proc around
+/// the driver's `select` where it declares one. Nothing for a program with
+/// storage, whose edges the routine takes.
+void addEntryStubs( diag::SourceManager& sources,
+                    Project& project,
+                    std::vector<Module>& modules,
+                    diag::DiagnosticSink& sink );
+
+/// A stub's bytes, as sizeOfEntryStub lays them out; `entry` is the entered
+/// Phase's, or nothing where that was reported.
+void writeEntryStub( PhaseEntryContent const& content,
+                     Placed const& build,
+                     std::optional<std::uint32_t> entry,
+                     std::span<std::uint8_t> into );
 
 /// What Patch writes for the Target's kinds, in the layout
 /// docs/spec/transition.md states. Each writes into `into` at offset zero and

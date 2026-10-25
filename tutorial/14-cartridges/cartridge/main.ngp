@@ -1,10 +1,10 @@
 include "atari/xegs128.ngp"
 
-modules { "print.asm" "shared.asm" "intro.asm" "level.asm" }
+modules { "print.asm" "intro.asm" "level.asm" }
 
 panes in switched { level }
 
-resident { print, shared }
+resident { print }
 
 phase intro { needs intro  then level  entry introStart }
 phase level { needs level             entry levelStart }

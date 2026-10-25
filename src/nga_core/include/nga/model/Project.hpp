@@ -2,6 +2,8 @@
 
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/diag/SourceManager.hpp"
+#include "nga/model/Board.hpp"
+#include "nga/model/Indices.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,36 +15,6 @@
 
 namespace nga::model
 {
-
-/// A Module's position in the Project.
-///
-/// Project order is the tie-break the ordering contract in
-/// docs/spec/diagnostics.md rests on, and it is also the order files are
-/// registered with the SourceManager, so the two never have to be reconciled.
-struct ModuleIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( ModuleIndex, ModuleIndex ) = default;
-};
-
-/// A macro's position within its Module's list, which is declaration order.
-/// Beside the Module's own index because the Project names one: the
-/// driver's roles are macros — see Driver.
-struct MacroIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( MacroIndex, MacroIndex ) = default;
-};
-
-/// A Phase's position in the PhaseGraph, which is declaration order.
-struct PhaseIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( PhaseIndex, PhaseIndex ) = default;
-};
 
 /// The set of Phases in which a Section must be present in memory.
 ///
@@ -70,9 +42,12 @@ public:
     mPhases[phase.value] = true;
   }
 
+  /// Whether `phase` is one of these. A Residency shorter than the Phases —
+  /// one of none, of a Module the tool built before the Phases were counted
+  /// — includes none past its end.
   [[nodiscard]] bool includes( PhaseIndex phase ) const
   {
-    return mPhases[phase.value];
+    return phase.value < mPhases.size() && mPhases[phase.value];
   }
 
   /// True when the two share a Phase: the first half of the co-visibility
@@ -90,6 +65,8 @@ public:
     return mPhases.size();
   }
 
+  friend bool operator==( Residency const&, Residency const& ) = default;
+
 private:
   std::vector<bool> mPhases;
 };
@@ -97,10 +74,27 @@ private:
 /// A named state of program execution: the Modules it needs in memory, and
 /// the Phases a Transition may lead to. A Transition is an edge and nothing
 /// more; what crosses one is not settled.
+/// `without MODULE` in a Phase: a ROM the driver switches out, which the
+/// Phase does without although `resident` lists it, and where it said so —
+/// see docs/decisions/0229-no-window-has-a-base.md.
+struct PhaseWithout
+{
+  ModuleIndex module;
+  diag::SourceSpan span;
+};
+
 struct Phase
 {
   /// Absent for the one Phase of a Project that declares none.
   std::optional<std::string> name;
+
+  /// What a finding, a map and a listing call it: its name, or `(implicit)`
+  /// for that one Phase, which no name can be spelled as.
+  [[nodiscard]] std::string displayName() const
+  {
+    return name.value_or( "(implicit)" );
+  }
+
   std::vector<ModuleIndex> needs;
   std::vector<PhaseIndex> then;
 
@@ -109,11 +103,19 @@ struct Phase
   /// docs/decisions/0018-xex-container.md.
   std::optional<std::string> entry;
 
-  /// Per Window of the Target, the state it shows when nothing has switched
-  /// while this Phase runs, where the Phase or a group it needs said so;
-  /// absent for the variant's base. See
-  /// docs/decisions/0056-a-phase-chooses-a-base.md.
-  std::vector<std::optional<std::uint32_t>> bases{};
+  /// Where `entry` wrote the Label's name, which a reader renaming the Label
+  /// renames there too — see docs/spec/facts.md.
+  std::optional<diag::SourceSpan> entrySpan{};
+
+  /// What the Phase does without, taken out of its needs once `resident` has
+  /// put everything in; held to the driver's `rom` lines once the driver is
+  /// resolved.
+  std::vector<PhaseWithout> without{};
+
+  /// Where `final` was said: nothing leaves the Phase, by an edge or by the
+  /// program returning, so what only an exit runs is not kept in it — see
+  /// docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  std::optional<diag::SourceSpan> finalAt{};
 };
 
 /// Phases, Transitions and the entry Phase. May contain cycles.
@@ -126,18 +128,6 @@ struct PhaseGraph
 /// One past the last address the CPU can name, and one past the zero page.
 constexpr std::uint32_t ADDRESS_SPACE_END = 0x10000;
 constexpr std::uint32_t ZERO_PAGE_END = 0x100;
-
-/// A half-open range of addresses.
-struct AddressRange
-{
-  std::uint32_t begin = 0;
-  std::uint32_t end = 0;
-
-  [[nodiscard]] std::uint32_t size() const
-  {
-    return end - begin;
-  }
-};
 
 /// What a Region says about its addresses, in the order a more restrictive
 /// one wins where two overlap: a Project declaring `reserved` over the
@@ -160,13 +150,8 @@ enum class RegionProperty : std::uint8_t
 
 std::string_view nameOf( RegionProperty property );
 
-/// A Region's position in the Target's list, which is declaration order.
-struct RegionIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( RegionIndex, RegionIndex ) = default;
-};
+/// The property a Region's word names, if it names one.
+std::optional<RegionProperty> regionPropertyNamed( std::string_view word );
 
 /// A contiguous address range with one property — see the glossary. A truth
 /// about addresses in every state of the hardware: what occupies memory for
@@ -201,7 +186,7 @@ std::string displayNameOf( Region const& region );
 /// instruction naming a variable can be a byte shorter, and a Section that is
 /// never written gains nothing from the scarcest memory the machine has, so
 /// `zeropage` and `rom` together are refused. A `rom` Region below `$100` is
-/// therefore in no pool, as a Window without a base is.
+/// therefore in no pool, as a Window's ranges are.
 struct Pools
 {
   /// Sorted and disjoint.
@@ -215,8 +200,10 @@ struct Pools
 };
 
 /// The pools the Regions leave: every address that some `ram` Region covers and
-/// no more restrictive Region does, and, above `$100`, the same of `rom`.
-Pools poolsOf( std::span<Region const> regions );
+/// no more restrictive Region does, and, above `$100`, the same of `rom` — less
+/// `windows`, the ranges of every Window, in which only a Pane or storage stands
+/// — see docs/decisions/0229-no-window-has-a-base.md.
+Pools poolsOf( std::span<Region const> regions, std::span<AddressRange const> windows = {} );
 
 /// The Regions of a Target no document described. Only what stands in for
 /// what an OS and a DOS in memory cost until a variant says so: `$80-$FF`,
@@ -224,15 +211,6 @@ Pools poolsOf( std::span<Region const> regions );
 /// where the DOSes in common use have finished. The stack page is the one
 /// hardware truth among them and is left out like the rest below `$2000`.
 std::vector<Region> standInRegions();
-
-/// A Bank's position in the Target's list, which is the order a Project will
-/// one day take a prefix of.
-struct BankIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( BankIndex, BankIndex ) = default;
-};
 
 /// Where an image waits: the unit its first byte is in, and the offset
 /// there. An image may run on into the units after — see Target.
@@ -244,16 +222,9 @@ struct StorageAddress
   friend bool operator==( StorageAddress, StorageAddress ) = default;
 };
 
-/// A unit set's position in the Target's list, which is declaration order.
-struct UnitSetIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( UnitSetIndex, UnitSetIndex ) = default;
-};
-
 /// A named set of Banks, declared by the variant with `units NAME N`: how
-/// many there are and nothing else. What the hardware calls each is the
+/// many there are, and where they lie in the medium's own memory where the
+/// hardware addresses it as one. What the hardware calls each is the
 /// driver's, and the model names one by its index. A Window shows a set as
 /// one state per Bank, and `storage` names the set its units are — see
 /// docs/decisions/0053-a-window-names-its-units.md. The name is a Symbol in
@@ -264,14 +235,13 @@ struct UnitSet
   std::string name{};
   std::uint32_t count = 0;
   diag::SourceSpan site{};
-};
 
-/// A Window's position in the Target's list, which is declaration order.
-struct WindowIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( WindowIndex, WindowIndex ) = default;
+  /// Declared `linear BEGIN .. END`: the medium's own addresses, which a
+  /// blitter or a video chip reads as one memory — Bank 0 starts at `begin`
+  /// and each next one a Window's size further on. Absent where nothing but
+  /// the CPU reads the set, through a Window. See
+  /// docs/decisions/0251-a-bank-has-a-linear-address.md.
+  std::optional<AddressRange> linear{};
 };
 
 /// One entry of a Window's `views`: a named state, or a unit set that
@@ -281,6 +251,13 @@ struct WindowState
   diag::SourceSpan nameSpan{};
   std::string name{};
   std::optional<UnitSetIndex> units{};
+
+  /// How many of the Window's state indices this takes: a set's Banks, or
+  /// one where it is named.
+  [[nodiscard]] std::uint32_t indices( std::span<UnitSet const> sets ) const
+  {
+    return units.has_value() ? sets[units->value].count : 1;
+  }
 };
 
 /// A named set of address ranges the hardware switches as one, the states it
@@ -299,10 +276,6 @@ struct Window
   /// Sorted as written; need not be contiguous.
   std::vector<AddressRange> ranges{};
   std::vector<WindowState> states{};
-
-  /// Which of `states` is the base, a named one; absent for a Window with
-  /// no state that holds when nothing switched, whose ranges are in no pool.
-  std::optional<std::uint32_t> base{};
   diag::SourceSpan site{};
 
   /// What the ranges hold together, which is what one state of it is.
@@ -318,24 +291,14 @@ struct Window
   /// Window does not show it. Needs the sets, since a set's count is theirs.
   [[nodiscard]] std::optional<std::uint32_t> firstStateOf( UnitSetIndex set, std::span<UnitSet const> sets ) const;
 
-  /// The index of the base state; nothing where there is none.
-  [[nodiscard]] std::optional<std::uint32_t> baseState() const
-  {
-    return base;
-  }
+  /// How many states the Window shows: one per named state and one per Bank
+  /// of every unit set among them.
+  [[nodiscard]] std::uint64_t stateCount( std::span<UnitSet const> sets ) const;
 
   /// The index of the named state called `name`, or nothing: a unit set's
   /// name is not a state.
   [[nodiscard]] std::optional<std::uint32_t> namedStateOf( std::string_view wanted,
                                                            std::span<UnitSet const> sets ) const;
-};
-
-/// A Pane's position in the Target's list, which is declaration order.
-struct PaneIndex
-{
-  std::uint32_t value = 0;
-
-  friend bool operator==( PaneIndex, PaneIndex ) = default;
 };
 
 /// A named set of Sections that one switch shows together — see the glossary
@@ -350,6 +313,9 @@ struct Pane
   diag::SourceSpan nameSpan{};
   std::string name{};
   WindowIndex window{};
+
+  /// Where the `panes` block named the Window, a use of the Window's name.
+  diag::SourceSpan windowSpan{};
 
   /// The named state the block pinned it to, as an index among the Window's
   /// states; absent for a Pane the solver gives a Bank.
@@ -425,10 +391,39 @@ std::optional<Container> containerNamed( std::string_view word );
 /// The word a Container is written as, which is what a finding lists.
 std::string_view nameOf( Container container );
 
+/// Every Container, in the order a finding lists them.
+std::span<Container const> containers();
+
+/// A piece of hardware that holds one Section at a time: a display list's
+/// pointer, an interrupt's vector. What it holds stays where it is for as
+/// long as it may hold it — see
+/// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+struct Holder
+{
+  std::string name;
+  diag::SourceSpan site;
+};
+
 struct Target
 {
   /// In declaration order, the stand-in until a document declares one.
   std::vector<Region> regions = standInRegions();
+
+  /// In declaration order, one per name however often it is declared.
+  std::vector<Holder> holders{};
+
+  /// The Holder of that name.
+  [[nodiscard]] std::optional<std::uint32_t> holderNamed( std::string_view name ) const
+  {
+    for ( std::uint32_t index = 0; index < holders.size(); ++index )
+    {
+      if ( holders[index].name == name )
+      {
+        return index;
+      }
+    }
+    return std::nullopt;
+  }
 
   /// Derived from the Regions — see poolsOf — and held here so that a Claim
   /// is built from a list rather than from a walk over every Region.
@@ -474,6 +469,12 @@ struct Target
   /// since the stream shows a Bank there while it is open.
   std::vector<AddressRange> streamRanges{};
 
+  /// The unit set that Window shows, and how big one of its units is, set
+  /// with `streamRanges`: what a Container fills a Pane's Bank through where
+  /// there is no storage to say it — see filledSet.
+  std::optional<UnitSetIndex> streamUnits{};
+  std::uint32_t streamUnitSize = 0;
+
   /// How much of each unit a program may use, indexed by the unit, where a
   /// unit is not usable to its end. Empty where every one is, which is every
   /// medium but a diskette whose tracks hold different numbers of sectors:
@@ -500,10 +501,34 @@ struct Target
     return unit < unitUsable.size() ? unitUsable[unit] : 0;
   }
 
+  /// The most of one unit a program may use, over every unit: what one image
+  /// is held to where images stay within a unit. Zero without storage.
+  [[nodiscard]] std::uint32_t widestUsableUnit() const;
+
   /// The whole of storage, end to end.
   [[nodiscard]] std::uint32_t storageSize() const
   {
     return unitCount * unitSize;
+  }
+
+  /// Whether the Project, with what it includes, declared any storage at all.
+  /// Without it an edge has nowhere for a Frame to wait, so it loads nothing
+  /// and is a jump to a stub of the Phase it enters — see
+  /// docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+  [[nodiscard]] bool hasStorage() const
+  {
+    return unitCount > 0;
+  }
+
+  /// How many bytes a unit's number takes wherever the tool writes one — in a
+  /// Frame, in a `.transition`'s table, in the driver's cell: one while the
+  /// units fit a byte and two once they do not. The variant decides it, since
+  /// the routine is written before any driver is read, and the driver's cell is
+  /// held to it — see
+  /// docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+  [[nodiscard]] std::uint32_t unitBytes() const
+  {
+    return unitCount > 256 ? 2 : 1;
   }
 
   /// The unit set or the Window of a name, or nothing.
@@ -515,6 +540,27 @@ struct Target
   /// states, since a Window showing two sets is not one this tool has met.
   [[nodiscard]] std::optional<UnitSetIndex> unitSetShownBy( WindowIndex window ) const;
 
+  /// What one Bank of a set holds: the size of the Windows that show it, or
+  /// nothing where no Window does.
+  [[nodiscard]] std::optional<std::uint32_t> bankSizeOf( UnitSetIndex set ) const;
+
+  /// Where a Section of a Pane stands in the medium's own addresses, given
+  /// the state Place gave the Pane and the Section's address in the Window:
+  /// the set's `linear` start, a Bank's size for every Bank before the
+  /// Pane's, and the Section's distance into the Window's ranges laid end to
+  /// end. Nothing for a Pane pinned to a named state or one whose set
+  /// declares no `linear` — see
+  /// docs/decisions/0251-a-bank-has-a-linear-address.md.
+  [[nodiscard]] std::optional<std::uint32_t>
+  linearAddressOf( PaneIndex pane, std::uint32_t state, std::uint32_t address ) const;
+
+  /// Where a set's Banks lie in the medium end to end: from its `linear`
+  /// start, a Bank's size each, or the whole declared range where no Window
+  /// shows the set to say how large a Bank is. Nothing for a set that
+  /// declares no `linear` — see
+  /// docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  [[nodiscard]] std::optional<AddressRange> linearBanksOf( UnitSetIndex set ) const;
+
   /// Where a position in storage, counted end to end, falls: the unit and
   /// the offset in it. What a StorageAddress names is the start of an
   /// image, and the image may run on into the units after.
@@ -522,6 +568,20 @@ struct Target
 
   /// The position, end to end, of a StorageAddress.
   [[nodiscard]] std::uint32_t positionOf( StorageAddress at ) const;
+
+  /// The units a Container fills at load, which is where a Pane's Bank is:
+  /// storage's where there is storage, and otherwise the set the driver's
+  /// stream reads through, which a program without storage still fills its
+  /// Panes through — see
+  /// docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+  /// The set, how many units it has and how big one is; and the position and
+  /// address of an image in them, as positionOf and addressAt are for
+  /// storage.
+  [[nodiscard]] std::optional<UnitSetIndex> filledSet() const;
+  [[nodiscard]] std::uint32_t filledCount() const;
+  [[nodiscard]] std::uint32_t filledUnitSize() const;
+  [[nodiscard]] StorageAddress filledAddressAt( std::uint32_t position ) const;
+  [[nodiscard]] std::uint32_t filledPositionOf( StorageAddress at ) const;
 
   /// The most restrictive Region any address of `range` lies in, or nothing
   /// when no Region covers any of it. What a pin is held against: a pin in a
@@ -536,6 +596,7 @@ enum class Generated : std::uint8_t
   NONE,
   TRANSITION_CELL,
   SLOT_CELLS,
+  ENTRY_STUB,
   REGIONS,
   CONSTANTS,
 };
@@ -543,11 +604,34 @@ enum class Generated : std::uint8_t
 /// One entry of a `constants` block: a name the Project gives a value, and
 /// the number it gave. The value is a **literal** and not an expression,
 /// because this grammar has no terminator to end one with — see
-/// docs/decisions/0178-a-configuration-is-a-document.md.
+/// docs/decisions/0178-a-configuration-is-a-document.md. A literal may carry
+/// a `-` as its sign, kept apart from the digits it negates.
 struct ProjectConstant
 {
   diag::SourceSpan nameSpan;
+  std::optional<diag::SourceSpan> signSpan;
   diag::SourceSpan valueSpan;
+};
+
+/// A `register` a Choice declares: its name, the range it gives it, and where.
+struct ChoiceRegister
+{
+  std::string name;
+  AddressRange range;
+  diag::SourceSpan span;
+};
+
+/// One document of a `choose` block: the values it gives the names every
+/// Choice declares. The first is the one the program is built as, and the
+/// others are what the program may be changed into while a `.xex` loads —
+/// see docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+struct Choice
+{
+  /// The path as the `choose` block wrote it, and where it wrote it.
+  std::string document;
+  diag::SourceSpan site;
+  std::vector<ChoiceRegister> registers;
+  std::vector<ProjectConstant> constants;
 };
 
 /// One entry of the Project's module list.
@@ -597,6 +681,9 @@ struct TransformRequest
   ModuleIndex module;
   std::string section;
   diag::SourceSpan span;
+
+  /// Where the format is named, which a finding about the format stands at.
+  diag::SourceSpan formatSpan;
 };
 
 /// A decoder the program declared with `.transform`, resolved and numbered:
@@ -612,11 +699,28 @@ struct Decoder
 };
 
 /// What the driver provides for one Window: `show` a state named where the
-/// use is written, and `showAt` one whose index is in `X`.
+/// use is written, and `showAt` one whose index is in `X` — and, where its
+/// declaration ends with the place `xy`, whose high byte is in `Y`.
 struct WindowRoles
 {
   MacroIndex show;
   MacroIndex showAt;
+
+  /// 2 where `showAt` was declared with the place `xy`, 1 for `x` or none.
+  std::uint32_t stateBytes = 1;
+};
+
+/// A ROM the driver switches out, declared `.driver rom MODULE [ALSO]`: the
+/// Module that is the ROM, and the Module whose ranges showing it shows too —
+/// on an XL the floating-point pack and the OS share one bit. Its position
+/// among the driver's `rom` lines is its bit in the set `select` is handed.
+/// A ROM whose Module the Project does not list is one no Phase needs, and
+/// its bit is never set: BASIC, which a program that wants it lists itself —
+/// see docs/decisions/0229-no-window-has-a-base.md.
+struct RomRole
+{
+  std::optional<ModuleIndex> module{};
+  std::optional<ModuleIndex> also{};
 };
 
 /// The storage driver, resolved: the Module that declared it, the macro of
@@ -628,8 +732,24 @@ struct WindowRoles
 struct Driver
 {
   ModuleIndex module;
+
+  /// Whether the driver has a stream: `open`, `read` and the two cells. Every
+  /// driver of storage has one; a driver in a program without storage
+  /// declares none of them, and then the four below mean nothing — see
+  /// docs/decisions/0242-a-driver-may-switch-roms-and-have-no-stream.md. Such
+  /// a driver may still show a Window, which every `.with` expands — see
+  /// docs/decisions/0253-a-driver-that-shows-a-window-stays.md.
+  bool streams = true;
   MacroIndex open;
   MacroIndex read;
+
+  /// The cells the stream stands in, declared `.driver unit` and `.driver
+  /// offset`: Symbols of the driver's Module, by position in its table. The
+  /// routine writes the position into them under `nga.unit` and `nga.offset`
+  /// and then expands `open`, which takes nothing in registers — see
+  /// docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+  std::uint32_t unit = 0;
+  std::uint32_t offset = 0;
 
   /// Declared `.driver init`: what the hardware takes before the driver can
   /// be used at all, which the Container calls once before it uses the driver
@@ -638,6 +758,30 @@ struct Driver
   /// where it is absent nothing is emitted and no Container segment is
   /// written. See docs/decisions/0227-a-driver-may-need-the-hardware-reached-first.md.
   std::optional<MacroIndex> init{};
+
+  /// Declared `.driver finalize`: what leaves the machine as the program found
+  /// it, called where the program ends — after its entry returns, through the
+  /// stub a Container that can be returned from starts it by, and wherever the
+  /// program writes `nga.finalize`. Absent where there is nothing to put back,
+  /// and then `nga.finalize` is nothing at all — see
+  /// docs/decisions/0229-no-window-has-a-base.md.
+  std::optional<MacroIndex> finalize{};
+
+  /// The ROMs the driver switches out, in the order it declared them, and the
+  /// macro that switches them: `select`, handed the set a Phase needs in `A`,
+  /// by the routine before it loads a byte of the Phase and at the start of
+  /// the program. Both empty where the driver switches nothing.
+  std::vector<RomRole> roms{};
+  std::optional<MacroIndex> select{};
+
+  /// Declared `.driver mask` and `.driver unmask`: what keeps the machine's
+  /// interrupts away while the load has every ROM out, and what lets them in
+  /// again. The program is not running yet, so they are the tool's to mind,
+  /// and how is the machine's. Absent where the driver says nothing, and then
+  /// nothing is hidden under a ROM — see
+  /// docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+  std::optional<MacroIndex> mask{};
+  std::optional<MacroIndex> unmask{};
 
   /// One entry per Window of the Target, in the Target's order.
   std::vector<WindowRoles> windows{};
@@ -662,9 +806,22 @@ struct Driver
   bool spansNothing = false;
 };
 
-/// Which Container the run writes. Chosen by the output file's name, and
-/// known before Assemble because a Container that loads through memory asks
-/// the program for a few bytes of glue — see docs/spec/xex.md.
+/// A group as written: its name and what it lists, Modules and groups alike.
+/// For the facts alone — no Step reads it, since nothing below the Project
+/// learns a group exists, docs/decisions/0042-groups.md.
+struct ProjectGroup
+{
+  std::string name;
+  std::vector<std::string> members;
+};
+
+/// A Label a `load` block names with `init`, and where it was named.
+struct LoadInit
+{
+  std::string name;
+  diag::SourceSpan span;
+};
+
 /// The description of the program a run works on.
 ///
 /// A run always has one. What is not here yet — the rest of the Target,
@@ -675,6 +832,24 @@ struct Project
   std::vector<ProjectModule> modules;
   PhaseGraph phases;
   Target target;
+
+  /// What a `load` block names: the memory the machine holds while a `.xex`
+  /// loads, as Modules of pinned Sections with no bytes, and where the first
+  /// block opened — see
+  /// docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+  std::vector<ModuleIndex> loadNeeds;
+
+  /// The groups the Project declared, and the directory of the shipped
+  /// library its paths were looked for in: for the facts, which an editor
+  /// completes a `.ngp` from — see docs/spec/facts.md.
+  std::vector<ProjectGroup> groups{};
+  std::string library{};
+
+  std::optional<diag::SourceSpan> loadSite{};
+
+  /// The Labels the `load` block names with `init`, in order: what the `.xex`
+  /// calls through `INITAD` before it writes anything else.
+  std::vector<LoadInit> loadInits;
 
   /// Declared `frames held`: an edge's block descriptors are read **once**
   /// into the memory of the block that loads last, and the Frame is then
@@ -695,6 +870,13 @@ struct Project
   std::optional<ModuleIndex> transitionRoutine;
   std::optional<ModuleIndex> transitionCell;
 
+  /// What a `.xex` without storage decodes its transformed Sections with while
+  /// it loads: the decoders, reading memory, and the glue the loader calls.
+  /// Present in no Phase and placed by no solver — its own Step places it once
+  /// the stored forms are known — see
+  /// docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+  std::optional<ModuleIndex> loadModule;
+
   /// The Module holding one Cell per Slot, added at the end of Assemble when
   /// the program declares any — see docs/decisions/0031-slots.md.
   std::optional<ModuleIndex> slotCells;
@@ -712,6 +894,14 @@ struct Project
   std::vector<ProjectConstant> constants;
   std::optional<ModuleIndex> constantModule;
 
+  /// What a `choose` block named, in its order, where it was written, and the
+  /// Module holding the byte the program chooses with and the routine that
+  /// changes the bytes — see
+  /// docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+  std::vector<Choice> choices;
+  std::optional<diag::SourceSpan> chooseSite;
+  std::optional<ModuleIndex> chooseModule;
+
   /// Every `transform` entry, in document order and unresolved.
   std::vector<TransformRequest> transforms;
 
@@ -726,13 +916,30 @@ struct Project
 
   /// What the program is, as its document named it. The raw image is what a
   /// document naming none is, which is what a program with no Payloads has
-  /// always been written as.
+  /// always been written as. Known before Assemble, because a Container that
+  /// loads through memory asks the program for a few bytes of glue — see
+  /// docs/spec/xex.md.
   Container container = Container::RAW_IMAGE;
 
-  /// The cartridge board `container car "xegs128"` named, and where it was
-  /// written; absent for every other Container.
-  std::optional<std::string> cartridge{};
+  /// The board `container car "xegs128"` named, or `container lnx "256k"`
+  /// for a `.lnx` or a `.lyx`, and where it was written: resolved where the
+  /// document was read, which refuses a name no board has. Absent for every
+  /// other Container, and at most one of the two is there.
+  std::optional<Cartridge> cartridge{};
+  std::optional<LynxBoard> lynxBoard{};
   std::optional<diag::SourceSpan> cartridgeSite{};
+
+  /// The format `container xex compress zx0` named, in which the file is
+  /// compressed segment by segment and decoded where each lands while it
+  /// loads, and nothing where the document asked for no compression — see
+  /// docs/decisions/0259-a-xex-may-be-compressed-segment-by-segment.md.
+  std::optional<std::string> compress{};
+
+  /// The Modules `except` names after `compress`, groups expanded: a
+  /// compressed file writes their bytes as they are, where a file without
+  /// compression would — see
+  /// docs/decisions/0260-a-compressed-xex-writes-what-it-is-told-as-it-is.md.
+  std::vector<ModuleIndex> uncompressed{};
 
   /// Where the `container` statement stood, and nothing where the document
   /// gave none — which is also what says the raw image was nobody's choice
@@ -746,25 +953,34 @@ struct Project
   Intent intent = Intent::FIT;
   std::optional<diag::SourceSpan> intentSite{};
 
-  /// What a `cartridge` block said, for the header a Lynx cartridge carries —
-  /// see docs/spec/lnx.md. Empty strings where nothing said, which is what the
-  /// header then holds: a name invented from the file's own would be a name the
-  /// reader shows and nobody chose.
-  std::string cartridgeName;
-  std::string cartridgeMaker;
-  std::uint8_t cartridgeRotation = 0;
+  /// What a `cartridge` block said, and where the block stood.
+  LynxHeader lynxHeader{};
   std::optional<diag::SourceSpan> cartridgeBlockSite{};
 };
 
-/// The base a Window shows in a Phase: what the Phase chose, or what a group
-/// it needs chose, or the variant's; nothing for a Window with no base at
-/// all. See docs/decisions/0056-a-phase-chooses-a-base.md.
-std::optional<std::uint32_t> baseIn( Project const& project, PhaseIndex phase, WindowIndex window );
+/// Whether every image and every Frame of storage stays inside one unit: a
+/// driver was promised `.driver span none`, or a unit is not usable to its end
+/// and an image crossing into the next would stand in the gap. Where it does,
+/// a stored form longer than the widest unit is cut into blocks and placed a
+/// block to a unit; where it does not, nothing is cut and anything may cross.
+/// One answer for every Step that asks, since a form cut for units it may
+/// cross, or confined to units it was not cut for, is no layout at all.
+[[nodiscard]] bool imagesStayInOneUnit( Project const& project );
 
 /// Fills in every Module's Residency from the PhaseGraph: the set of Phases
 /// whose `needs` name it. The one way a Residency comes to exist, for a read
 /// Project and a synthesised one alike.
 void deriveResidency( Project& project );
+
+/// Adds a Module the tool writes itself, before anything is assembled: needed
+/// by every Phase, every Module's Residency derived again. Its index.
+ModuleIndex addToolModule( Project& project, ProjectModule module );
+
+/// Every Phase but a `final` one other than the entry: where a program may
+/// still leave, by an edge or by returning, or is entered by its Container,
+/// and so where what only that runs has to be — see
+/// docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+[[nodiscard]] Residency notFinal( PhaseGraph const& phases );
 
 /// The Project of a run given no Project file: one Module per file, named by
 /// the file's stem, one unnamed Phase holding all of them, a default Target.

@@ -2,7 +2,7 @@
 
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/diag/SourceLocation.hpp"
-#include "nga/model/PlacementClass.hpp"
+#include "nga/syntax/Statement.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -55,12 +55,15 @@ struct GeneratedItem
 struct GeneratedSection
 {
   std::string name{};
-  PlacementClass placement = PlacementClass::ABSOLUTE;
+  syntax::PlacementClass placement = syntax::PlacementClass::ABSOLUTE;
   std::optional<std::int64_t> pinnedAddress{};
   std::optional<std::int64_t> alignment{};
   std::optional<std::int64_t> boundary{};
   std::optional<std::string> pane{};
-  bool movable = false;
+
+  /// Each further `in`, which names another Region the Section may stand in
+  /// instead — see docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.
+  std::vector<std::string> alsoIn{};
   bool root = false;
   bool temporary = false;
   bool readOnly = false;

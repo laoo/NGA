@@ -7,7 +7,6 @@ namespace nga::model
 
 RawImage emitRawImage( Patched const& build, diag::DiagnosticSink& sink )
 {
-  diag::SourceManager const& sources = build.sources();
   GlobalSymbols const& symbols = build.symbols();
   Sizes const& sizes = build.sizes();
   Layout const& layout = build.layout();
@@ -25,12 +24,12 @@ RawImage emitRawImage( Patched const& build, diag::DiagnosticSink& sink )
       {
         SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
         if ( !layout.isPlaced( where ) || !sizes.isKnown( where ) || sizes.sizeOfSection( where ) == 0 ||
-             !one.sections()[index].emitsBytes() || one.sections()[index].pane().has_value() )
+             !one.sections()[index].emitsBytes() || one.sections()[index].inMedium() )
         {
           // A reservation puts nothing in an image, and a zero-page one would
           // otherwise stretch it from address zero. A Pane's Section is in a
-          // Bank and never in base memory, which is what a raw image is — see
-          // docs/decisions/0054-panes.md.
+          // Bank and never in the memory a raw image is — see
+          // docs/decisions/0054-panes.md — and a unit set's is in the medium.
           continue;
         }
         visit( where, layout.addressOf( where ), sizes.sizeOfSection( where ) );
@@ -61,19 +60,19 @@ RawImage emitRawImage( Patched const& build, diag::DiagnosticSink& sink )
     {
       AddressRange const& a = contents[earlier].range;
       AddressRange const& b = contents[later].range;
-      if ( a.begin < b.end && b.begin < a.end )
+      if ( a.overlaps( b ) )
       {
         Section const& section =
             symbols.moduleAt( contents[later].where.module ).sectionAt( contents[later].where.section );
-        sink.add( diag::diagnostic( diag::DiagnosticId::OVERLAY_IN_RAW_IMAGE )
-                      .at( section.span().begin, section.span().length )
-                      .arg( "section",
-                            symbols.moduleAt( contents[later].where.module )
-                                .displayNameOf( contents[later].where.section, sources ) )
-                      .arg( "other",
-                            symbols.moduleAt( contents[earlier].where.module )
-                                .displayNameOf( contents[earlier].where.section, sources ) )
-                      .arg( "address", static_cast<std::int64_t>( std::max( a.begin, b.begin ) ) ) );
+        sink.add(
+            diag::diagnostic( diag::DiagnosticId::OVERLAY_IN_RAW_IMAGE )
+                .at( section.span().begin, section.span().length )
+                .arg( "section",
+                      symbols.moduleAt( contents[later].where.module ).displayNameOf( contents[later].where.section ) )
+                .arg( "other",
+                      symbols.moduleAt( contents[earlier].where.module )
+                          .displayNameOf( contents[earlier].where.section ) )
+                .arg( "address", static_cast<std::int64_t>( std::max( a.begin, b.begin ) ) ) );
         refused = true;
       }
     }

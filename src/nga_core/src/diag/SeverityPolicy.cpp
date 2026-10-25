@@ -13,6 +13,11 @@ void SeverityPolicy::clear( DiagnosticId id )
   mOverrides.at( static_cast<std::size_t>( id ) ).reset();
 }
 
+bool SeverityPolicy::overrides( DiagnosticId id ) const
+{
+  return mOverrides.at( static_cast<std::size_t>( id ) ).has_value();
+}
+
 std::optional<Severity> SeverityPolicy::effectiveFor( DiagnosticId id ) const
 {
   Severity const defaultSeverity = catalogEntryFor( id ).defaultSeverity;

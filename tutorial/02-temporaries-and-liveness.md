@@ -102,15 +102,15 @@ with `.ztemp`
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 3 of 16 bytes
   memory:    50 of 32768 bytes
-  $0080-$0080  scan.largest     section            phase0
-  $0081-$0081  scan.above       section            phase0
-  $0082-$0082  scan.entry.best  temporary          phase0  shares with entry.tally
-  $0082-$0082  scan.entry.tally temporary          phase0  shares with entry.best
-  $2000-$2004  scan.input       section            phase0
-  $2005-$2031  scan.entry       proc               phase0
+  $0080-$0080  scan.largest     section            (implicit)
+  $0081-$0081  scan.above       section            (implicit)
+  $0082-$0082  scan.entry.best  temporary          (implicit)  shares with entry.tally
+  $0082-$0082  scan.entry.tally temporary          (implicit)  shares with entry.best
+  $2000-$2004  scan.input       section            (implicit)
+  $2005-$2031  scan.entry       proc               (implicit)
 ```
 <!-- end -->
 
@@ -159,15 +159,15 @@ tally   .ztemp 1
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 4 of 16 bytes
   memory:    43 of 32768 bytes
-  $0080-$0080  scan.entry.tally temporary          phase0
-  $0081-$0081  scan.entry.best  temporary          phase0
-  $0082-$0082  scan.above       section            phase0
-  $0083-$0083  scan.largest     section            phase0
-  $2000-$2004  scan.input       section            phase0
-  $2005-$202A  scan.entry       proc               phase0
+  $0080-$0080  scan.entry.tally temporary          (implicit)
+  $0081-$0081  scan.entry.best  temporary          (implicit)
+  $0082-$0082  scan.above       section            (implicit)
+  $0083-$0083  scan.largest     section            (implicit)
+  $2000-$2004  scan.input       section            (implicit)
+  $2005-$202A  scan.entry       proc               (implicit)
 ```
 <!-- end -->
 
@@ -222,20 +222,20 @@ two procedures are on the stack and both of them are holding a value.
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 5 of 16 bytes
   memory:    90 of 32768 bytes
-  $0080-$0080  scan.largest          section            phase0
-  $0081-$0081  scan.above            section            phase0
-  $0082-$0082  scan.spread           section            phase0
-  $0083-$0083  scan.countAbove.tally temporary          phase0  shares with findLargest.best
-  $0083-$0083  scan.findLargest.best temporary          phase0  shares with countAbove.tally
-  $0084-$0084  scan.report.least     temporary          phase0
-  $2000-$2004  scan.input            section            phase0
-  $2005-$200E  scan.entry            proc               phase0
-  $200F-$2025  scan.findLargest      proc               phase0
-  $2026-$203C  scan.countAbove       proc               phase0
-  $203D-$2059  scan.report           proc               phase0
+  $0080-$0080  scan.largest          section            (implicit)
+  $0081-$0081  scan.above            section            (implicit)
+  $0082-$0082  scan.spread           section            (implicit)
+  $0083-$0083  scan.countAbove.tally temporary          (implicit)  shares with findLargest.best
+  $0083-$0083  scan.findLargest.best temporary          (implicit)  shares with countAbove.tally
+  $0084-$0084  scan.report.least     temporary          (implicit)
+  $2000-$2004  scan.input            section            (implicit)
+  $2005-$200E  scan.entry            proc               (implicit)
+  $200F-$2025  scan.findLargest      proc               (implicit)
+  $2026-$203C  scan.countAbove       proc               (implicit)
+  $203D-$2059  scan.report           proc               (implicit)
 ```
 <!-- end -->
 
@@ -310,19 +310,19 @@ void entry()
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 1 of 16 bytes
-  memory:    102 of 32768 bytes
-  $0080-$0080  scan.countAbove.__0tally temporary          phase0  shares with report.__0least
-  $0080-$0080  scan.report.__0least     temporary          phase0  shares with countAbove.__0tally
-  $2000-$2004  scan.input               section            phase0
-  $2005-$2005  scan.largest             section            phase0
-  $2006-$2006  scan.above               section            phase0
-  $2007-$2007  scan.spread              section            phase0
-  $2008-$201B  scan.findLargest         proc               phase0
-  $201C-$2034  scan.countAbove          proc               phase0
-  $2035-$2055  scan.report              proc               phase0
-  $2056-$2065  scan.entry               proc               phase0
+  memory:    101 of 32768 bytes
+  $0080-$0080  scan.countAbove.__0tally temporary          (implicit)  shares with report.__0least
+  $0080-$0080  scan.report.__0least     temporary          (implicit)  shares with countAbove.__0tally
+  $2000-$2004  scan.input               section            (implicit)
+  $2005-$2005  scan.largest             section            (implicit)
+  $2006-$2006  scan.above               section            (implicit)
+  $2007-$2007  scan.spread              section            (implicit)
+  $2008-$201B  scan.findLargest         proc               (implicit)
+  $201C-$2034  scan.countAbove          proc               (implicit)
+  $2035-$2055  scan.report              proc               (implicit)
+  $2056-$2064  scan.entry               proc               (implicit)
 ```
 <!-- end -->
 

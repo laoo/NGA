@@ -72,15 +72,21 @@ public:
   /// at all is not a question the text settles.
   virtual void setSeverity( Token code, diag::SeverityOverride action ) = 0;
 
-  /// One entry of a `constants` block: `NAME = NUMBER`. Whether the name has
-  /// been given a value already is a fact about the document, and it is
-  /// reported by the implementation, which is where the first one was kept.
-  virtual void addConstant( Token name, Token value ) = 0;
+  /// One entry of a `constants` block: `NAME = NUMBER`, or `NAME = -NUMBER`
+  /// with the `-` as `sign`. Whether the name has been given a value already
+  /// is a fact about the document, and it is reported by the implementation,
+  /// which is where the first one was kept.
+  virtual void addConstant( Token name, std::optional<Token> sign, Token value ) = 0;
 
   /// Reads another document into this Project, at this point. Recursion, the
   /// cycle check and registering the file all belong to the implementation:
   /// the grammar has read one `include` and knows nothing about files.
   virtual void includeDocument( Token path ) = 0;
+
+  /// A `choose` block: the documents the program may be any one of, in the
+  /// order written, the first being the one it is built as — see
+  /// docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+  virtual void chooseDocuments( Token keyword, std::vector<Token> paths ) = 0;
 
   /// The header of a `phase` block. Reached once per block, so a name written
   /// over two blocks arrives twice, and summing them is the implementation's
@@ -94,14 +100,26 @@ public:
   /// One name in a `then` list of the Phase named `phase`.
   virtual void phaseLeadsTo( Token phase, Token next ) = 0;
 
-  /// `base WINDOW = STATE` in the Phase named `phase`, or in the group named
-  /// `group`, which every Phase needing the group inherits — see
-  /// docs/decisions/0056-a-phase-chooses-a-base.md.
-  virtual void phaseBase( Token phase, Token window, Token state ) = 0;
-  virtual void groupBase( Token group, Token window, Token state ) = 0;
+  /// One name in a `without` list of the Phase named `phase`: a ROM the
+  /// driver switches out, which the Phase does without — see
+  /// docs/decisions/0229-no-window-has-a-base.md.
+  virtual void phaseWithout( Token phase, Token module ) = 0;
+
+  /// The word `final` in the Phase named `phase`: nothing leaves it — see
+  /// docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  virtual void phaseFinal( Token phase, Token keyword ) = 0;
 
   /// One name in a `resident` block.
   virtual void addResident( Token module ) = 0;
+
+  /// One name in a `needs` list of a `load` block, which `keyword` opened: a
+  /// Module of what the machine holds while a `.xex` loads — see
+  /// docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+  virtual void loadNeeds( Token keyword, Token module ) = 0;
+
+  /// The `init` of a `load` block, which `keyword` opened: a Label the `.xex`
+  /// calls while it loads, before anything else of the program.
+  virtual void loadInit( Token keyword, std::vector<Token> label ) = 0;
 
   /// The `entry` statement. Whether it has been given before is a fact about
   /// the document, and it is reported by the implementation because that is
@@ -113,6 +131,16 @@ public:
   /// tool writes, whether that container takes a board, and whether one was
   /// given before, belong to the implementation.
   virtual void setContainer( Token name, std::optional<Token> board ) = 0;
+
+  /// `compress FORMAT` after the Container `name`: the format the file is
+  /// compressed in, segment by segment. Whether that Container is compressed
+  /// at all, and whether the tool encodes the format, belong to the
+  /// implementation.
+  virtual void setCompress( Token name, Token keyword, Token format ) = 0;
+
+  /// One name in the `except` block after `compress`: a Module or a group the
+  /// compressed file writes as it is.
+  virtual void addUncompressed( Token module ) = 0;
 
   /// One entry of the `cartridge` block: what a reader shows about the cartridge
   /// — its name, its manufacturer, how the screen is held — which only a format
@@ -156,17 +184,21 @@ public:
   /// of that many.
   virtual void addPane( Token name, ExpressionPtr count ) = 0;
 
-  /// A `units` entry of a `target` block: a named set of that many Banks.
-  virtual void addUnitSet( Token keyword, Token name, ExpressionPtr count ) = 0;
+  /// A `units` entry of a `target` block: a named set of that many Banks,
+  /// and the range of the medium's own addresses after `linear`, where one
+  /// was written.
+  virtual void addUnitSet( Token keyword,
+                           Token name,
+                           ExpressionPtr count,
+                           std::optional<std::pair<ExpressionPtr, ExpressionPtr>> linear ) = 0;
 
   /// A `window` entry of a `target` block: a name, its ranges, the names
   /// after `views` — each a unit set or a named state, which the text
-  /// cannot tell apart — and the name after `base`, where there was one.
+  /// cannot tell apart.
   virtual void addWindow( Token keyword,
                           Token name,
                           std::vector<std::pair<ExpressionPtr, ExpressionPtr>> ranges,
-                          std::vector<Token> states,
-                          std::optional<Token> base ) = 0;
+                          std::vector<Token> states ) = 0;
 
   /// A `region` entry: an optional name, the two ends of its range, and the
   /// word that follows, which the grammar has only seen to be a word.
@@ -176,6 +208,10 @@ public:
   /// A `register` entry: a name, an address, and the width after the comma,
   /// absent where there was none.
   virtual void addRegister( Token keyword, Token name, ExpressionPtr address, ExpressionPtr width ) = 0;
+
+  /// `holder NAME` in a `target` block: a piece of hardware that holds one
+  /// Section at a time — see docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  virtual void addHolder( Token keyword, Token name ) = 0;
 
   /// The `entry` of a `phase` block: the Label the Phase starts at, as a
   /// name or a dotted one, `one.start`, when the Label lies in a Namespace.

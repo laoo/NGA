@@ -1,9 +1,14 @@
-; An Atari 130XE: four extended Banks as a unit set, the Window PORTB brings
-; one of them into, the Window over the OS ROM, every Region of the address
-; space, and the Modules a program on this machine needs. What PORTB takes to
-; show a state is the driver's and not here, and the OS is a Module rather than
-; a Region because it occupies memory for a while rather than being a truth
-; about addresses.
+; An Atari 130XE: five Banks as a unit set — the four of extended memory and,
+; last, the machine's own memory under the Window — the Window PORTB brings
+; one of them into, every Region of the address space, and the Modules a
+; program on this machine needs. It declares no storage. A program that loads
+; anything during a run includes `atari/extension.ngp` beside this, which makes
+; the Banks its storage. What PORTB takes to show a state is the
+; driver's and not here, and the OS is two Modules rather than a Region because
+; it occupies memory for a while rather than being a truth about addresses: its
+; variables for the whole of a program, its ROM in every Phase that does not
+; say `without osrom` — see 0229. The same register switches the ROMs, so the
+; driver is what declares them.
 target {
   cpu "6502"
 
@@ -11,17 +16,23 @@ target {
   ; here rather than at the writer.
   containers xex
 
-  units  extension 4
-  window ext  $4000 .. $7FFF  views main, extension  base main
-  window os   $C000 .. $CFFF, $D800 .. $FFFF  views rom, ram  base rom
+  ; No Window has a base, so the memory under this one is a Bank like the
+  ; others and nothing of the program stands there but a Pane or storage — see
+  ; docs/decisions/0229-no-window-has-a-base.md.
+  units  extension 5
+  window ext  $4000 .. $7FFF  views extension
 }
-storage { units extension }
 
 target {
   region ram    $0000 .. $CFFF  ram
   region        $D800 .. $FFFF  ram
   region stack  $0100 .. $01FF  reserved
   region io     $D000 .. $D7FF  register
+  ; The RAM the OS ROM covers, named so that a Section may say `in underOsLow`
+  ; and stand there: only in a Phase without `osrom`, or hidden under it where
+  ; nothing needs it — see docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.
+  region underOsLow   $C000 .. $CFFF  ram
+  region underOsHigh  $D800 .. $FFFF  ram
 
   ; This machine takes a `.xex` and nothing else, and a `.xex` is loaded by a
   ; DOS, which stays where a DOS of the 2.x family stays. A Project whose DOS
@@ -32,10 +43,29 @@ target {
   ; What the driver writes. A Project that wants more of the hardware by name
   ; declares it, as it declares the memory its DOS holds.
   register PORTB  $D301
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`: what it holds stays where it is for that long. See
+  ; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  holder dlist                          ; ANTIC's display list: SDLSTL, or DLISTL
+  holder dli                            ; the display list interrupt: VDSLST
+  holder vbi                            ; the immediate vertical blank: VVBLKI
+  holder vbd                            ; the deferred vertical blank: VVBLKD
+  holder nmi                            ; $FFFA, where the OS ROM is switched out
+  holder irq                            ; $FFFE, where the OS ROM is switched out
+  holder chbase                         ; the character set: CHBAS, or CHBASE
+  holder pmbase                         ; the player-missile memory: PMBASE
+  holder dosini                         ; DOSINI: called once a boot returns, and on every reset
 }
 
-; The OS, the driver for this storage and the decoders the tool ships, listed
-; as a file of the Project's own would be. Every Transition calls the driver
-; and the decoders, so they are resident; a decoder nothing uses is dropped.
-modules { "atari/os.asm"  "atari/charsets.asm"  "atari/portb.asm"  "stream/zx0.asm" }
-resident { os, charsets, portb, zx0 }
+; The OS and the driver, listed as a file of the Project's own would be. The
+; driver is here and not beside the storage because it does more than read it:
+; it shows a Pane's Bank and switches the ROMs, with or without storage. BASIC
+; is not listed: a program that wants it lists `atari/basic.asm` and names it
+; in a Phase's `needs`, and the driver switches it out everywhere else.
+modules {
+  "atari/osram.asm"  "atari/osrom.asm"  "atari/mathpack.asm"
+  "atari/charsets.asm"  "atari/portb.asm"
+}
+resident { osram, osrom, mathpack, charsets, portb }

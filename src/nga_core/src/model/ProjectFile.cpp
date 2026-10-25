@@ -11,7 +11,9 @@
 
 #include "nga/model/Evaluate.hpp"
 #include "nga/model/Generator.hpp"
+#include "nga/model/Load.hpp"
 #include "nga/model/Runtime.hpp"
+#include "nga/model/Transform.hpp"
 #include "nga/model/Transition.hpp"
 #include "nga/syntax/Lexer.hpp"
 #include "nga/syntax/Literal.hpp"
@@ -20,9 +22,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -32,11 +37,13 @@ namespace nga::model
 namespace
 {
 
-/// A unit is named in a byte: in a Frame, and in the accumulator the driver
-/// is handed it in.
-constexpr std::int64_t MOST_UNITS = 256;
+/// A unit is named in two bytes at most: in a Frame, in a `.transition`'s
+/// table and in the driver's cell — one byte while the units fit one, which
+/// is Target::unitBytes.
+constexpr std::int64_t MOST_UNITS = 65536;
 
-/// A family's members are consecutive Banks, and a Bank is named in a byte.
+/// A family's members are consecutive Banks, and a member is chosen by an
+/// index in a byte.
 constexpr std::int64_t MOST_PANE_MEMBERS = 255;
 
 /// A name already in a set adds nothing and is not reported: an include
@@ -49,6 +56,234 @@ void addOnce( List& list, Value value )
     list.push_back( value );
   }
 }
+
+/// Reads a document a `choose` block names, which holds values and nothing
+/// else: `register` lines in a `target` block and `constants` entries go to
+/// whoever takes them, and anything else is refused where it was written —
+/// see docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+class ChoiceReader final : public syntax::ProjectBuilder
+{
+public:
+  using Refuse = std::function<void( syntax::Token, std::string_view )>;
+  using TakeRegister =
+      std::function<void( syntax::Token, syntax::Token, syntax::ExpressionPtr, syntax::ExpressionPtr )>;
+  using TakeConstant = std::function<void( syntax::Token, std::optional<syntax::Token>, syntax::Token )>;
+
+  ChoiceReader( Refuse refuse, TakeRegister takeRegister, TakeConstant takeConstant )
+      : mRefuse( std::move( refuse ) ), mTakeRegister( std::move( takeRegister ) ),
+        mTakeConstant( std::move( takeConstant ) )
+  {
+  }
+
+  void addRegister( syntax::Token keyword,
+                    syntax::Token name,
+                    syntax::ExpressionPtr address,
+                    syntax::ExpressionPtr width ) override
+  {
+    mTakeRegister( keyword, name, std::move( address ), std::move( width ) );
+  }
+
+  void addConstant( syntax::Token name, std::optional<syntax::Token> sign, syntax::Token value ) override
+  {
+    mTakeConstant( name, sign, value );
+  }
+
+  void addModule( syntax::Token path,
+                  std::optional<syntax::Token> /*alias*/,
+                  std::optional<syntax::Token> /*group*/ ) override
+  {
+    mRefuse( path, "a module" );
+  }
+
+  void addGeneratedModule( syntax::Token generator,
+                           std::vector<GeneratorArgument> /*arguments*/,
+                           std::optional<syntax::Token> /*alias*/,
+                           std::optional<syntax::Token> /*group*/ ) override
+  {
+    mRefuse( generator, "a module" );
+  }
+
+  void declareGroup( syntax::Token name ) override
+  {
+    mRefuse( name, "a group" );
+  }
+
+  void groupMember( syntax::Token /*group*/, syntax::Token member ) override
+  {
+    mRefuse( member, "a group" );
+  }
+
+  void setSeverity( syntax::Token code, diag::SeverityOverride /*action*/ ) override
+  {
+    mRefuse( code, "a severity" );
+  }
+
+  void includeDocument( syntax::Token path ) override
+  {
+    mRefuse( path, "an `include`" );
+  }
+
+  void chooseDocuments( syntax::Token keyword, std::vector<syntax::Token> /*paths*/ ) override
+  {
+    mRefuse( keyword, "a `choose`" );
+  }
+
+  void declarePhase( syntax::Token name ) override
+  {
+    mRefuse( name, "a phase" );
+  }
+
+  void phaseNeeds( syntax::Token phase, syntax::Token /*module*/ ) override
+  {
+    mRefuse( phase, "a phase" );
+  }
+
+  void phaseLeadsTo( syntax::Token phase, syntax::Token /*next*/ ) override
+  {
+    mRefuse( phase, "a phase" );
+  }
+
+  void phaseWithout( syntax::Token phase, syntax::Token /*module*/ ) override
+  {
+    mRefuse( phase, "a phase" );
+  }
+
+  void phaseFinal( syntax::Token phase, syntax::Token /*keyword*/ ) override
+  {
+    mRefuse( phase, "a phase" );
+  }
+
+  void phaseEntry( syntax::Token phase, std::vector<syntax::Token> /*label*/ ) override
+  {
+    mRefuse( phase, "a phase" );
+  }
+
+  void addResident( syntax::Token module ) override
+  {
+    mRefuse( module, "a resident module" );
+  }
+
+  void loadNeeds( syntax::Token keyword, syntax::Token /*module*/ ) override
+  {
+    mRefuse( keyword, "what the load needs" );
+  }
+
+  void loadInit( syntax::Token keyword, std::vector<syntax::Token> /*label*/ ) override
+  {
+    mRefuse( keyword, "what the load needs" );
+  }
+
+  void setEntry( syntax::Token phase ) override
+  {
+    mRefuse( phase, "the entry phase" );
+  }
+
+  void setContainer( syntax::Token name, std::optional<syntax::Token> /*board*/ ) override
+  {
+    mRefuse( name, "the container" );
+  }
+
+  void setCompress( syntax::Token name, syntax::Token /*keyword*/, syntax::Token /*format*/ ) override
+  {
+    mRefuse( name, "the container" );
+  }
+
+  void addUncompressed( syntax::Token module ) override
+  {
+    mRefuse( module, "the container" );
+  }
+
+  void setCartridgeField( syntax::Token block, syntax::Token /*field*/, syntax::Token /*value*/ ) override
+  {
+    mRefuse( block, "a cartridge" );
+  }
+
+  void addAcceptedContainer( syntax::Token keyword, syntax::Token /*name*/ ) override
+  {
+    mRefuse( keyword, "a container the target takes" );
+  }
+
+  void setCpu( syntax::Token keyword, syntax::Token /*name*/ ) override
+  {
+    mRefuse( keyword, "the processor" );
+  }
+
+  void setIntent( syntax::Token name ) override
+  {
+    mRefuse( name, "an intent" );
+  }
+
+  void setFrames( syntax::Token name ) override
+  {
+    mRefuse( name, "how frames are held" );
+  }
+
+  void setStorageUnits( syntax::Token keyword, syntax::Token /*name*/ ) override
+  {
+    mRefuse( keyword, "storage" );
+  }
+
+  void setUnitCount( syntax::Token keyword, syntax::ExpressionPtr /*value*/ ) override
+  {
+    mRefuse( keyword, "storage" );
+  }
+
+  void setUnitSize( syntax::Token keyword, syntax::ExpressionPtr /*value*/ ) override
+  {
+    mRefuse( keyword, "storage" );
+  }
+
+  void beginPanes( syntax::Token keyword, syntax::Token /*window*/, std::optional<syntax::Token> /*state*/ ) override
+  {
+    mRefuse( keyword, "panes" );
+  }
+
+  void addPane( syntax::Token name, syntax::ExpressionPtr /*count*/ ) override
+  {
+    mRefuse( name, "panes" );
+  }
+
+  void addUnitSet( syntax::Token keyword,
+                   syntax::Token /*name*/,
+                   syntax::ExpressionPtr /*count*/,
+                   std::optional<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> /*linear*/ ) override
+  {
+    mRefuse( keyword, "a unit set" );
+  }
+
+  void addWindow( syntax::Token keyword,
+                  syntax::Token /*name*/,
+                  std::vector<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> /*ranges*/,
+                  std::vector<syntax::Token> /*states*/ ) override
+  {
+    mRefuse( keyword, "a window" );
+  }
+
+  void addRegion( syntax::Token keyword,
+                  std::optional<syntax::Token> /*name*/,
+                  syntax::ExpressionPtr /*begin*/,
+                  syntax::ExpressionPtr /*end*/,
+                  syntax::Token /*property*/ ) override
+  {
+    mRefuse( keyword, "a region" );
+  }
+
+  void addHolder( syntax::Token keyword, syntax::Token /*name*/ ) override
+  {
+    mRefuse( keyword, "a holder" );
+  }
+
+  void
+  applyTransform( syntax::Token transform, syntax::Token /*module*/, std::vector<syntax::Token> /*section*/ ) override
+  {
+    mRefuse( transform, "a transform" );
+  }
+
+private:
+  Refuse mRefuse;
+  TakeRegister mTakeRegister;
+  TakeConstant mTakeConstant;
+};
 
 /// Reads one document and everything it includes, in document order, and
 /// resolves what the text named once the last include has returned.
@@ -65,6 +300,10 @@ public:
   }
 
   void readDocument( std::filesystem::path const& document, std::optional<syntax::Token> from );
+
+  /// What the `diagnostics` blocks said, put into the policy once the document
+  /// has been read: no finding raised while reading it is governed by them.
+  void applySeverities();
 
   /// Turns what every `phase`, `resident` and `entry` said into the PhaseGraph
   /// and each Module's Residency. Runs once, after the whole document: a block
@@ -85,33 +324,40 @@ public:
   void declareGroup( syntax::Token name ) override;
   void groupMember( syntax::Token group, syntax::Token member ) override;
   void setSeverity( syntax::Token code, diag::SeverityOverride action ) override;
-  void addConstant( syntax::Token name, syntax::Token value ) override;
+  void addConstant( syntax::Token name, std::optional<syntax::Token> sign, syntax::Token value ) override;
   void setContainer( syntax::Token name, std::optional<syntax::Token> board ) override;
+  void setCompress( syntax::Token name, syntax::Token keyword, syntax::Token format ) override;
+  void addUncompressed( syntax::Token module ) override;
   void setCartridgeField( syntax::Token block, syntax::Token field, syntax::Token value ) override;
   void addAcceptedContainer( syntax::Token keyword, syntax::Token name ) override;
   void setCpu( syntax::Token keyword, syntax::Token name ) override;
   void setIntent( syntax::Token name ) override;
   void setFrames( syntax::Token name ) override;
   void includeDocument( syntax::Token path ) override;
+  void chooseDocuments( syntax::Token keyword, std::vector<syntax::Token> paths ) override;
   void declarePhase( syntax::Token name ) override;
   void phaseNeeds( syntax::Token phase, syntax::Token module ) override;
   void phaseLeadsTo( syntax::Token phase, syntax::Token next ) override;
-  void phaseBase( syntax::Token phase, syntax::Token window, syntax::Token state ) override;
-  void groupBase( syntax::Token group, syntax::Token window, syntax::Token state ) override;
+  void phaseWithout( syntax::Token phase, syntax::Token module ) override;
+  void phaseFinal( syntax::Token phase, syntax::Token keyword ) override;
   void addResident( syntax::Token module ) override;
+  void loadNeeds( syntax::Token keyword, syntax::Token module ) override;
+  void loadInit( syntax::Token keyword, std::vector<syntax::Token> label ) override;
   void applyTransform( syntax::Token transform, syntax::Token module, std::vector<syntax::Token> section ) override;
   void setEntry( syntax::Token phase ) override;
   void setStorageUnits( syntax::Token keyword, syntax::Token name ) override;
   void setUnitCount( syntax::Token keyword, syntax::ExpressionPtr value ) override;
   void setUnitSize( syntax::Token keyword, syntax::ExpressionPtr value ) override;
-  void addUnitSet( syntax::Token keyword, syntax::Token name, syntax::ExpressionPtr count ) override;
+  void addUnitSet( syntax::Token keyword,
+                   syntax::Token name,
+                   syntax::ExpressionPtr count,
+                   std::optional<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> linear ) override;
   void beginPanes( syntax::Token keyword, syntax::Token window, std::optional<syntax::Token> state ) override;
   void addPane( syntax::Token name, syntax::ExpressionPtr count ) override;
   void addWindow( syntax::Token keyword,
                   syntax::Token name,
                   std::vector<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> ranges,
-                  std::vector<syntax::Token> states,
-                  std::optional<syntax::Token> base ) override;
+                  std::vector<syntax::Token> states ) override;
   void addRegion( syntax::Token keyword,
                   std::optional<syntax::Token> name,
                   syntax::ExpressionPtr begin,
@@ -121,22 +367,58 @@ public:
                     syntax::Token name,
                     syntax::ExpressionPtr address,
                     syntax::ExpressionPtr width ) override;
+  void addHolder( syntax::Token keyword, syntax::Token name ) override;
   void phaseEntry( syntax::Token phase, std::vector<syntax::Token> label ) override;
 
   /// What only the whole document settles about the Target: what every
-  /// Window shows and which is its base, whose names may be sets declared
-  /// later; the units storage is and what one holds; the pools the Regions
-  /// leave; and the Module whose Symbols are the named Regions, the unit sets
-  /// and the Windows. After resolvePhases, since that Module is present in
-  /// every Phase.
+  /// Window shows, whose names may be sets declared later; the units storage is and what one holds; the pools the
+  /// Regions leave; and the Module whose Symbols are the named Regions, the unit sets and the Windows. After
+  /// resolvePhases, since that Module is present in every Phase.
   void resolveTarget();
   void addConstantModule();
+
+  /// What only the whole document settles about a `choose` block: that the
+  /// program is a `.xex` without storage, and that no register of a later
+  /// Choice stands where the first lets a Section stand. After resolveTarget,
+  /// whose pools the second is read against.
+  void checkChoices() const;
+
+  /// The Module a `.xex` built from a `choose` block chooses with and changes
+  /// its bytes with while it loads — see
+  /// docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+  void addChooseModule();
   void checkContainer() const;
   void checkCartridge();
   void checkDiskette();
 
+  /// The Module a `.xex` without storage decodes with while it loads, where a
+  /// `transform` asks for a format: each format's decoder, read from the
+  /// library by its name and made to read memory, and the glue the loader
+  /// calls — see docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+  void addLoadModule();
+
+  /// Whether the document declared a Module, by a path or by a generator.
+  [[nodiscard]] bool declaresModules() const
+  {
+    return !mModuleSites.empty();
+  }
+
   [[nodiscard]] Project take() &&
   {
+    for ( GroupText const& group : mGroupTexts )
+    {
+      ProjectGroup written{ .name = std::string{ mSources->textOf( group.name.span() ) }, .members = {} };
+      for ( ModuleIndex const module : group.modules )
+      {
+        written.members.push_back( mProject.modules[module.value].name );
+      }
+      for ( syntax::Token const& member : group.members )
+      {
+        written.members.emplace_back( mSources->textOf( member.span() ) );
+      }
+      mProject.groups.push_back( std::move( written ) );
+    }
+    mProject.library = mLibrary.generic_string();
     return std::move( mProject );
   }
 
@@ -157,24 +439,14 @@ private:
   };
 
   /// What one `phase` block said — or several with one name, which sum.
-  /// `base WINDOW = STATE` as written, in a Phase or a group.
-  struct BaseText
-  {
-    syntax::Token window;
-    syntax::Token state;
-  };
-
   struct PhaseText
   {
     syntax::Token name;
     std::vector<syntax::Token> needs;
     std::vector<syntax::Token> then;
+    std::vector<syntax::Token> without;
     std::optional<DottedText> entry;
-    std::vector<BaseText> bases;
-
-    /// What the groups the Phase needs said, gathered once the lists are
-    /// resolved, and settled against the Windows once those are.
-    std::vector<BaseText> inherited;
+    std::optional<syntax::Token> final;
   };
 
   [[nodiscard]] DottedText dottedTextOf( std::vector<syntax::Token> const& path ) const;
@@ -207,13 +479,7 @@ private:
     syntax::Token name;
     std::vector<ModuleIndex> modules;
     std::vector<syntax::Token> members;
-    std::vector<BaseText> bases;
   };
-
-  /// The bases every group a name reaches gave, a group's own and its
-  /// members' through any depth, added to `into`; a cycle has been reported
-  /// where the lists were flattened and is not followed here.
-  void gatherBases( syntax::Token name, std::vector<BaseText>& into, std::vector<std::size_t>& walking ) const;
 
   /// The text of the group with this name, created on first sight.
   GroupText& groupTextOf( syntax::Token name );
@@ -247,6 +513,17 @@ private:
   /// to a number here never will.
   [[nodiscard]] std::optional<std::int64_t> valueOf( syntax::Expression const& node ) const;
 
+  /// What a `register` line declares, or nothing where it was reported.
+  [[nodiscard]] std::optional<AddressRange> registerRange( syntax::Expression const& address,
+                                                           syntax::Expression const* width ) const;
+
+  /// One document of a `choose` block, read for its values: the first is
+  /// declared into the Project as `include` would, the others only kept.
+  void readChoice( syntax::Token path, bool first );
+
+  /// A name one Choice declares and another does not.
+  void checkChoiceNames() const;
+
   void report( diag::Diagnostic value ) const
   {
     mSink->add( std::move( value ) );
@@ -264,6 +541,10 @@ private:
   /// and the directory a relative path resolves against.
   std::vector<std::filesystem::path> mOpen;
 
+  /// Every document read so far, by its resolved path. A second `include` of
+  /// one adds nothing, which is what lets two documents share a third.
+  std::unordered_set<std::string> mRead;
+
   /// Every token stream stays alive for as long as the load runs: a Token is a
   /// position, and an included document's tokens are read while its parent's
   /// parser is still on the stack.
@@ -271,9 +552,17 @@ private:
 
   std::unordered_map<std::string, SeveritySite> mSeveritySet;
 
+  /// What the `diagnostics` blocks set, in the order written, held until the
+  /// document has been read.
+  std::vector<std::pair<diag::DiagnosticId, diag::SeverityOverride>> mSeverities;
+
   /// Where a Project constant was first given a value, so the second one can
   /// point at it.
   std::unordered_map<std::string, diag::SourceSpan> mConstantSet;
+
+  /// The fields of the `cartridge` blocks given a value, each once.
+  std::unordered_set<std::string> mCartridgeFields;
+
   std::unordered_map<std::string, diag::SourceSpan> mModuleNames;
 
   /// Where each Module was named, parallel to the Project's list: the place a
@@ -285,6 +574,8 @@ private:
   std::vector<PhaseText> mPhaseTexts;
   std::unordered_map<std::string, std::size_t> mPhaseByName;
   std::vector<syntax::Token> mResidentTexts;
+  std::vector<syntax::Token> mUncompressedTexts;
+  std::vector<syntax::Token> mLoadTexts;
 
   std::vector<GroupText> mGroupTexts;
   std::unordered_map<std::string, std::size_t> mGroupByName;
@@ -328,7 +619,6 @@ private:
   struct WindowText
   {
     std::vector<syntax::Token> states;
-    std::optional<syntax::Token> base;
   };
 
   std::vector<WindowText> mWindowTexts;
@@ -374,6 +664,18 @@ private:
   /// Takes a name for the Target, reporting the second of one name; false
   /// when it was taken already.
   bool claimTargetName( syntax::Token name, std::string_view kind );
+
+  /// Takes a Module's name, reporting the second Module of one; false when it
+  /// was taken already.
+  bool claimModuleName( std::string const& name, diag::SourceSpan site );
+
+  /// Adds a Module whose name was claimed at `site`, into `group` where one
+  /// is named: the three records of a Module's name kept in step.
+  void registerModule( ProjectModule module, diag::SourceSpan site, std::optional<syntax::Token> group );
+
+  /// Takes a field of the cartridge's header, reporting the second value of
+  /// one; false when it was given already.
+  bool claimCartridgeField( syntax::Token field, std::string const& which );
 
   /// Adds one Region, named or not, once its numbers are known to be a range.
   void declareRegion( syntax::Token keyword,
@@ -458,7 +760,10 @@ void Loader::readDocument( std::filesystem::path const& document, std::optional<
     return;
   }
 
-  auto const isOpen = [&found]( std::filesystem::path const& open ) { return open == found->first; };
+  // A file is one document however it was reached, so it is known by its
+  // resolved path and not by the text of the `include` that named it.
+  std::filesystem::path const identity = found->first.lexically_normal();
+  auto const isOpen = [&identity]( std::filesystem::path const& open ) { return open.lexically_normal() == identity; };
   if ( std::ranges::any_of( mOpen, isOpen ) )
   {
     diag::Diagnostic cycle = diag::diagnostic( diag::DiagnosticId::INCLUDE_CYCLE );
@@ -467,6 +772,16 @@ void Loader::readDocument( std::filesystem::path const& document, std::optional<
       cycle = std::move( cycle ).at( from->location, from->length );
     }
     report( std::move( cycle ) );
+    return;
+  }
+
+  // Read once, and a second `include` of it is already satisfied. That is
+  // safe because a document means the same wherever it is included: blocks
+  // sum, and in no order that matters, and every path in it resolves against
+  // the document itself. Reading it again would only declare all of it twice
+  // — see docs/spec/project-file.md#include.
+  if ( !mRead.insert( identity.generic_string() ).second )
+  {
     return;
   }
 
@@ -494,14 +809,8 @@ void Loader::addModule( syntax::Token path, std::optional<syntax::Token> alias, 
   std::string name = alias.has_value() ? std::string{ mSources->textOf( alias->span() ) } : resolved.stem().string();
   diag::SourceSpan const site = alias.has_value() ? alias->span() : path.span();
 
-  auto const [existing, added] = mModuleNames.emplace( name, site );
-  if ( !added )
+  if ( !claimModuleName( name, site ) )
   {
-    // The message says naming Modules is the Project file's business, and here
-    // there is one to say it to: `as` is what the author writes.
-    report( diag::diagnostic( diag::DiagnosticId::MODULE_NAME_COLLISION )
-                .at( site.begin, site.length )
-                .arg( "module", name ) );
     return;
   }
 
@@ -514,15 +823,38 @@ void Loader::addModule( syntax::Token path, std::optional<syntax::Token> alias, 
   }
 
   diag::FileId const file = mSources->addFile( resolved.generic_string(), std::move( found->second ) );
+  registerModule(
+      ProjectModule{ .name = std::move( name ), .file = file, .residency = {}, .path = *relative }, site, group );
+}
+
+void Loader::registerModule( ProjectModule module, diag::SourceSpan site, std::optional<syntax::Token> group )
+{
   ModuleIndex const index{ static_cast<std::uint32_t>( mProject.modules.size() ) };
-  mModuleByName.emplace( name, index );
+  mModuleByName.emplace( module.name, index );
   mModuleSites.push_back( site );
-  mProject.modules.push_back(
-      ProjectModule{ .name = std::move( name ), .file = file, .residency = {}, .path = *relative } );
+  mProject.modules.push_back( std::move( module ) );
   if ( group.has_value() )
   {
     groupTextOf( *group ).modules.push_back( index );
   }
+}
+
+bool Loader::claimModuleName( std::string const& name, diag::SourceSpan site )
+{
+  auto const [existing, added] = mModuleNames.emplace( name, site );
+  if ( added )
+  {
+    return true;
+  }
+  // The message proposes `as`, since naming Modules is the Project file's
+  // business and here there is one to say it to. The note is the first entry.
+  report( diag::diagnostic( diag::DiagnosticId::MODULE_NAME_COLLISION )
+              .at( site.begin, site.length )
+              .arg( "module", name )
+              .note( diag::diagnostic( diag::DiagnosticId::MODULE_DECLARED_HERE )
+                         .at( existing->second.begin, existing->second.length )
+                         .arg( "name", name ) ) );
+  return false;
 }
 
 std::optional<std::string> Loader::read( std::string const& path, std::string& resolved ) const
@@ -588,12 +920,8 @@ void Loader::addGeneratedModule( syntax::Token generator,
   diag::SourceSpan const site = alias.has_value() ? alias->span() : generator.span();
   call.module = name;
 
-  auto const [existing, added] = mModuleNames.emplace( name, site );
-  if ( !added )
+  if ( !claimModuleName( name, site ) )
   {
-    report( diag::diagnostic( diag::DiagnosticId::MODULE_NAME_COLLISION )
-                .at( site.begin, site.length )
-                .arg( "module", name ) );
     return;
   }
 
@@ -616,15 +944,9 @@ void Loader::addGeneratedModule( syntax::Token generator,
   // stands, so the diagnostic ordering contract needs no exception, and it is
   // assembled in the same wave as every other.
   diag::FileId const written = mSources->addFile( "<generated>/" + name + ".asm", emitModule( *description ) );
-  ModuleIndex const index{ static_cast<std::uint32_t>( mProject.modules.size() ) };
-  mModuleByName.emplace( name, index );
-  mModuleSites.push_back( site );
-  mProject.modules.push_back(
-      ProjectModule{ .name = std::move( name ), .file = written, .residency = {}, .fromGenerator = true } );
-  if ( group.has_value() )
-  {
-    groupTextOf( *group ).modules.push_back( index );
-  }
+  registerModule( ProjectModule{ .name = std::move( name ), .file = written, .residency = {}, .fromGenerator = true },
+                  site,
+                  group );
 }
 
 Loader::GroupText& Loader::groupTextOf( syntax::Token name )
@@ -635,7 +957,7 @@ Loader::GroupText& Loader::groupTextOf( syntax::Token name )
       mGroupByName.emplace( std::string{ mSources->textOf( name.span() ) }, mGroupTexts.size() );
   if ( added )
   {
-    mGroupTexts.push_back( GroupText{ .name = name, .modules = {}, .members = {}, .bases = {} } );
+    mGroupTexts.push_back( GroupText{ .name = name, .modules = {}, .members = {} } );
   }
   return mGroupTexts[entry->second];
 }
@@ -679,10 +1001,26 @@ void Loader::setSeverity( syntax::Token code, diag::SeverityOverride action )
     return;
   }
 
-  mPolicy->set( *id, action );
+  mSeverities.emplace_back( *id, action );
 }
 
-void Loader::addConstant( syntax::Token name, syntax::Token value )
+void Loader::applySeverities()
+{
+  // Applied once the whole document is read, so that where the block stands
+  // makes no difference: a generator reports while its entry is read, and a
+  // block above the entry would otherwise reach what one below it cannot. What
+  // the policy holds already the command line set, and the block never
+  // overrides the command line.
+  for ( auto const& [id, action] : mSeverities )
+  {
+    if ( !mPolicy->overrides( id ) )
+    {
+      mPolicy->set( id, action );
+    }
+  }
+}
+
+void Loader::addConstant( syntax::Token name, std::optional<syntax::Token> sign, syntax::Token value )
 {
   std::string text{ mSources->textOf( name.span() ) };
   auto const [existing, added] = mConstantSet.emplace( text, name.span() );
@@ -701,7 +1039,13 @@ void Loader::addConstant( syntax::Token name, syntax::Token value )
     return;
   }
 
-  mProject.constants.push_back( ProjectConstant{ .nameSpan = name.span(), .valueSpan = value.span() } );
+  std::optional<diag::SourceSpan> signSpan;
+  if ( sign.has_value() )
+  {
+    signSpan = sign->span();
+  }
+  mProject.constants.push_back(
+      ProjectConstant{ .nameSpan = name.span(), .signSpan = signSpan, .valueSpan = value.span() } );
 }
 
 /// The four geometries a Lynx board is wired for, as a finding lists them.
@@ -724,18 +1068,17 @@ std::string knownLynxBoards()
 /// Every container the tool writes, as a finding lists them.
 std::string knownContainers()
 {
-  return fmt::format( "`{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}` and `{}`",
-                      nameOf( Container::RAW_IMAGE ),
-                      nameOf( Container::XEX ),
-                      nameOf( Container::ATR ),
-                      nameOf( Container::CAR ),
-                      nameOf( Container::BS93 ),
-                      nameOf( Container::LNX ),
-                      nameOf( Container::LYX ),
-                      nameOf( Container::PRG ),
-                      nameOf( Container::D64 ),
-                      nameOf( Container::D80 ),
-                      nameOf( Container::D82 ) );
+  std::span<Container const> const all = containers();
+  std::string known;
+  for ( std::size_t index = 0; index < all.size(); ++index )
+  {
+    if ( index > 0 )
+    {
+      known += index + 1 == all.size() ? " and " : ", ";
+    }
+    known += fmt::format( "`{}`", nameOf( all[index] ) );
+  }
+  return known;
 }
 
 void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> board )
@@ -756,10 +1099,17 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
   // four page sizes, which `.lnx` and `.lyx` name the same way.
   bool const lynx = *named == Container::LNX || *named == Container::LYX;
   bool const cartridge = *named == Container::CAR || lynx;
-  std::optional<std::string> spelled;
+  std::optional<Cartridge> carBoard;
+  std::optional<LynxBoard> lynxBoard;
   if ( board.has_value() )
   {
-    spelled = pathTextOf( *board );
+    std::optional<std::string> const spelled = pathTextOf( *board );
+    if ( !spelled.has_value() )
+    {
+      // Reported where it was read. A cartridge Container is set together
+      // with its board or not at all, so that every writer may take one.
+      return;
+    }
     if ( !cartridge )
     {
       report( diag::diagnostic( diag::DiagnosticId::CONTAINER_TAKES_NO_FORMAT )
@@ -767,9 +1117,15 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
                   .arg( "name", text ) );
       return;
     }
-    bool const known = lynx ? lynxBoardNamed( spelled.value_or( "" ) ).has_value()
-                            : cartridgeNamed( spelled.value_or( "" ) ).has_value();
-    if ( spelled.has_value() && !known )
+    if ( lynx )
+    {
+      lynxBoard = lynxBoardNamed( *spelled );
+    }
+    else
+    {
+      carBoard = cartridgeNamed( *spelled );
+    }
+    if ( !lynxBoard.has_value() && !carBoard.has_value() )
     {
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_CARTRIDGE )
                   .at( board->location, board->length )
@@ -782,6 +1138,8 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
   {
     report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_WITHOUT_FORMAT )
                 .at( name.location, name.length )
+                .arg( "name", text )
+                .arg( "example", std::string{ lynx ? lynxBoards().front().name : "8k" } )
                 .arg( "known", lynx ? knownLynxBoards() : knownCartridges() ) );
     return;
   }
@@ -799,11 +1157,52 @@ void Loader::setContainer( syntax::Token name, std::optional<syntax::Token> boar
 
   mProject.container = *named;
   mProject.containerSite = name.span();
-  mProject.cartridge = std::move( spelled );
+  mProject.cartridge = carBoard;
+  mProject.lynxBoard = lynxBoard;
   if ( board.has_value() )
   {
     mProject.cartridgeSite = board->span();
   }
+}
+
+void Loader::setCompress( syntax::Token name, syntax::Token keyword, syntax::Token format )
+{
+  // Only a `.xex`'s loader calls anything between the segments it writes, and
+  // a decode is such a call.
+  std::string const container{ mSources->textOf( name.span() ) };
+  if ( containerNamed( container ) != Container::XEX )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::COMPRESS_NOT_XEX )
+                .at( keyword.location, keyword.length )
+                .arg( "name", container ) );
+    return;
+  }
+  // `copy` is a format and saves nothing, so it is no compression.
+  std::string const named{ mSources->textOf( format.span() ) };
+  if ( named == "copy" || formatNamed( named ) == nullptr )
+  {
+    std::string known;
+    for ( Format const& one : formats() )
+    {
+      if ( one.name == "copy" )
+      {
+        continue;
+      }
+      known += known.empty() ? "" : " and ";
+      known += fmt::format( "`{}`", one.name );
+    }
+    report( diag::diagnostic( diag::DiagnosticId::COMPRESS_UNKNOWN_FORMAT )
+                .at( format.location, format.length )
+                .arg( "name", named )
+                .arg( "known", known ) );
+    return;
+  }
+  mProject.compress = named;
+}
+
+void Loader::addUncompressed( syntax::Token module )
+{
+  mUncompressedTexts.push_back( module );
 }
 
 void Loader::setCartridgeField( syntax::Token block, syntax::Token field, syntax::Token value )
@@ -846,15 +1245,11 @@ void Loader::setCartridgeField( syntax::Token block, syntax::Token field, syntax
                   .arg( "given", static_cast<std::int64_t>( text->size() ) ) );
       return;
     }
-    std::string& into = which == "name" ? mProject.cartridgeName : mProject.cartridgeMaker;
-    if ( !into.empty() )
+    if ( !claimCartridgeField( field, which ) )
     {
-      report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_REPEATED )
-                  .at( field.location, field.length )
-                  .arg( "field", which ) );
       return;
     }
-    into = *text;
+    ( which == "name" ? mProject.lynxHeader.name : mProject.lynxHeader.maker ) = *text;
     return;
   }
 
@@ -874,13 +1269,31 @@ void Loader::setCartridgeField( syntax::Token block, syntax::Token field, syntax
                   .arg( "name", word ) );
       return;
     }
-    mProject.cartridgeRotation = *turned;
+    if ( !claimCartridgeField( field, which ) )
+    {
+      return;
+    }
+    mProject.lynxHeader.rotation = *turned;
     return;
   }
 
   report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_UNKNOWN )
               .at( field.location, field.length )
               .arg( "field", which ) );
+}
+
+bool Loader::claimCartridgeField( syntax::Token field, std::string const& which )
+{
+  // Each field is a value and not a set, across every `cartridge` block of the
+  // Project, whatever the first one said: an empty name is a name given.
+  if ( mCartridgeFields.insert( which ).second )
+  {
+    return true;
+  }
+  report( diag::diagnostic( diag::DiagnosticId::CARTRIDGE_FIELD_REPEATED )
+              .at( field.location, field.length )
+              .arg( "field", which ) );
+  return false;
 }
 
 void Loader::addAcceptedContainer( syntax::Token keyword, syntax::Token name )
@@ -998,6 +1411,15 @@ void Loader::setFrames( syntax::Token name )
 void Loader::checkContainer() const
 {
   Target const& target = mProject.target;
+  // The load is the `.xex`'s: the DOS writes its segments and runs its
+  // `INITAD`s, which no other Container has — see
+  // docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+  if ( mProject.loadSite.has_value() && mProject.container != Container::XEX )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::LOAD_NOT_XEX )
+                .at( mProject.loadSite->begin, mProject.loadSite->length )
+                .arg( "container", std::string{ nameOf( mProject.container ) } ) );
+  }
   // A Project that named none is the raw image, which nobody chose and no
   // machine refuses; a Target that named none is a stand-in and claims
   // nothing — see docs/decisions/0179-a-container-is-chosen-in-the-project.md.
@@ -1074,7 +1496,7 @@ void Loader::checkCartridge()
   // documents, each authoritative about its half, and neither derived from the
   // other — see
   // docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
-  if ( !mProject.cartridge.has_value() || !mProject.cartridgeSite.has_value() )
+  if ( !mProject.cartridgeSite.has_value() )
   {
     return;
   }
@@ -1083,7 +1505,7 @@ void Loader::checkCartridge()
   // driver that reached a unit of the wrong width would read the wrong bytes with
   // nothing to say so. The two documents are checked against each other, as the
   // Atari's board is against its Variant's memory.
-  if ( std::optional<LynxBoard> const lynx = lynxBoardNamed( *mProject.cartridge ); lynx.has_value() )
+  if ( std::optional<LynxBoard> const& lynx = mProject.lynxBoard; lynx.has_value() )
   {
     Target const& target = mProject.target;
     if ( target.unitCount != 0 && ( target.unitSize != lynx->pageSize || target.unitCount != LYNX_PAGES - 1 ) )
@@ -1098,12 +1520,10 @@ void Loader::checkCartridge()
     return;
   }
 
-  std::optional<Cartridge> const board = cartridgeNamed( *mProject.cartridge );
-  if ( !board.has_value() )
+  if ( mProject.cartridge.has_value() )
   {
-    return;
+    checkCartridgeAgainstTarget( *mProject.cartridge, mProject.target, *mProject.cartridgeSite, *mSink );
   }
-  checkCartridgeAgainstTarget( *board, mProject.target, *mProject.cartridgeSite, *mSink );
 }
 
 void Loader::includeDocument( syntax::Token path )
@@ -1115,6 +1535,208 @@ void Loader::includeDocument( syntax::Token path )
   }
 }
 
+void Loader::chooseDocuments( syntax::Token keyword, std::vector<syntax::Token> paths )
+{
+  if ( mProject.chooseSite.has_value() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CHOOSE_TWICE )
+                .at( keyword.location, keyword.length )
+                .note( diag::diagnostic( diag::DiagnosticId::PREVIOUS_CHOOSE )
+                           .at( mProject.chooseSite->begin, mProject.chooseSite->length ) ) );
+    return;
+  }
+  mProject.chooseSite = keyword.span();
+  if ( paths.size() < 2 )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CHOOSE_TOO_FEW )
+                .at( keyword.location, keyword.length )
+                .arg( "count", static_cast<std::int64_t>( paths.size() ) ) );
+  }
+  for ( std::size_t index = 0; index < paths.size(); ++index )
+  {
+    readChoice( paths[index], index == 0 );
+  }
+  checkChoiceNames();
+}
+
+void Loader::readChoice( syntax::Token path, bool first )
+{
+  std::optional<std::string> const relative = pathTextOf( path );
+  if ( !relative.has_value() )
+  {
+    return;
+  }
+  std::optional<std::pair<std::filesystem::path, std::string>> found = readNamed( *relative );
+  if ( !found.has_value() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CANNOT_READ_FILE )
+                .at( path.location, path.length )
+                .arg( "path", resolve( *relative ).generic_string() ) );
+    return;
+  }
+  diag::FileId const file = mSources->addFile( found->first.generic_string(), std::move( found->second ) );
+  mTokens.push_back( syntax::tokenize( *mSources, file, *mSink ) );
+
+  // The first is the program the build is, so what it declares is declared as
+  // `include` would declare it; every one is kept, for the names to be held
+  // against each other and for a later build to take its values.
+  Choice choice{ .document = *relative, .site = path.span(), .registers = {}, .constants = {} };
+  ChoiceReader reader{
+    [this, &choice]( syntax::Token where, std::string_view what )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::CHOICE_DECLARES )
+                  .at( where.location, where.length )
+                  .arg( "document", choice.document )
+                  .arg( "what", std::string{ what } ) );
+    },
+    [this, &choice, first](
+        syntax::Token keyword, syntax::Token name, syntax::ExpressionPtr address, syntax::ExpressionPtr width )
+    {
+      std::optional<AddressRange> const range = registerRange( *address, width.get() );
+      if ( !range.has_value() )
+      {
+        return;
+      }
+      choice.registers.push_back( ChoiceRegister{
+          .name = std::string{ mSources->textOf( name.span() ) }, .range = *range, .span = name.span() } );
+      if ( first )
+      {
+        declareRegion( keyword, name, *range, RegionProperty::REGISTER );
+      }
+    },
+    [this, &choice, first]( syntax::Token name, std::optional<syntax::Token> sign, syntax::Token value )
+    {
+      std::optional<diag::SourceSpan> signSpan;
+      if ( sign.has_value() )
+      {
+        signSpan = sign->span();
+      }
+      choice.constants.push_back(
+          ProjectConstant{ .nameSpan = name.span(), .signSpan = signSpan, .valueSpan = value.span() } );
+      if ( first )
+      {
+        addConstant( name, sign, value );
+      }
+    }
+  };
+  syntax::TokenCursor cursor{ mTokens.back(), true };
+  syntax::ProjectParser parser{ *mSources, cursor, reader, *mSink };
+  parser.parseDocument();
+  mProject.choices.push_back( std::move( choice ) );
+}
+
+void Loader::checkChoiceNames() const
+{
+  // By kind, so that a register in one and a constant of its name in another
+  // are two programs as much as a name missing from one is.
+  using Names = std::vector<std::pair<std::string, diag::SourceSpan>>;
+  std::function<Names( Choice const& )> const registersOf = []( Choice const& choice )
+  {
+    Names names;
+    for ( ChoiceRegister const& one : choice.registers )
+    {
+      names.emplace_back( one.name, one.span );
+    }
+    return names;
+  };
+  std::function<Names( Choice const& )> const constantsOf = [this]( Choice const& choice )
+  {
+    Names names;
+    for ( ProjectConstant const& one : choice.constants )
+    {
+      names.emplace_back( std::string{ mSources->textOf( one.nameSpan ) }, one.nameSpan );
+    }
+    return names;
+  };
+  std::vector<Choice> const& choices = mProject.choices;
+  for ( std::function<Names( Choice const& )> const* const namesOf : { &registersOf, &constantsOf } )
+  {
+    for ( Choice const& one : choices )
+    {
+      for ( Choice const& other : choices )
+      {
+        if ( &one == &other )
+        {
+          continue;
+        }
+        Names const theirs = ( *namesOf )( other );
+        for ( auto const& [name, span] : ( *namesOf )( one ) )
+        {
+          if ( std::ranges::none_of( theirs, [&name]( auto const& entry ) { return entry.first == name; } ) )
+          {
+            report( diag::diagnostic( diag::DiagnosticId::CHOICE_NAME_MISSING )
+                        .at( span.begin, span.length )
+                        .arg( "name", name )
+                        .arg( "document", one.document )
+                        .arg( "other", other.document ) );
+          }
+        }
+      }
+    }
+  }
+}
+
+void Loader::checkChoices() const
+{
+  if ( !mProject.chooseSite.has_value() )
+  {
+    return;
+  }
+  diag::SourceSpan const site = *mProject.chooseSite;
+  if ( mProject.container != Container::XEX )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CHOOSE_NEEDS_XEX )
+                .at( site.begin, site.length )
+                .arg( "what", fmt::format( "is written as `{}`", nameOf( mProject.container ) ) ) );
+  }
+  else if ( mProject.target.hasStorage() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::CHOOSE_NEEDS_XEX )
+                .at( site.begin, site.length )
+                .arg( "what", std::string{ "has storage" } ) );
+  }
+
+  // Place keeps a Section off the first Choice's registers alone, so one of a
+  // later Choice's has to stand where no Section may.
+  Pools const& pools = mProject.target.pools;
+  for ( std::size_t index = 1; index < mProject.choices.size(); ++index )
+  {
+    Choice const& choice = mProject.choices[index];
+    for ( ChoiceRegister const& one : choice.registers )
+    {
+      for ( std::vector<AddressRange> const* const pool : { &pools.zeroPage, &pools.general } )
+      {
+        if ( std::ranges::any_of( *pool,
+                                  [&one]( AddressRange const& range )
+                                  { return one.range.begin < range.end && range.begin < one.range.end; } ) )
+        {
+          report( diag::diagnostic( diag::DiagnosticId::CHOICE_REGISTER_IN_POOL )
+                      .at( one.span.begin, one.span.length )
+                      .arg( "name", one.name )
+                      .arg( "address", static_cast<std::int64_t>( one.range.begin ) )
+                      .arg( "document", choice.document ) );
+          break;
+        }
+      }
+    }
+  }
+}
+
+void Loader::addChooseModule()
+{
+  if ( mProject.choices.size() < 2 || mProject.container != Container::XEX || mProject.target.hasStorage() )
+  {
+    return;
+  }
+  diag::FileId const file = mSources->addFile( "<nga>/choose.asm", chooseModuleSource( mProject.choices.size() ) );
+  mProject.chooseModule = ModuleIndex{ static_cast<std::uint32_t>( mProject.modules.size() ) };
+  mProject.modules.push_back( ProjectModule{ .name = "nga.choose",
+                                             .file = file,
+                                             .residency = Residency{ mProject.phases.phases.size() },
+                                             .generated = Generated::NONE,
+                                             .outsideWindow = true } );
+}
+
 Loader::PhaseText& Loader::phaseTextOf( syntax::Token name )
 {
   // Two blocks with one name sum, exactly as two `modules` blocks do: that is
@@ -1124,8 +1746,8 @@ Loader::PhaseText& Loader::phaseTextOf( syntax::Token name )
       mPhaseByName.emplace( std::string{ mSources->textOf( name.span() ) }, mPhaseTexts.size() );
   if ( added )
   {
-    mPhaseTexts.push_back(
-        PhaseText{ .name = name, .needs = {}, .then = {}, .entry = std::nullopt, .bases = {}, .inherited = {} } );
+    mPhaseTexts.push_back( PhaseText{
+        .name = name, .needs = {}, .then = {}, .without = {}, .entry = std::nullopt, .final = std::nullopt } );
   }
   return mPhaseTexts[entry->second];
 }
@@ -1145,31 +1767,14 @@ void Loader::phaseLeadsTo( syntax::Token phase, syntax::Token next )
   phaseTextOf( phase ).then.push_back( next );
 }
 
-void Loader::phaseBase( syntax::Token phase, syntax::Token window, syntax::Token state )
+void Loader::phaseWithout( syntax::Token phase, syntax::Token module )
 {
-  phaseTextOf( phase ).bases.push_back( BaseText{ .window = window, .state = state } );
+  phaseTextOf( phase ).without.push_back( module );
 }
 
-void Loader::groupBase( syntax::Token group, syntax::Token window, syntax::Token state )
+void Loader::phaseFinal( syntax::Token phase, syntax::Token keyword )
 {
-  groupTextOf( group ).bases.push_back( BaseText{ .window = window, .state = state } );
-}
-
-void Loader::gatherBases( syntax::Token name, std::vector<BaseText>& into, std::vector<std::size_t>& walking ) const
-{
-  auto const group = mGroupByName.find( std::string{ mSources->textOf( name.span() ) } );
-  if ( group == mGroupByName.end() || std::ranges::find( walking, group->second ) != walking.end() )
-  {
-    return;
-  }
-  walking.push_back( group->second );
-  GroupText const& text = mGroupTexts[group->second];
-  into.insert( into.end(), text.bases.begin(), text.bases.end() );
-  for ( syntax::Token const member : text.members )
-  {
-    gatherBases( member, into, walking );
-  }
-  walking.pop_back();
+  phaseTextOf( phase ).final = keyword;
 }
 
 Loader::DottedText Loader::dottedTextOf( std::vector<syntax::Token> const& path ) const
@@ -1193,6 +1798,25 @@ void Loader::applyTransform( syntax::Token transform, syntax::Token module, std:
   // name travels as text — see TransformRequest.
   mTransformTexts.push_back(
       TransformText{ .transform = transform, .module = module, .section = dottedTextOf( section ) } );
+}
+
+void Loader::loadNeeds( syntax::Token keyword, syntax::Token module )
+{
+  if ( !mProject.loadSite.has_value() )
+  {
+    mProject.loadSite = keyword.span();
+  }
+  mLoadTexts.push_back( module );
+}
+
+void Loader::loadInit( syntax::Token keyword, std::vector<syntax::Token> label )
+{
+  if ( !mProject.loadSite.has_value() )
+  {
+    mProject.loadSite = keyword.span();
+  }
+  DottedText text = dottedTextOf( label );
+  mProject.loadInits.push_back( LoadInit{ .name = std::move( text.name ), .span = text.span } );
 }
 
 void Loader::addResident( syntax::Token module )
@@ -1269,7 +1893,10 @@ void Loader::setStorageUnits( syntax::Token keyword, syntax::Token name )
   mStorageUnitsText = name;
 }
 
-void Loader::addUnitSet( syntax::Token keyword, syntax::Token name, syntax::ExpressionPtr count )
+void Loader::addUnitSet( syntax::Token keyword,
+                         syntax::Token name,
+                         syntax::ExpressionPtr count,
+                         std::optional<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> linear )
 {
   std::optional<std::int64_t> const value = valueOf( *count );
   if ( !value.has_value() )
@@ -1288,6 +1915,25 @@ void Loader::addUnitSet( syntax::Token keyword, syntax::Token name, syntax::Expr
                 .arg( "count", *value ) );
     return;
   }
+  // The medium's own addresses are not the CPU's, so they are bounded by
+  // what an address of the tool holds and not by the address space.
+  std::optional<AddressRange> range;
+  if ( linear.has_value() )
+  {
+    std::optional<std::int64_t> const low = valueOf( *linear->first );
+    std::optional<std::int64_t> const high = valueOf( *linear->second );
+    if ( !low.has_value() || !high.has_value() )
+    {
+      return;
+    }
+    if ( *low < 0 || *high < *low || std::cmp_greater_equal( *high, std::numeric_limits<std::uint32_t>::max() ) )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::LINEAR_NOT_A_RANGE )
+                  .at( linear->first->span.begin, linear->first->span.length ) );
+      return;
+    }
+    range = AddressRange{ .begin = static_cast<std::uint32_t>( *low ), .end = static_cast<std::uint32_t>( *high + 1 ) };
+  }
   if ( !claimTargetName( name, "unit set" ) )
   {
     return;
@@ -1295,7 +1941,8 @@ void Loader::addUnitSet( syntax::Token keyword, syntax::Token name, syntax::Expr
   mProject.target.unitSets.push_back( UnitSet{ .nameSpan = name.span(),
                                                .name = std::string{ mSources->textOf( name.span() ) },
                                                .count = static_cast<std::uint32_t>( *value ),
-                                               .site = keyword.span() } );
+                                               .site = keyword.span(),
+                                               .linear = range } );
 }
 
 void Loader::beginPanes( syntax::Token keyword, syntax::Token window, std::optional<syntax::Token> state )
@@ -1341,8 +1988,7 @@ void Loader::addPane( syntax::Token name, syntax::ExpressionPtr count )
 void Loader::addWindow( syntax::Token keyword,
                         syntax::Token name,
                         std::vector<std::pair<syntax::ExpressionPtr, syntax::ExpressionPtr>> ranges,
-                        std::vector<syntax::Token> states,
-                        std::optional<syntax::Token> base )
+                        std::vector<syntax::Token> states )
 {
   // Every range is a range, or the entry is one finding at the keyword: a
   // Window whose ranges are half right is not one the solver can use.
@@ -1371,9 +2017,8 @@ void Loader::addWindow( syntax::Token keyword,
                                              .name = std::string{ mSources->textOf( name.span() ) },
                                              .ranges = std::move( evaluated ),
                                              .states = {},
-                                             .base = std::nullopt,
                                              .site = keyword.span() } );
-  mWindowTexts.push_back( WindowText{ .states = std::move( states ), .base = base } );
+  mWindowTexts.push_back( WindowText{ .states = std::move( states ) } );
 }
 
 void Loader::declareRegion( syntax::Token keyword,
@@ -1407,23 +2052,7 @@ void Loader::addRegion( syntax::Token keyword,
                         syntax::Token property )
 {
   std::string_view const word = mSources->textOf( property.span() );
-  std::optional<RegionProperty> kind;
-  if ( word == "ram" )
-  {
-    kind = RegionProperty::RAM;
-  }
-  else if ( word == "register" )
-  {
-    kind = RegionProperty::REGISTER;
-  }
-  else if ( word == "reserved" )
-  {
-    kind = RegionProperty::RESERVED;
-  }
-  else if ( word == "rom" )
-  {
-    kind = RegionProperty::ROM;
-  }
+  std::optional<RegionProperty> const kind = regionPropertyNamed( word );
   if ( !kind.has_value() )
   {
     report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_REGION_PROPERTY )
@@ -1452,15 +2081,24 @@ void Loader::addRegion( syntax::Token keyword,
       *kind );
 }
 
-void Loader::addRegister( syntax::Token keyword,
-                          syntax::Token name,
-                          syntax::ExpressionPtr address,
-                          syntax::ExpressionPtr width )
+void Loader::addHolder( syntax::Token /*keyword*/, syntax::Token name )
 {
-  std::optional<std::int64_t> const at = valueOf( *address );
+  // Declared again by a document that includes the variant, it is the same
+  // Holder: a fact about the machine, said twice.
+  std::string text{ mSources->textOf( name.span() ) };
+  if ( !mProject.target.holderNamed( text ).has_value() )
+  {
+    mProject.target.holders.push_back( Holder{ .name = std::move( text ), .site = name.span() } );
+  }
+}
+
+std::optional<AddressRange> Loader::registerRange( syntax::Expression const& address,
+                                                   syntax::Expression const* width ) const
+{
+  std::optional<std::int64_t> const at = valueOf( address );
   if ( !at.has_value() )
   {
-    return;
+    return std::nullopt;
   }
   std::int64_t bytes = 1;
   if ( width != nullptr )
@@ -1468,29 +2106,38 @@ void Loader::addRegister( syntax::Token keyword,
     std::optional<std::int64_t> const given = valueOf( *width );
     if ( !given.has_value() )
     {
-      return;
+      return std::nullopt;
     }
     if ( *given != 1 && *given != 2 )
     {
       report( diag::diagnostic( diag::DiagnosticId::REGISTER_WIDTH )
                   .at( width->span.begin, width->span.length )
                   .arg( "width", *given ) );
-      return;
+      return std::nullopt;
     }
     bytes = *given;
   }
   if ( *at < 0 || std::cmp_greater( *at + bytes, ADDRESS_SPACE_END ) )
   {
+    // The last byte, which is the one past the end for `$FFFF, 2` as well as
+    // for an address that is past it already.
     report( diag::diagnostic( diag::DiagnosticId::REGISTER_NOT_AN_ADDRESS )
-                .at( address->span.begin, address->span.length )
-                .arg( "value", *at ) );
-    return;
+                .at( address.span.begin, address.span.length )
+                .arg( "value", *at + bytes - 1 ) );
+    return std::nullopt;
   }
-  declareRegion(
-      keyword,
-      name,
-      AddressRange{ .begin = static_cast<std::uint32_t>( *at ), .end = static_cast<std::uint32_t>( *at + bytes ) },
-      RegionProperty::REGISTER );
+  return AddressRange{ .begin = static_cast<std::uint32_t>( *at ), .end = static_cast<std::uint32_t>( *at + bytes ) };
+}
+
+void Loader::addRegister( syntax::Token keyword,
+                          syntax::Token name,
+                          syntax::ExpressionPtr address,
+                          syntax::ExpressionPtr width )
+{
+  if ( std::optional<AddressRange> const range = registerRange( *address, width.get() ); range.has_value() )
+  {
+    declareRegion( keyword, name, *range, RegionProperty::REGISTER );
+  }
 }
 
 void Loader::setUnitCount( syntax::Token keyword, syntax::ExpressionPtr value )
@@ -1594,24 +2241,6 @@ void Loader::resolveTarget()
       window.states.push_back(
           WindowState{ .nameSpan = state.span(), .name = std::string{ name }, .units = target.unitSetNamed( name ) } );
     }
-    if ( text.base.has_value() )
-    {
-      std::string_view const name = mSources->textOf( text.base->span() );
-      for ( std::uint32_t state = 0; state < window.states.size(); ++state )
-      {
-        if ( window.states[state].name == name && !window.states[state].units.has_value() )
-        {
-          window.base = state;
-        }
-      }
-      if ( !window.base.has_value() )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::WINDOW_BASE_UNKNOWN )
-                    .at( text.base->location, text.base->length )
-                    .arg( "base", std::string{ name } )
-                    .arg( "window", window.name ) );
-      }
-    }
   }
 
   for ( PaneText const& text : mPaneTexts )
@@ -1629,6 +2258,7 @@ void Loader::resolveTarget()
     Pane pane{ .nameSpan = text.name.span(),
                .name = std::string{ mSources->textOf( text.name.span() ) },
                .window = *window,
+               .windowSpan = text.window.span(),
                .state = std::nullopt,
                .count = text.count,
                .site = text.keyword.span() };
@@ -1637,15 +2267,7 @@ void Loader::resolveTarget()
       // Pinned to a named state, which the solver then has no say in; a
       // family is a run of Banks, so one state cannot hold it.
       std::string_view const stateName = mSources->textOf( text.state->span() );
-      std::uint32_t index = 0;
-      for ( WindowState const& state : shown.states )
-      {
-        if ( state.name == stateName && !state.units.has_value() )
-        {
-          pane.state = index;
-        }
-        index += state.units.has_value() ? target.unitSets[state.units->value].count : 1;
-      }
+      pane.state = shown.namedStateOf( stateName, target.unitSets );
       if ( !pane.state.has_value() )
       {
         report( diag::diagnostic( diag::DiagnosticId::PANES_STATE_UNKNOWN )
@@ -1670,93 +2292,6 @@ void Loader::resolveTarget()
       continue;
     }
     target.panes.push_back( std::move( pane ) );
-  }
-
-  // Every Phase's bases: what it said, else what the groups it needs agree
-  // on, else the variant's — a fact of the Phase once names are resolved, so
-  // no Step asks where it came from.
-  for ( std::size_t index = 0; index < mPhaseTexts.size(); ++index )
-  {
-    PhaseText const& text = mPhaseTexts[index];
-    Phase& phase = mProject.phases.phases[index];
-    phase.bases.assign( target.windows.size(), std::nullopt );
-    std::string const phaseName{ mSources->textOf( text.name.span() ) };
-    auto const resolve = [&]( BaseText const& base ) -> std::optional<std::pair<WindowIndex, std::uint32_t>>
-    {
-      std::string_view const windowName = mSources->textOf( base.window.span() );
-      std::optional<WindowIndex> const window = target.windowNamed( windowName );
-      if ( !window.has_value() )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::BASE_WINDOW_UNKNOWN )
-                    .at( base.window.location, base.window.length )
-                    .arg( "name", std::string{ windowName } ) );
-        return std::nullopt;
-      }
-      std::string_view const stateName = mSources->textOf( base.state.span() );
-      std::optional<std::uint32_t> const state =
-          target.windows[window->value].namedStateOf( stateName, target.unitSets );
-      if ( !state.has_value() )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::BASE_STATE_UNKNOWN )
-                    .at( base.state.location, base.state.length )
-                    .arg( "state", std::string{ stateName } )
-                    .arg( "window", target.windows[window->value].name ) );
-        return std::nullopt;
-      }
-      return std::pair{ *window, *state };
-    };
-    // The Phase's own word first, and once per Window.
-    for ( BaseText const& base : text.bases )
-    {
-      std::optional<std::pair<WindowIndex, std::uint32_t>> const found = resolve( base );
-      if ( !found.has_value() )
-      {
-        continue;
-      }
-      if ( phase.bases[found->first.value].has_value() )
-      {
-        report( diag::diagnostic( diag::DiagnosticId::BASE_TWICE )
-                    .at( base.window.location, base.window.length )
-                    .arg( "phase", phaseName )
-                    .arg( "window", target.windows[found->first.value].name ) );
-        continue;
-      }
-      phase.bases[found->first.value] = found->second;
-    }
-    // Then the groups', which agree or are refused; the Phase's own word
-    // outranks them where it was given.
-    std::vector<std::optional<std::pair<std::uint32_t, syntax::Token>>> fromGroups( target.windows.size() );
-    for ( BaseText const& base : text.inherited )
-    {
-      std::optional<std::pair<WindowIndex, std::uint32_t>> const found = resolve( base );
-      if ( !found.has_value() )
-      {
-        continue;
-      }
-      std::optional<std::pair<std::uint32_t, syntax::Token>>& earlier = fromGroups[found->first.value];
-      if ( earlier.has_value() && earlier->first != found->second )
-      {
-        Window const& window = target.windows[found->first.value];
-        report( diag::diagnostic( diag::DiagnosticId::BASES_DISAGREE )
-                    .at( base.state.location, base.state.length )
-                    .arg( "phase", phaseName )
-                    .arg( "window", window.name )
-                    .arg( "state", std::string{ mSources->textOf( base.state.span() ) } )
-                    .arg( "other", std::string{ mSources->textOf( earlier->second.span() ) } )
-                    .note( diag::diagnostic( diag::DiagnosticId::BASE_GIVEN_HERE )
-                               .at( earlier->second.location, earlier->second.length )
-                               .arg( "state", std::string{ mSources->textOf( earlier->second.span() ) } ) ) );
-        continue;
-      }
-      earlier = std::pair{ found->second, base.state };
-    }
-    for ( std::uint32_t window = 0; window < target.windows.size(); ++window )
-    {
-      if ( !phase.bases[window].has_value() && fromGroups[window].has_value() )
-      {
-        phase.bases[window] = fromGroups[window]->first;
-      }
-    }
   }
 
   if ( mStorageUnitsText.has_value() )
@@ -1817,7 +2352,35 @@ void Loader::resolveTarget()
     report( diag::diagnostic( diag::DiagnosticId::STORAGE_SIZE_MISSING ).at( site.begin, site.length ) );
   }
 
-  target.pools = poolsOf( target.regions );
+  // A set's Banks lie in its `linear` range end to end, so all of them fit
+  // in it or the variant has declared Banks the medium does not have.
+  for ( std::uint32_t index = 0; index < target.unitSets.size(); ++index )
+  {
+    UnitSet const& set = target.unitSets[index];
+    std::optional<std::uint32_t> const bank = target.bankSizeOf( UnitSetIndex{ index } );
+    if ( !set.linear.has_value() || !bank.has_value() )
+    {
+      continue;
+    }
+    std::uint64_t const reach = std::uint64_t{ set.linear->begin } + ( std::uint64_t{ set.count } * *bank );
+    if ( reach > set.linear->end )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::UNITS_PAST_LINEAR )
+                  .at( set.nameSpan.begin, set.nameSpan.length )
+                  .arg( "name", set.name )
+                  .arg( "count", static_cast<std::int64_t>( set.count ) )
+                  .arg( "size", static_cast<std::int64_t>( *bank ) )
+                  .arg( "begin", static_cast<std::int64_t>( set.linear->begin ) )
+                  .arg( "last", static_cast<std::int64_t>( set.linear->end ) - 1 ) );
+    }
+  }
+
+  std::vector<AddressRange> windows;
+  for ( Window const& window : target.windows )
+  {
+    windows.insert( windows.end(), window.ranges.begin(), window.ranges.end() );
+  }
+  target.pools = poolsOf( target.regions, windows );
 
   bool const anyNamed =
       std::ranges::any_of( target.regions, []( Region const& region ) { return region.nameSpan.has_value(); } ) ||
@@ -1832,15 +2395,12 @@ void Loader::resolveTarget()
   // holding no Section, so that Merge and every Step after it see one kind
   // of name — see docs/decisions/0038-regions.md.
   diag::FileId const file = mSources->addFile( "<nga>/regions", std::string{} );
-  ModuleIndex const index{ static_cast<std::uint32_t>( mProject.modules.size() ) };
-  mProject.modules.push_back( ProjectModule{
-      .name = "nga.regions", .file = file, .residency = {}, .generated = Generated::REGIONS, .outsideWindow = false } );
-  mProject.regionModule = index;
-  for ( Phase& phase : mProject.phases.phases )
-  {
-    phase.needs.push_back( index );
-  }
-  deriveResidency( mProject );
+  mProject.regionModule = addToolModule( mProject,
+                                         ProjectModule{ .name = "nga.regions",
+                                                        .file = file,
+                                                        .residency = {},
+                                                        .generated = Generated::REGIONS,
+                                                        .outsideWindow = false } );
 }
 
 void Loader::addConstantModule()
@@ -1856,18 +2416,12 @@ void Loader::addConstantModule()
   // can come from a document — see
   // docs/decisions/0178-a-configuration-is-a-document.md.
   diag::FileId const file = mSources->addFile( "<nga>/constants", std::string{} );
-  ModuleIndex const index{ static_cast<std::uint32_t>( mProject.modules.size() ) };
-  mProject.modules.push_back( ProjectModule{ .name = "nga.constants",
-                                             .file = file,
-                                             .residency = {},
-                                             .generated = Generated::CONSTANTS,
-                                             .outsideWindow = false } );
-  mProject.constantModule = index;
-  for ( Phase& phase : mProject.phases.phases )
-  {
-    phase.needs.push_back( index );
-  }
-  deriveResidency( mProject );
+  mProject.constantModule = addToolModule( mProject,
+                                           ProjectModule{ .name = "nga.constants",
+                                                          .file = file,
+                                                          .residency = {},
+                                                          .generated = Generated::CONSTANTS,
+                                                          .outsideWindow = false } );
 }
 
 std::optional<ModuleIndex> Loader::moduleNamed( syntax::Token name ) const
@@ -2048,15 +2602,20 @@ void Loader::resolvePhases( std::filesystem::path const& root )
   for ( PhaseText const& text : mPhaseTexts )
   {
     std::optional<std::string> entry;
+    std::optional<diag::SourceSpan> entrySpan;
     if ( text.entry.has_value() )
     {
       entry = text.entry->name;
+      entrySpan = text.entry->span;
     }
-    graph.phases.push_back( Phase{ .name = std::string{ mSources->textOf( text.name.span() ) },
-                                   .needs = {},
-                                   .then = {},
-                                   .entry = std::move( entry ),
-                                   .bases = {} } );
+    graph.phases.push_back( Phase{
+        .name = std::string{ mSources->textOf( text.name.span() ) },
+        .needs = {},
+        .then = {},
+        .entry = std::move( entry ),
+        .entrySpan = entrySpan,
+        .without = {},
+        .finalAt = text.final.has_value() ? std::optional<diag::SourceSpan>{ text.final->span() } : std::nullopt } );
   }
 
   // Nothing declared a Phase: one, unnamed, with every Module in it. That is
@@ -2089,10 +2648,6 @@ void Loader::resolvePhases( std::filesystem::path const& root )
       {
         addOnce( phase.needs, module );
       }
-      // A group's base, and its members' groups', reaches every Phase that
-      // needs the group — see docs/decisions/0056-a-phase-chooses-a-base.md.
-      std::vector<std::size_t> walking;
-      gatherBases( name, mPhaseTexts[index].inherited, walking );
     }
     for ( syntax::Token const next : mPhaseTexts[index].then )
     {
@@ -2100,6 +2655,13 @@ void Loader::resolvePhases( std::filesystem::path const& root )
       {
         addOnce( phase.then, *found );
       }
+    }
+    // A Phase with an edge out is left by it, which is what `final` denies.
+    if ( phase.finalAt.has_value() && !mPhaseTexts[index].then.empty() )
+    {
+      report( diag::diagnostic( diag::DiagnosticId::FINAL_PHASE_LEADS_ON )
+                  .at( phase.finalAt->begin, phase.finalAt->length )
+                  .arg( "phase", *phase.name ) );
     }
   }
 
@@ -2117,7 +2679,44 @@ void Loader::resolvePhases( std::filesystem::path const& root )
       }
     }
   }
+  // What the load needs is the machine's while a `.xex` loads, and in no
+  // Phase unless a Phase names it too — see
+  // docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+  for ( syntax::Token const name : mLoadTexts )
+  {
+    for ( ModuleIndex const module : modulesNamed( name ) )
+    {
+      addOnce( mProject.loadNeeds, module );
+    }
+  }
+  for ( syntax::Token const name : mUncompressedTexts )
+  {
+    for ( ModuleIndex const module : modulesNamed( name ) )
+    {
+      addOnce( mProject.uncompressed, module );
+    }
+  }
   reportEmptyGroups();
+
+  // `without` takes out of a Phase what `resident` put in, and nothing else:
+  // a ROM the driver switches out, which the driver's `rom` lines say once the
+  // driver is resolved at the end of Assemble — see
+  // docs/decisions/0229-no-window-has-a-base.md. A Module and not a group,
+  // since what a Phase does without is one switch of the hardware.
+  for ( std::size_t index = 0; index < mPhaseTexts.size(); ++index )
+  {
+    Phase& phase = graph.phases[index];
+    for ( syntax::Token const name : mPhaseTexts[index].without )
+    {
+      std::optional<ModuleIndex> const module = moduleNamed( name );
+      if ( !module.has_value() )
+      {
+        continue;
+      }
+      std::erase( phase.needs, *module );
+      phase.without.push_back( PhaseWithout{ .module = *module, .span = name.span() } );
+    }
+  }
 
   // A `transform` names a Module, which is resolvable here, and a Section,
   // which is not: no Module has been assembled yet.
@@ -2129,7 +2728,8 @@ void Loader::resolvePhases( std::filesystem::path const& root )
           TransformRequest{ .transform = std::string{ mSources->textOf( request.transform.span() ) },
                             .module = *found,
                             .section = request.section.name,
-                            .span = request.section.span } );
+                            .span = request.section.span,
+                            .formatSpan = request.transform.span() } );
     }
   }
 
@@ -2160,7 +2760,10 @@ void Loader::resolvePhases( std::filesystem::path const& root )
   {
     for ( std::size_t module = 0; module < mProject.modules.size(); ++module )
     {
-      if ( mProject.modules[module].residency.isEmpty() )
+      // A Module the load alone needs is in memory while the file loads.
+      if ( mProject.modules[module].residency.isEmpty() &&
+           std::ranges::find( mProject.loadNeeds, ModuleIndex{ static_cast<std::uint32_t>( module ) } ) ==
+               mProject.loadNeeds.end() )
       {
         report( diag::diagnostic( diag::DiagnosticId::MODULE_IN_NO_PHASE )
                     .at( mModuleSites[module].begin, mModuleSites[module].length )
@@ -2172,6 +2775,49 @@ void Loader::resolvePhases( std::filesystem::path const& root )
 
 } // namespace
 
+void Loader::addLoadModule()
+{
+  // Without storage the load decodes what a `transform` names; with it, only
+  // what a compressed file carries — see
+  // docs/decisions/0259-a-xex-may-be-compressed-segment-by-segment.md.
+  bool const storage = mProject.target.hasStorage();
+  if ( mProject.container != Container::XEX || ( storage && !mProject.compress.has_value() ) )
+  {
+    return;
+  }
+  std::vector<std::string> wanted;
+  if ( mProject.compress.has_value() )
+  {
+    wanted.push_back( *mProject.compress );
+  }
+  for ( TransformRequest const& request : mProject.transforms )
+  {
+    if ( !storage && request.transform != "copy" && std::ranges::find( wanted, request.transform ) == wanted.end() )
+    {
+      wanted.push_back( request.transform );
+    }
+  }
+  // Read beside the document or in the library, as any decoder a Project
+  // names is; the text around them is the load Step's.
+  std::vector<DecoderSource> decoders;
+  for ( std::string const& format : wanted )
+  {
+    std::optional<std::pair<std::filesystem::path, std::string>> text = readNamed( "stream/" + format + ".asm" );
+    if ( text.has_value() )
+    {
+      decoders.push_back(
+          DecoderSource{ .format = format, .path = text->first.generic_string(), .text = std::move( text->second ) } );
+    }
+  }
+  diag::FileId const file = mSources->addFile( "<nga>/load.asm", loadModuleSource( decoders ) );
+  mProject.loadModule = ModuleIndex{ static_cast<std::uint32_t>( mProject.modules.size() ) };
+  mProject.modules.push_back( ProjectModule{ .name = "nga.load",
+                                             .file = file,
+                                             .residency = Residency{ mProject.phases.phases.size() },
+                                             .generated = Generated::NONE,
+                                             .outsideWindow = true } );
+}
+
 Project loadProject( diag::SourceManager& sources,
                      FileReader& files,
                      std::filesystem::path const& path,
@@ -2181,18 +2827,25 @@ Project loadProject( diag::SourceManager& sources,
 {
   Loader loader{ sources, files, library, policy, sink };
   loader.readDocument( path.lexically_normal(), std::nullopt );
+  loader.applySeverities();
   loader.resolvePhases( path );
   loader.resolveTarget();
   loader.addConstantModule();
   loader.checkContainer();
   loader.checkCartridge();
   loader.checkDiskette();
+  loader.addLoadModule();
+  loader.checkChoices();
+  loader.addChooseModule();
 
+  bool const declaresModules = loader.declaresModules();
   Project project = std::move( loader ).take();
-  if ( project.modules.empty() && !sink.hasErrors() )
+  if ( !declaresModules && !sink.hasErrors() )
   {
     // A Project with no Modules is not a program. Said only when nothing else
-    // went wrong, since every other failure here produces one already.
+    // went wrong, since every other failure here produces one already. The
+    // Modules the tool adds for what the document declared — its constants,
+    // its Regions, a `.xex`'s load — are no program either.
     sink.add( diag::diagnostic( diag::DiagnosticId::PROJECT_HAS_NO_MODULES ).sortedBy( path.generic_string() ) );
   }
 

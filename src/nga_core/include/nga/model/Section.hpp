@@ -1,9 +1,9 @@
 #pragma once
 
 #include "nga/model/Chunk.hpp"
-#include "nga/model/PlacementClass.hpp"
 #include "nga/syntax/Builder.hpp"
 #include "nga/syntax/Expression.hpp"
+#include "nga/syntax/Statement.hpp"
 #include "nga/syntax/Token.hpp"
 
 #include <algorithm>
@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -28,6 +29,23 @@ enum class SectionKind : std::uint8_t
   PROC,
   TEMPORARY,
 };
+
+/// What a Section answers to after a dot, which `docs/spec/syntax.md`
+/// closes. The two of storage are reserved and not built: the type check
+/// refuses them, and nothing else reads them.
+enum class SectionAttribute : std::uint8_t
+{
+  RUNTIME_SECTION_ADDRESS,
+  RUNTIME_SECTION_SIZE,
+  RESIDENT,
+  LINEAR_SECTION_ADDRESS,
+  LINEAR_FAMILY_ADDRESS,
+  STORAGE_PAYLOAD_ADDRESS,
+  STORAGE_PAYLOAD_SIZE,
+};
+
+/// The attribute of that spelling, if a Section has one.
+std::optional<SectionAttribute> sectionAttributeNamed( std::string_view text );
 
 /// An optionally named, placeable container of Chunks, produced by one Module.
 ///
@@ -90,12 +108,19 @@ struct Conditional
 /// reservation below, which holds exactly those and is there only where
 /// there is one — see docs/decisions/0145-an-argument-in-a-register.md.
 /// Empty where every byte is in the reservation, as it always was.
+///
+/// Or, for a result, the result of another Proc, by its name as written:
+/// `elsewhere`, with no reservation and no type of its own, the bytes being
+/// that Proc's — see
+/// docs/decisions/0278-a-result-may-be-another-procs-result.md.
 struct Declared
 {
   std::optional<SectionIndex> temporary;
-  std::optional<DeclaredType> type;
+  std::optional<syntax::DeclaredType> type;
   diag::SourceSpan span{};
   std::string place{};
+  std::string elsewhere{};
+  diag::SourceSpan elsewhereSpan{};
 
   /// How many bytes it is where `place` says, and how many of them the
   /// reservation holds.
@@ -129,17 +154,15 @@ struct Signature
 class Section
 {
 public:
-  Section( PlacementClass placement,
+  Section( syntax::PlacementClass placement,
            syntax::ExpressionPtr pinnedAddress,
            syntax::ExpressionPtr alignment,
            syntax::ExpressionPtr boundary,
-           bool movable,
            bool root,
            SectionKind kind,
            diag::SourceSpan span )
-      : mMovable( movable ), mRoot( root ), mKind( kind ), mPlacement( placement ),
-        mPinnedAddress( std::move( pinnedAddress ) ), mAlignment( std::move( alignment ) ),
-        mBoundary( std::move( boundary ) ), mSpan( span )
+      : mRoot( root ), mKind( kind ), mPlacement( placement ), mPinnedAddress( std::move( pinnedAddress ) ),
+        mAlignment( std::move( alignment ) ), mBoundary( std::move( boundary ) ), mSpan( span )
   {
   }
 
@@ -150,17 +173,9 @@ public:
   Section& operator=( Section&& ) = default;
   ~Section() = default;
 
-  [[nodiscard]] PlacementClass placement() const
+  [[nodiscard]] syntax::PlacementClass placement() const
   {
     return mPlacement;
-  }
-
-  /// Whether the Section may stand at a different address in each Phase. A
-  /// direct Reference holds it to one address across the referrer's
-  /// Residency; see docs/decisions/0030-movable-sections.md.
-  [[nodiscard]] bool isMovable() const
-  {
-    return mMovable;
   }
 
   /// Whether the Section is a Root: the hardware reaches it with no Reference
@@ -265,6 +280,27 @@ public:
     return mSpan;
   }
 
+  /// Where the Section's text ends: the directive that closed it. Nothing in
+  /// the model reads it; a reader shown what Prune dropped does.
+  void close( diag::SourceSpan closing )
+  {
+    mClosing = closing;
+  }
+
+  /// From the directive that opened the Section to the one that closed it,
+  /// with whatever was written inside it — a Section in a Proc is inside the
+  /// Proc's. Only the opening for one that nothing closed, such as a
+  /// Temporary declared on one line.
+  [[nodiscard]] diag::SourceSpan extent() const
+  {
+    if ( !mSpan.begin.isValid() || !mClosing.begin.isValid() || mClosing.begin < mSpan.begin )
+    {
+      return mSpan;
+    }
+    return diag::SourceSpan{ .begin = mSpan.begin,
+                             .length = mClosing.begin.rawOffset() + mClosing.length - mSpan.begin.rawOffset() };
+  }
+
   /// What `in PANE` wrote, if anything: the name, resolved at the end of
   /// Assemble against the Project's Panes into `pane`.
   [[nodiscard]] std::optional<syntax::Token> const& paneName() const
@@ -272,13 +308,20 @@ public:
     return mPaneName;
   }
 
-  void setPaneName( syntax::Token name )
+  void setPaneName( syntax::Token name, std::vector<syntax::Token> alsoIn = {} )
   {
     mPaneName = name;
+    mAlsoIn = std::move( alsoIn );
+  }
+
+  /// Each further `in NAME`: another Region the Section may stand in instead.
+  [[nodiscard]] std::span<syntax::Token const> alsoIn() const
+  {
+    return mAlsoIn;
   }
 
   /// The Pane the Section is in, once resolved; absent for a Section in
-  /// `fixed` or in its Window's base state — see docs/decisions/0054-panes.md.
+  /// `fixed` — see docs/decisions/0054-panes.md.
   [[nodiscard]] std::optional<PaneIndex> pane() const
   {
     return mPane;
@@ -287,6 +330,41 @@ public:
   void bindPane( PaneIndex pane )
   {
     mPane = pane;
+  }
+
+  /// The unit set the Section stands in as the medium sees it, once
+  /// resolved: at a linear address, across its Banks, with no runtime
+  /// address at all — see docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  [[nodiscard]] std::optional<UnitSetIndex> unitSet() const
+  {
+    return mUnitSet;
+  }
+
+  void bindUnitSet( UnitSetIndex set )
+  {
+    mUnitSet = set;
+  }
+
+  /// Whether the Section's bytes are the medium's rather than the CPU's
+  /// memory: in a Pane's Bank or in a unit set. Either is written once by the
+  /// Container and never copied by an edge.
+  [[nodiscard]] bool inMedium() const
+  {
+    return mPane.has_value() || mUnitSet.has_value();
+  }
+
+  /// The ranges of the Regions `in NAME` named, where the names were
+  /// Regions' and not a Pane's: the Section stands wholly within one of them,
+  /// which the solver chooses — see
+  /// docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.
+  [[nodiscard]] std::span<AddressRange const> regions() const
+  {
+    return mRegions;
+  }
+
+  void bindRegion( AddressRange range )
+  {
+    mRegions.push_back( range );
   }
 
   /// What `under PANE` wrote on a Proc, if anything: the Pane the Proc runs
@@ -371,6 +449,13 @@ public:
     mNext = index;
   }
 
+  /// Unlinks what this one falls through into: the edge that closed a cycle
+  /// the builder refused, so that no walk along `next` comes back.
+  void clearNext()
+  {
+    mNext.reset();
+  }
+
   /// Which format this Section's Payload waits as — an index into the
   /// formats the tool encodes. Zero, `copy`, unless the Project named
   /// another, which is recorded at the end of Assemble. A Section with no
@@ -426,7 +511,10 @@ public:
 
   /// Marks a Chunk as written under `.own` or `.root`, with the followers
   /// `.own` named.
-  void markTaking( ChunkIndex chunk, Taking taking, std::vector<syntax::Token> followers );
+  void markTaking( ChunkIndex chunk, syntax::Taking taking, std::vector<syntax::Token> followers );
+
+  /// What a `.alt` above the instruction at `chunk` declared.
+  void markAlternatives( ChunkIndex chunk, std::vector<syntax::Token> alternatives );
 
   /// What a `.root` taking does to the Section it names — see
   /// docs/decisions/0061-root-at-the-taking.md.
@@ -471,23 +559,26 @@ public:
   void blank( ChunkIndex index );
 
 private:
-  bool mMovable = false;
   bool mRoot = false;
   bool mReadOnly = false;
   bool mForeign = false;
   SectionKind mKind = SectionKind::PLAIN;
   std::uint8_t mFormat = 0;
-  PlacementClass mPlacement = PlacementClass::ABSOLUTE;
+  syntax::PlacementClass mPlacement = syntax::PlacementClass::ABSOLUTE;
   syntax::ExpressionPtr mPinnedAddress;
   syntax::ExpressionPtr mAlignment;
   syntax::ExpressionPtr mBoundary;
   diag::SourceSpan mSpan;
+  diag::SourceSpan mClosing{};
   std::optional<syntax::Token> mThen;
   std::string_view mThenScope;
   std::string_view mScope;
   std::optional<SectionIndex> mNext;
   std::optional<syntax::Token> mPaneName;
+  std::vector<syntax::Token> mAlsoIn;
   std::optional<PaneIndex> mPane;
+  std::optional<UnitSetIndex> mUnitSet;
+  std::vector<AddressRange> mRegions;
   std::optional<syntax::Token> mUnderName;
   std::optional<PaneIndex> mUnder;
   std::optional<syntax::Token> mAsName;

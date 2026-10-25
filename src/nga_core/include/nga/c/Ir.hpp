@@ -1,8 +1,8 @@
 #pragma once
 
 #include "nga/diag/SourceLocation.hpp"
-#include "nga/model/PlacementClass.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <set>
@@ -77,6 +77,12 @@ struct Constant
   /// text says with `.own` — see docs/decisions/0060-own.md and
   /// docs/decisions/0065-handlers.md.
   std::string follower{};
+
+  /// Whether `value` is what the name stands for: a `const` of the program's
+  /// C, whose value the compiler writes itself. A name of the assembler, an
+  /// address or a character of a set is the assembler's to resolve — see
+  /// docs/decisions/0287-a-bound-known-past-a-byte-is-compared-high-byte-first.md.
+  bool valued = false;
 };
 
 /// An SSA value: the result of one instruction of its function, numbered in
@@ -190,6 +196,17 @@ struct Call
   std::string resultPlace{};
 };
 
+/// Whether the bytes of an object lie in the zero page or anywhere else, as
+/// `[[placement]]` says. The model's `PlacementClass` by another name, copied
+/// rather than depended on for the reason `Intent` in `Compile.hpp` is: the
+/// compiler reads no model type — see
+/// docs/decisions/0210-placement-is-declared-in-c-too.md.
+enum class Placement : std::uint8_t
+{
+  ZEROPAGE,
+  ABSOLUTE,
+};
+
 /// The four forms of `[[with(...)]]`, as `.with` has them — see
 /// docs/decisions/0096-panes-in-c.md.
 enum class WithForm : std::uint8_t
@@ -223,6 +240,10 @@ struct EnterWith
   /// so the family's first state is added to it. Of a Window, the index is
   /// the state itself.
   bool member = false;
+
+  /// AT: how many bytes the Window's state takes; two puts the high byte in
+  /// `Y` and writes `, xy`.
+  std::uint32_t stateBytes = 1;
 };
 
 /// `switch OPERAND, FIRST, N`: the value less FIRST, held below N, left where
@@ -428,7 +449,8 @@ struct Terminator
 
   /// Where a DISPATCH goes, by block index, one entry per value from zero;
   /// a block may stand more than once, which is how the holes of the table
-  /// and `default` are written. Its value is `condition`.
+  /// and `default` are written. Its value is the one the `Switch` its block
+  /// ends with left.
   std::vector<std::uint32_t> targets{};
 };
 
@@ -442,6 +464,44 @@ struct Block
 /// them. Nothing for `ret`, `enter` and `fall`: what the Proc holds does not
 /// outlive the call, and a Proc chained by `then` is another Function.
 std::vector<std::uint32_t> successorsOf( Terminator const& terminator );
+
+/// For each block, the blocks whose terminators may go to it, in index order
+/// and each once, however many ways of one terminator lead there: the
+/// reverse of `successorsOf`, and what a pass asking whether a block is
+/// entered from one place alone reads, a DISPATCH's targets included.
+std::vector<std::vector<std::uint32_t>> predecessorsOf( std::vector<Block> const& blocks );
+
+/// Every block index a terminator names, as a reference a pass renumbering
+/// blocks rewrites: the blocks `successorsOf` lists, a DISPATCH's once for
+/// each time it names one.
+template <typename Visit>
+void eachTarget( Terminator& terminator, Visit const& visit )
+{
+  switch ( terminator.kind )
+  {
+  case TerminatorKind::JUMP:
+    visit( terminator.target );
+    break;
+  case TerminatorKind::BRANCH:
+    visit( terminator.target );
+    visit( terminator.otherwise );
+    break;
+  case TerminatorKind::DISPATCH:
+    for ( std::uint32_t& into : terminator.targets )
+    {
+      visit( into );
+    }
+    break;
+  case TerminatorKind::RETURN:
+  case TerminatorKind::TRANSITION:
+  case TerminatorKind::FALL:
+    break;
+  }
+}
+
+/// The object a name stands for, without the offset a byte of it carries:
+/// `__0q+1` is `__0q`.
+[[nodiscard]] std::string baseOf( std::string const& name );
 
 /// A byte of a Proc's own: a local of the C, or one the compiler needed —
 /// see docs/decisions/0080-a-local-is-a-byte-of-its-proc.md.
@@ -464,7 +524,7 @@ struct Local
   /// docs/decisions/0210-placement-is-declared-in-c-too.md. A block of more
   /// than a few bytes is written off the zero page whatever this says, since
   /// an instruction reaches none of it in two bytes.
-  model::PlacementClass placement = model::PlacementClass::ZEROPAGE;
+  Placement placement = Placement::ZEROPAGE;
 };
 
 /// A `const` given a constant: a Constant of the assembler, taking no byte.
@@ -511,7 +571,7 @@ struct Global
   /// otherwise, and the zero page whatever is written for a pointer, which
   /// `(zp),y` reads through — see
   /// docs/decisions/0210-placement-is-declared-in-c-too.md.
-  model::PlacementClass placement = model::PlacementClass::ABSOLUTE;
+  Placement placement = Placement::ABSOLUTE;
 
   /// A striped array's stripes, a byte of each element to a stripe: the names
   /// its Label lies under in the array's Namespace, and what it is given —
@@ -569,6 +629,11 @@ struct Function
   bool isInline = false;
   diag::SourceSpan inlineSpan{};
 
+  /// Written `[[noinline]]`: no call of it is wrapped, whatever would have
+  /// asked for it — see
+  /// docs/decisions/0299-a-body-no-larger-than-its-call-is-wrapped.md.
+  bool isNoinline = false;
+
   /// Its parameters in the order C lists them, each a byte of the Proc named
   /// by its C name, and the type of its result where it returns one.
   std::vector<Local> parameters{};
@@ -581,6 +646,15 @@ struct Function
   /// see docs/decisions/0120-a-function-returns-through-a-parameter.md.
   std::string resultByte{};
 
+  /// The result of another function the result is, `g.__ret`, where some
+  /// `return g(...)` would otherwise copy it: the Proc declares that byte
+  /// its result and reserves none — see
+  /// docs/decisions/0278-a-result-may-be-another-procs-result.md. And
+  /// whether another function's result is this one's, which keeps it in
+  /// memory.
+  std::string resultElsewhere{};
+  bool resultShared = false;
+
   /// Where the result's bytes are left, as a `.declare ret` spells it: `a`,
   /// or `ma` for a pair whose high byte is in `A` at the `rts` — or empty for
   /// `__ret` — see docs/decisions/0145-an-argument-in-a-register.md.
@@ -589,7 +663,7 @@ struct Function
   /// Where the bytes the compiler takes for itself lie: the function's own
   /// `[[placement]]`, since scratch has no name for anything finer to reach —
   /// see docs/decisions/0210-placement-is-declared-in-c-too.md.
-  model::PlacementClass placement = model::PlacementClass::ZEROPAGE;
+  Placement placement = Placement::ZEROPAGE;
 
   /// The bytes it holds, written as `.ztemp` after its last instruction.
   std::vector<Local> locals{};
@@ -677,10 +751,13 @@ struct Unit
 };
 
 /// Every operand of an instruction, so that a pass rewriting operands touches
-/// each exactly once. What ends a block has one operand of its own, a BRANCH's
-/// condition, which a pass visits beside these.
-template <typename Visitor>
-void eachOperand( Instruction& instruction, Visitor visit )
+/// each exactly once: the pointer of either end of a copy and of an argument
+/// copied from one included. What ends a block has one operand of its own, a
+/// BRANCH's condition, which a pass visits beside these. Of a `const`
+/// instruction, each is visited as a `const` operand.
+template <typename Held, typename Visitor>
+  requires std::is_same_v<std::remove_const_t<Held>, Instruction>
+void eachOperand( Held& instruction, Visitor visit )
 {
   std::visit(
       [&visit]( auto& operation )
@@ -719,11 +796,26 @@ void eachOperand( Instruction& instruction, Visitor visit )
           visit( operation.index );
           visit( operation.value );
         }
+        else if constexpr ( std::is_same_v<Operation, Copy> )
+        {
+          if ( operation.from.pointer.has_value() )
+          {
+            visit( *operation.from.pointer );
+          }
+          if ( operation.to.pointer.has_value() )
+          {
+            visit( *operation.to.pointer );
+          }
+        }
         else if constexpr ( std::is_same_v<Operation, Call> )
         {
-          for ( Argument& argument : operation.arguments )
+          for ( auto& argument : operation.arguments )
           {
             visit( argument.value );
+            if ( argument.from.has_value() && argument.from->pointer.has_value() )
+            {
+              visit( *argument.from->pointer );
+            }
           }
         }
         else if constexpr ( std::is_same_v<Operation, EnterWith> )
@@ -735,6 +827,22 @@ void eachOperand( Instruction& instruction, Visitor visit )
         }
       },
       instruction.operation );
+}
+
+/// Every operand of a block: of each of its instructions, and the condition
+/// of the BRANCH it ends with, which is the one operand a terminator has.
+template <typename Held, typename Visitor>
+  requires std::is_same_v<std::remove_const_t<Held>, Block>
+void eachOperand( Held& block, Visitor visit )
+{
+  for ( auto& instruction : block.instructions )
+  {
+    eachOperand( instruction, visit );
+  }
+  if ( block.terminator.kind == TerminatorKind::BRANCH )
+  {
+    visit( block.terminator.condition );
+  }
 }
 
 /// Every name of an object an instruction holds, each once, as the string the
@@ -839,11 +947,19 @@ void eachName( Instruction& instruction, Visit const& visit )
       instruction.operation );
 }
 
+/// How many operands of the function read the value, a BRANCH's condition
+/// among them: an instruction naming it twice reads it twice.
+[[nodiscard]] std::uint32_t readersOf( Function const& function, Value value );
+
 /// The type an operand has in `function`.
 [[nodiscard]] Type typeOf( Operand const& operand, Function const& function );
 
 /// The value an instruction defines, or nothing for one that defines none.
 [[nodiscard]] std::optional<Value> resultOf( Instruction const& instruction );
+
+/// The instruction of a block that defines a value, by its position, or
+/// nothing where the value is defined elsewhere.
+[[nodiscard]] std::optional<std::size_t> definerIn( Block const& block, Value value );
 
 /// The unit as text for a reader, an instruction a line — what the compiler's
 /// tests compare. It carries no source position: the `.source` marks of the

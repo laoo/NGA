@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nga/c/Ir.hpp"
+#include "nga/c/Loops.hpp"
 
 namespace nga::c
 {
@@ -12,6 +13,12 @@ namespace nga::c
 /// test of `for (j = 0; j < 127 - i; ...)` is the shape, and `cpx` of one byte
 /// is what the test becomes. See
 /// docs/decisions/0125-what-a-loop-computes-the-same-every-turn.md.
-void hoistInvariants( ir::Unit& unit );
+///
+/// A call of the runtime's arithmetic moves as an operator does, and two of
+/// the same are kept once; a call of a function of the program writes what
+/// `effects` says it does, so that an object it does not write stays
+/// invariant across it — see
+/// docs/decisions/0304-a-product-a-loop-computes-the-same-is-computed-before-it.md.
+void hoistInvariants( ir::Unit& unit, Effects const& effects );
 
 } // namespace nga::c

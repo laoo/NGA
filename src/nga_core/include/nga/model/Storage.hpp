@@ -8,7 +8,9 @@
 #include "nga/model/Types.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace nga::model
@@ -111,8 +113,8 @@ public:
                      std::vector<SectionRef> payloads,
                      std::uint32_t blocks,
                      std::uint32_t cellWrites,
-                     std::uint32_t windows,
-                     bool held );
+                     std::uint32_t headerBytes,
+                     std::uint32_t unitBytes );
   void placeFrame( FrameIndex index, StorageAddress at );
   void liveFrame( FrameIndex index, Residency live );
   [[nodiscard]] Residency const& frameLiveOf( FrameIndex index ) const;
@@ -132,7 +134,6 @@ public:
   [[nodiscard]] std::optional<PhaseIndex> frameFrom( FrameIndex index ) const;
   [[nodiscard]] PhaseIndex frameTo( FrameIndex index ) const;
   [[nodiscard]] std::span<SectionRef const> framePayloadsOf( FrameIndex index ) const;
-  [[nodiscard]] std::uint32_t frameCellWritesOf( FrameIndex index ) const;
 
   /// A Pane's Section with bytes: written by the Container into the Bank the
   /// Pane was given, at its offset within the Window, once, and never copied
@@ -146,9 +147,146 @@ public:
 
   void addPaneImage( SectionRef where, StorageAddress at );
 
+  /// A Section with bytes in a Pane pinned to a named state of the Window the
+  /// driver's stream reads through: written by a `.xex` into that state, which
+  /// the loader shows as it shows a unit, at the Section's offset within the
+  /// Window — see docs/decisions/0256-a-named-state-is-filled-where-a-xex-can-show-it.md.
+  /// No other Container fills one, so no other reads these.
+  struct StateImage
+  {
+    SectionRef where{};
+    std::uint32_t state = 0;
+    std::uint32_t offset = 0;
+  };
+
+  void addStateImage( SectionRef where, std::uint32_t state, std::uint32_t offset );
+
+  /// A Section a `.xex` without storage carries encoded and decodes in place
+  /// while it loads: its stored form, how far past the end of the Section's
+  /// initialised extent the form has to end, and the format — see
+  /// docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md. Ordered by
+  /// the address it decodes to, which is the order the loader decodes in.
+  struct LoadForm
+  {
+    SectionRef where{};
+    std::vector<std::uint8_t> form;
+    std::uint32_t margin = 0;
+    std::string format;
+
+    /// Where the form is loaded, and where it decodes to.
+    std::uint32_t at = 0;
+    std::uint32_t to = 0;
+  };
+
+  void decodeAtLoad( LoadForm form );
+
+  [[nodiscard]] std::span<LoadForm const> loadForms() const
+  {
+    return mLoadForms;
+  }
+
+  [[nodiscard]] bool isDecodedAtLoad( SectionRef where ) const;
+
+  /// A Section whose bytes lie under a ROM the entry Phase has in, which a
+  /// `.xex` writes by moving them there while it loads: the bytes, and where
+  /// they go — see
+  /// docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+  struct Hidden
+  {
+    SectionRef where{};
+    std::uint32_t to = 0;
+    std::vector<std::uint8_t> bytes;
+
+    /// Where the Section is named in a `transform` and its form saves
+    /// something: the stored form, and the format that decodes it.
+    std::vector<std::uint8_t> form{};
+    std::string format{};
+  };
+
+  /// One hidden Section decoded under its ROM while the program loads: its
+  /// form, where it is written and where it decodes to.
+  struct HiddenForm
+  {
+    std::uint32_t at = 0;
+    std::uint32_t to = 0;
+    std::vector<std::uint8_t> form;
+    std::string format;
+  };
+
+  /// One batch of that move: what the `.xex` writes at `at` — a table, then
+  /// the pieces it names — before `INITAD` at the move.
+  struct HiddenBatch
+  {
+    std::uint32_t at = 0;
+    std::vector<std::uint8_t> image;
+
+    /// The Sections it carries a piece of.
+    std::vector<SectionRef> holds{};
+
+    /// Where in the image each piece stands, and which bytes of its Section it
+    /// is: what a `.xex` built from a `choose` block changes a copy at, before
+    /// the move takes it under the ROM.
+    struct Piece
+    {
+      SectionRef where{};
+      std::uint32_t offset = 0;
+      std::uint32_t at = 0;
+      std::uint32_t size = 0;
+    };
+
+    std::vector<Piece> pieces{};
+  };
+
+  void hideAtLoad( Hidden hidden );
+  void stageHidden( HiddenBatch batch );
+  void decodeHidden( HiddenForm form );
+
+  [[nodiscard]] std::span<HiddenForm const> hiddenForms() const
+  {
+    return mHiddenForms;
+  }
+
+  [[nodiscard]] std::span<Hidden const> hiddenAtLoad() const
+  {
+    return mHidden;
+  }
+
+  [[nodiscard]] std::span<HiddenBatch const> hiddenBatches() const
+  {
+    return mHiddenBatches;
+  }
+
+  [[nodiscard]] bool isHiddenAtLoad( SectionRef where ) const;
+
+  /// A byte the Choices of a `choose` block differ in: its Section, its offset
+  /// in it, and what it is under each Choice, the first's first — see
+  /// docs/decisions/0302-a-document-may-be-chosen-while-a-xex-loads.md.
+  struct ChoiceSite
+  {
+    SectionRef where{};
+    std::uint32_t offset = 0;
+    std::vector<std::uint8_t> values;
+  };
+
+  void chooseAtLoad( std::vector<ChoiceSite> sites );
+
+  [[nodiscard]] std::span<ChoiceSite const> choiceSites() const
+  {
+    return mChoiceSites;
+  }
+
+  /// Whether the cold start into `entry` brings this Section, which a
+  /// Container then does not write at its address.
+  [[nodiscard]] bool isLoadedByColdStart( SectionRef where, PhaseIndex entry ) const;
+
   [[nodiscard]] std::span<PaneImage const> paneImages() const
   {
     return mPaneImages;
+  }
+
+  [[nodiscard]] std::span<StateImage const> stateImages() const
+  {
+    return mStateImages;
   }
 
 private:
@@ -181,7 +319,6 @@ private:
     std::optional<PhaseIndex> from;
     PhaseIndex to;
     std::vector<SectionRef> payloads;
-    std::uint32_t cellWrites = 0;
     std::vector<std::uint8_t> bytes;
     Residency live;
   };
@@ -191,6 +328,12 @@ private:
   std::vector<std::vector<Entry>> mByModule;
   std::vector<Frame> mFrames;
   std::vector<PaneImage> mPaneImages;
+  std::vector<StateImage> mStateImages;
+  std::vector<LoadForm> mLoadForms;
+  std::vector<Hidden> mHidden;
+  std::vector<HiddenBatch> mHiddenBatches;
+  std::vector<HiddenForm> mHiddenForms;
+  std::vector<ChoiceSite> mChoiceSites;
 };
 
 /// The Phases across which bytes written once and never restored are still
@@ -200,6 +343,17 @@ private:
 /// image waits in storage for, `needed` being the Phases whose edges load
 /// it. The glossary's **live**; see docs/decisions/0057-live.md.
 Residency liveAcross( PhaseGraph const& graph, Residency const& needed );
+
+/// The Phases a Section's bytes are held apart across, given the Residency it
+/// has: that Residency closed by liveAcross where nothing restores the bytes —
+/// a Pane's Section with bytes, and in a program without storage every Section
+/// with bytes, which the Container writes at load and no edge writes again —
+/// and the Residency itself otherwise. The one place the choice is made: Place
+/// claims by it, the Containers write the start by it and the verifier holds a
+/// Layout to it — see docs/decisions/0057-live.md and
+/// docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+Residency
+heldAcross( PhaseGraph const& graph, Target const& target, Section const& section, Residency const& residency );
 
 /// The first half of the PlaceStorage Step: which Sections have a Payload,
 /// and where every Frame waits.
@@ -232,8 +386,7 @@ Storage findPayloads( Pruned const& build, ReadOnly const& readOnly, Sizes const
 /// the whole of it and the Transform Step has to cut it. A Frame is sized for
 /// this before the cutting happens — the address it waits at is in the bytes of
 /// a `.transition`, so Patch has to know it before a form exists — and a Frame
-/// sized for more blocks than are used leaves the rest unread, as it does for a
-/// Movable Section that did not move.
+/// sized for more blocks than are used leaves the rest unread.
 std::uint32_t blocksForPayload( std::uint32_t storedCeiling, std::uint32_t extent );
 
 /// Whether the Project's Container takes a **cold start**: an edge into the

@@ -26,4 +26,14 @@ void narrowRuntimeCalls( ir::Unit& unit );
 /// docs/decisions/0127-an-index-that-fits-a-byte-goes-through-x.md.
 void narrowIndexes( ir::Unit& unit );
 
+/// Makes a `/` and a `%` of the same unsigned operands one call: where a block
+/// divides and takes the remainder of what it can show to be the same two
+/// operands, with nothing writing either between, the first of the two
+/// becomes the call of `__umod8` or `__umod16` and the quotient is read from
+/// that Proc's `dividend`, which holds it once the call returns. After
+/// `narrowRuntimeCalls`, which sends no division elsewhere, and after the
+/// passes that make two reads of one object the same operand — see
+/// docs/decisions/0301-a-quotient-and-a-remainder-are-one-call.md.
+void shareDivisions( ir::Unit& unit );
+
 } // namespace nga::c

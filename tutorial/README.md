@@ -56,4 +56,5 @@ The last four are reference. Read them when you need a detail, not in order.
     differences from C: what is gone, what changed, and what was added.
 18. [Diagnostics](18-diagnostics.md) — every finding the tool can report, by
     the part of the tool that raises it: what the identifier means, what the
-    severity costs, and a note where the message cannot say the whole of it.
+    severity costs, when each one is raised and what to do about it, and a
+    program that raises it.

@@ -29,23 +29,6 @@ bool isIdentifierContinue( char c )
   return isIdentifierStart( c ) || isDigit( c );
 }
 
-int valueOfDigit( char c )
-{
-  if ( isDigit( c ) )
-  {
-    return c - '0';
-  }
-  if ( c >= 'A' && c <= 'F' )
-  {
-    return c - 'A' + 10;
-  }
-  if ( c >= 'a' && c <= 'f' )
-  {
-    return c - 'a' + 10;
-  }
-  return -1;
-}
-
 std::string_view nameOfBase( int base )
 {
   switch ( base )
@@ -116,7 +99,7 @@ std::optional<std::int64_t> valueOfIntegerConstant( std::string_view text )
     {
       continue;
     }
-    int const digit = valueOfDigit( c );
+    int const digit = syntax::hexDigitValue( c );
     if ( digit < 0 || digit >= base )
     {
       return std::nullopt;
@@ -331,6 +314,18 @@ Token Lexer::lexLiteral( std::uint32_t begin )
       ++characters;
       continue;
     }
+    // A control byte is refused here as it is between tokens, since what a
+    // form feed or a NUL would put in the bytes no reader of the source can
+    // see; it still counts as the character it stands for, so that it is the
+    // one finding. A tab is text, as it is in the assembler's strings.
+    if ( auto const byte = static_cast<unsigned char>( c ); ( byte < 0x20U && c != '\t' ) || byte == 0x7FU )
+    {
+      report( diagnostic( diag::DiagnosticId::C_CONTROL_CHARACTER ).arg( "code", std::int64_t{ byte } ), mPos, 1 );
+      rejected = true;
+      ++mPos;
+      ++characters;
+      continue;
+    }
     std::uint32_t const length = syntax::utf8LengthAt( mText, mPos );
     if ( length == 0 )
     {
@@ -401,7 +396,7 @@ Token Lexer::lexConstant( std::uint32_t begin )
   auto const [base, prefix] = baseOf( text );
   std::uint32_t end = prefix;
   while ( end < text.size() &&
-          ( ( base == 16 ? valueOfDigit( text[end] ) >= 0 : isDigit( text[end] ) ) || text[end] == '\'' ) )
+          ( ( base == 16 ? syntax::hexDigitValue( text[end] ) >= 0 : isDigit( text[end] ) ) || text[end] == '\'' ) )
   {
     ++end;
   }
@@ -417,7 +412,11 @@ Token Lexer::lexConstant( std::uint32_t begin )
     return reject( diagnostic( diag::DiagnosticId::C_FLOATING_CONSTANT ), begin, length );
   }
 
-  if ( digits.find_first_not_of( '\'' ) == std::string_view::npos )
+  // A prefix followed straight by a character that is no digit of its base
+  // names that character, as one later in the constant would: `0b_1010` holds
+  // a stray `_`, and its digits are there. A suffix is no digit at all.
+  bool const strayAfterPrefix = digits.empty() && !rest.empty() && !isIntegerSuffix( rest );
+  if ( digits.find_first_not_of( '\'' ) == std::string_view::npos && !strayAfterPrefix )
   {
     return reject(
         diagnostic( diag::DiagnosticId::C_EMPTY_CONSTANT ).arg( "prefix", std::string{ text.substr( 0, 2 ) } ),
@@ -438,7 +437,7 @@ Token Lexer::lexConstant( std::uint32_t begin )
     {
       return reject( diagnostic( diag::DiagnosticId::C_MISPLACED_DIGIT_SEPARATOR ), at, 1 );
     }
-    if ( digits[i] != '\'' && valueOfDigit( digits[i] ) >= base )
+    if ( digits[i] != '\'' && syntax::hexDigitValue( digits[i] ) >= base )
     {
       return reject( diagnostic( diag::DiagnosticId::C_INVALID_DIGIT )
                          .arg( "character", std::string{ digits[i] } )

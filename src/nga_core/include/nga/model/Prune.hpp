@@ -53,6 +53,12 @@ private:
 /// See docs/decisions/0033-prune.md.
 Reachable prune( Merged const& build, diag::DiagnosticSink& sink );
 
+/// What Prune's walk reaches from `from` alone, `from` included: what has to
+/// be in memory for code there to run — how a `.xex` knows which of its
+/// start the loader calls, see
+/// docs/decisions/0259-a-xex-may-be-compressed-segment-by-segment.md.
+[[nodiscard]] Reachable reachedFrom( Merged const& build, std::span<SectionRef const> from );
+
 /// What `.root` takings declare, resolved once every name is: the Section
 /// an address is handed to the hardware from becomes a Root, kept by Prune,
 /// active in every state for Trace, and held to docs/decisions/0040-root-evicted.md.

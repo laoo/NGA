@@ -127,6 +127,20 @@ private:
   std::vector<std::vector<std::vector<ResolvedImplementation>>> mImplementations;
 };
 
+/// The result a Proc declares in the reservation a Symbol names: the Proc
+/// and its declaration. Nothing where the Symbol is no such reservation, or
+/// where a register carries part of that result: what `.declare ret
+/// PROC.NAME` is held to — see
+/// docs/decisions/0278-a-result-may-be-another-procs-result.md.
+struct DeclaredResult
+{
+  ModuleIndex module;
+  SectionIndex proc;
+  Declared const* result = nullptr;
+};
+
+[[nodiscard]] std::optional<DeclaredResult> declaredResultAt( GlobalSymbols const& symbols, SymbolRef where );
+
 /// Which Charset, across the whole program.
 struct CharsetRef
 {
@@ -147,9 +161,6 @@ class Charset
 {
 public:
   [[nodiscard]] std::optional<std::uint8_t> byteFor( char32_t codePoint ) const;
-
-  /// True when this code point was not mapped before.
-  bool map( char32_t codePoint, std::uint8_t byte );
 
   /// Overwrites, which is what an entry in a derived block does to its base.
   void remap( char32_t codePoint, std::uint8_t byte );
@@ -213,6 +224,12 @@ resolveCharsets( diag::SourceManager const& sources, GlobalSymbols const& symbol
 /// order is declaration order and determinism costs nothing. Modules are walked
 /// in Project order and Symbols in definition order, which is the whole of what
 /// makes the result independent of how the work was scheduled.
-GlobalSymbols merge( std::span<Module const> modules, diag::DiagnosticSink& sink );
+///
+/// The Project gives the tool three names of its own, bound here and never by
+/// anything exporting them: `nga.unit` and `nga.offset`, the labels the
+/// driver's `.driver unit` and `.driver offset` name, and `nga.entry`, the
+/// entry Phase's entry Label, which the stub a program that returns is started
+/// by jumps to.
+GlobalSymbols merge( std::span<Module const> modules, Project const& project, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

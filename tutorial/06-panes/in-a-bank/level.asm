@@ -24,9 +24,9 @@ levelMapEnd
 ; end section
 
 ; tag draw
-; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`
-; shown — which is what lets it name what the Pane holds. Chapter five's loop,
-; moved here whole.
+; A Trampoline: it stands outside the Window, but runs with `level` shown —
+; which is what lets it name what the Pane holds. Chapter five's loop, moved
+; here whole.
 .proc drawMap, under level
 at      .ztemp 2
 left    .ztemp 1

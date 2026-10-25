@@ -30,13 +30,6 @@ std::string_view bareLocalName( std::string_view text )
   return text;
 }
 
-/// The three attributes of a Section, which `docs/spec/syntax.md` closes.
-bool isAttributeName( std::string_view text )
-{
-  return text == "runtimeSectionAddress" || text == "runtimeSectionSize" || text == "storagePayloadAddress" ||
-         text == "storagePayloadSize" || text == "resident";
-}
-
 bool isLocal( syntax::Token token )
 {
   return token.kind == syntax::TokenKind::LOCAL_IDENTIFIER || token.kind == syntax::TokenKind::ANONYMOUS_LABEL;
@@ -84,10 +77,7 @@ std::string_view ModuleBuilder::currentScope() const
 
 Symbol const* ModuleBuilder::findScoped( std::string_view scope, std::string_view name ) const
 {
-  // From the innermost Namespace outwards to the top level: the scope, each
-  // prefix of it that ends in a dot, then nothing.
-  std::string_view rest = scope;
-  while ( true )
+  for ( std::string_view rest = scope;; rest = enclosingScopeOf( rest ) )
   {
     std::string candidate{ rest };
     candidate += name;
@@ -99,9 +89,6 @@ Symbol const* ModuleBuilder::findScoped( std::string_view scope, std::string_vie
     {
       return nullptr;
     }
-    rest.remove_suffix( 1 );
-    std::size_t const dot = rest.rfind( '.' );
-    rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( 0, dot + 1 );
   }
 }
 
@@ -276,8 +263,9 @@ void ModuleBuilder::beginCase( syntax::Pattern pattern, diag::SourceSpan span )
     }
     // A name a case binds may not be one already bound around it: inside
     // the case it would mean one thing and just outside another, and a body
-    // is small enough that hiding buys nothing.
-    if ( boundName( text ).has_value() )
+    // is small enough that hiding buys nothing. The `.match` this case is of
+    // is left out, since its last case is a sibling and closes here.
+    if ( boundName( text, mOpenConditionals.size() - 1 ).has_value() )
     {
       report( diag::diagnostic( diag::DiagnosticId::CASE_NAME_SHADOWS )
                   .at( name.location, name.length )
@@ -341,6 +329,11 @@ void ModuleBuilder::endMatch( diag::SourceSpan /*span*/ )
 
 std::optional<ModuleBuilder::BoundName> ModuleBuilder::boundName( std::string_view name ) const
 {
+  return boundName( name, mOpenConditionals.size() );
+}
+
+std::optional<ModuleBuilder::BoundName> ModuleBuilder::boundName( std::string_view name, std::size_t open ) const
+{
   if ( !mOpenMacro.has_value() )
   {
     return std::nullopt;
@@ -351,10 +344,10 @@ std::optional<ModuleBuilder::BoundName> ModuleBuilder::boundName( std::string_vi
   // names may not repeat a parameter's or an enclosing case's, so the order
   // decides nothing for a program that assembles; it decides what a finding
   // about one that does not says.
-  for ( std::size_t depth = mOpenConditionals.size(); depth-- > 0; )
+  for ( std::size_t depth = open; depth-- > 0; )
   {
-    OpenConditional const& open = mOpenConditionals[depth];
-    Conditional const& conditional = macro.body.conditionals()[open.index];
+    OpenConditional const& enclosing = mOpenConditionals[depth];
+    Conditional const& conditional = macro.body.conditionals()[enclosing.index];
     if ( !conditional.isMatch() || conditional.branches.empty() )
     {
       continue;
@@ -364,11 +357,11 @@ std::optional<ModuleBuilder::BoundName> ModuleBuilder::boundName( std::string_vi
     {
       if ( textOf( pattern.names[slot] ) == name )
       {
-        return BoundName{
-          .parameter = std::nullopt,
-          .caseName = CaseBinding{ .conditional = open.index, .branch = conditional.branches.size() - 1, .slot = slot },
-          .pack = pattern.pack && slot + 1 == pattern.names.size()
-        };
+        return BoundName{ .parameter = std::nullopt,
+                          .caseName = CaseBinding{ .conditional = enclosing.index,
+                                                   .branch = conditional.branches.size() - 1,
+                                                   .slot = slot },
+                          .pack = pattern.pack && slot + 1 == pattern.names.size() };
       }
     }
   }
@@ -459,7 +452,7 @@ void ModuleBuilder::defineSymbol( syntax::Token name, SymbolKind kind, SymbolVal
   // attributes have to keep meaning what they mean: `worker.runtimeSectionSize` is
   // its size, and a Symbol of that name inside it would win, since a dotted
   // name that is a Symbol is read before an attribute of what stands left.
-  if ( mProcScopes.contains( currentScope() ) && isAttributeName( text ) )
+  if ( mProcScopes.contains( currentScope() ) && sectionAttributeNamed( text ).has_value() )
   {
     report( diag::diagnostic( diag::DiagnosticId::NAME_IS_AN_ATTRIBUTE )
                 .at( name.location, name.length )
@@ -501,7 +494,6 @@ void ModuleBuilder::beginSection( syntax::SectionAttributes attributes, diag::So
                                     std::move( attributes.pinnedAddress ),
                                     std::move( attributes.alignment ),
                                     std::move( attributes.boundary ),
-                                    attributes.movable,
                                     attributes.root,
                                     attributes.temporary ? SectionKind::TEMPORARY : SectionKind::PLAIN,
                                     span } );
@@ -516,7 +508,7 @@ void ModuleBuilder::beginSection( syntax::SectionAttributes attributes, diag::So
   }
   if ( attributes.pane.has_value() )
   {
-    mModule->sectionAt( index ).setPaneName( *attributes.pane );
+    mModule->sectionAt( index ).setPaneName( *attributes.pane, attributes.alsoIn );
   }
   mOpenSection = index;
   mOpenSectionLabelled = false;
@@ -530,8 +522,12 @@ void ModuleBuilder::beginSection( syntax::SectionAttributes attributes, diag::So
   }
 }
 
-void ModuleBuilder::endSection( diag::SourceSpan /*span*/ )
+void ModuleBuilder::endSection( diag::SourceSpan span )
 {
+  if ( mOpenSection.has_value() )
+  {
+    mModule->sectionAt( *mOpenSection ).close( span );
+  }
   // A Section is named by its first Label, and one with none is a Section
   // nothing can name: not source, not the Project, not the memory map.
   if ( mOpenSection.has_value() && !mOpenSectionLabelled )
@@ -553,16 +549,10 @@ void ModuleBuilder::beginProc( syntax::Token name, syntax::SectionAttributes att
   ++mScopeCount;
 
   // A Proc's name is a Label: it names the position its code begins at, which
-  // is what makes it referenceable and a candidate Root.
+  // is what makes it referenceable and a candidate Root. One named like an
+  // instruction draws no NGA0113: `.proc inc` is no lost indent, and a C
+  // function called `inc` is written so.
   std::string_view const text = textOf( name );
-  if ( isMnemonic( text ) )
-  {
-    // A legal construct warned about rather than a name reserved: this is what
-    // a lost indent looks like, and it is suppressible like any other warning.
-    report( diag::diagnostic( diag::DiagnosticId::LABEL_NAMED_LIKE_MNEMONIC )
-                .at( name.location, name.length )
-                .arg( "name", std::string{ text } ) );
-  }
 
   collectReferences( attributes.pinnedAddress.get() );
   collectReferences( attributes.alignment.get() );
@@ -575,14 +565,13 @@ void ModuleBuilder::beginProc( syntax::Token name, syntax::SectionAttributes att
                                                              std::move( attributes.pinnedAddress ),
                                                              std::move( attributes.alignment ),
                                                              std::move( attributes.boundary ),
-                                                             attributes.movable,
                                                              attributes.root,
                                                              SectionKind::PROC,
                                                              span } );
   mModule->sectionAt( section ).setScope( currentScope() );
   if ( attributes.pane.has_value() )
   {
-    mModule->sectionAt( section ).setPaneName( *attributes.pane );
+    mModule->sectionAt( section ).setPaneName( *attributes.pane, attributes.alsoIn );
   }
   if ( attributes.under.has_value() )
   {
@@ -611,8 +600,18 @@ void ModuleBuilder::beginProc( syntax::Token name, syntax::SectionAttributes att
   mProcScopes.insert( scope );
 }
 
-void ModuleBuilder::endProc( std::optional<syntax::Token> then, diag::SourceSpan /*span*/ )
+void ModuleBuilder::endProc( std::optional<syntax::Token> then, diag::SourceSpan span )
 {
+  if ( mOpenProcSection.has_value() )
+  {
+    // `.endp then NAME` closes the Proc at the name, which is part of its text.
+    diag::SourceSpan closing = span;
+    if ( then.has_value() && then->span().begin > span.begin )
+    {
+      closing.length = then->span().begin.rawOffset() + then->span().length - span.begin.rawOffset();
+    }
+    mModule->sectionAt( *mOpenProcSection ).close( closing );
+  }
   // Before `then` is recorded: the Proc it names is a sibling of this one and
   // is read in the scope this one stood in, not inside it.
   if ( mOpenProcSection.has_value() && !mScopes.empty() )
@@ -630,18 +629,20 @@ void ModuleBuilder::endProc( std::optional<syntax::Token> then, diag::SourceSpan
 
 void ModuleBuilder::resolveThens()
 {
-  auto const nameOf = [this]( SectionIndex index ) { return mModule->displayNameOf( index, *mSources ); };
-  std::vector<bool> followed( mModule->sections().size(), false );
+  auto const nameOf = [this]( SectionIndex index ) { return mModule->displayNameOf( index ); };
+  // The Proc each Section already follows, which a second `then` naming it
+  // is told of.
+  std::vector<std::optional<SectionIndex>> followed( mModule->sections().size() );
   for ( SectionIndex const from : mThens )
   {
     syntax::Token const name = mModule->sectionAt( from ).then().value_or( syntax::Token{} );
     std::string_view const text = textOf( name );
-    auto const refuse = [&]( diag::DiagnosticId id )
+    auto const refuse = [&]( diag::DiagnosticId id, SectionIndex previous )
     {
       report( diag::diagnostic( id )
                   .at( name.location, name.length )
                   .arg( "name", std::string{ text } )
-                  .arg( "previous", nameOf( from ) ) );
+                  .arg( "previous", nameOf( previous ) ) );
     };
 
     // The name is a Proc of this Module: the Label at the start of one,
@@ -650,33 +651,27 @@ void ModuleBuilder::resolveThens()
     auto const* const label = symbol != nullptr ? std::get_if<LabelPosition>( &symbol->value ) : nullptr;
     if ( label == nullptr || label->chunk != ChunkIndex{ 0 } || !mModule->sectionAt( label->section ).isProc() )
     {
-      refuse( diag::DiagnosticId::THEN_NOT_A_PROC );
+      refuse( diag::DiagnosticId::THEN_NOT_A_PROC, from );
       continue;
     }
     SectionIndex const to = label->section;
     Section const& target = mModule->sectionAt( to );
 
     // One predecessor, since a Section stands immediately after one thing;
-    // no pin and no alignment, since adjacency decides its start; and the
-    // same movability, since the two move together or not at all.
+    // and no pin and no alignment, since adjacency decides its start.
     if ( to == from )
     {
-      refuse( diag::DiagnosticId::THEN_CYCLE );
+      refuse( diag::DiagnosticId::THEN_CYCLE, from );
       continue;
     }
-    if ( followed[to.value] )
+    if ( followed[to.value].has_value() )
     {
-      refuse( diag::DiagnosticId::THEN_ALREADY_FOLLOWED );
+      refuse( diag::DiagnosticId::THEN_ALREADY_FOLLOWED, *followed[to.value] );
       continue;
     }
     if ( target.pinnedAddress() != nullptr || target.alignment() != nullptr )
     {
-      refuse( diag::DiagnosticId::THEN_PLACED );
-      continue;
-    }
-    if ( target.isMovable() != mModule->sectionAt( from ).isMovable() )
-    {
-      refuse( diag::DiagnosticId::THEN_MOVABILITY );
+      refuse( diag::DiagnosticId::THEN_PLACED, from );
       continue;
     }
     // And in one Pane or in none: the bytes after one state's are not the
@@ -687,16 +682,18 @@ void ModuleBuilder::resolveThens()
     if ( paneOfFrom.has_value() != paneOfTo.has_value() ||
          ( paneOfFrom.has_value() && textOf( *paneOfFrom ) != textOf( *paneOfTo ) ) )
     {
-      refuse( diag::DiagnosticId::THEN_PANE );
+      refuse( diag::DiagnosticId::THEN_PANE, from );
       continue;
     }
-    followed[to.value] = true;
+    followed[to.value] = from;
     mModule->sectionAt( from ).setNext( to );
   }
 
   // A chain that comes back to where it started has no first Section, and
   // the solver would be asked for a start that follows itself. Reported once
-  // per cycle, at its lowest Section.
+  // per cycle, at its lowest Section, and cut there: the edge back into it is
+  // not kept, so that whatever runs past the finding — which may be allowed —
+  // walks a chain with an end.
   for ( SectionIndex const start : mThens )
   {
     std::optional<SectionIndex> at = mModule->sectionAt( start ).next();
@@ -713,6 +710,12 @@ void ModuleBuilder::resolveThens()
                   .at( name.location, name.length )
                   .arg( "name", std::string{ textOf( name ) } )
                   .arg( "previous", nameOf( start ) ) );
+      SectionIndex last = start;
+      while ( mModule->sectionAt( last ).next() != start )
+      {
+        last = *mModule->sectionAt( last ).next();
+      }
+      mModule->sectionAt( last ).clearNext();
     }
   }
 }
@@ -734,10 +737,11 @@ void ModuleBuilder::defineLocalNamed( syntax::Token name, std::string_view bare,
 
   if ( mOpenMacro.has_value() && !bare.empty() )
   {
-    // A plain name is unique in its body and an `@` one may repeat, so the
-    // two cannot share a name: a reference would not say which it meant.
+    // A plain name is unique in its body. An `@` one may repeat, and is
+    // another kind of name altogether: a plain reference reaches the plain
+    // label and an `@` one the `@` labels, so the two may share a spelling.
     auto const clashes = [&]( LocalDefinition const& definition )
-    { return definition.proc == scope && definition.name == bare && ( definition.plain || plain ); };
+    { return definition.proc == scope && definition.name == bare && definition.plain && plain; };
     if ( auto const earlier = std::ranges::find_if( mLocalDefinitions, clashes ); earlier != mLocalDefinitions.end() )
     {
       report( diag::diagnostic( diag::DiagnosticId::LOCAL_LABEL_REDEFINED )
@@ -824,6 +828,14 @@ void ModuleBuilder::defineLabel( syntax::Token name, diag::SourceSpan span )
 
 void ModuleBuilder::defineConstant( syntax::Token name, syntax::ExpressionPtr value, diag::SourceSpan /*span*/ )
 {
+  // A line that starts with a name looks like code to the grammar, so a
+  // `.alt` above a Constant arrives here, where there is no instruction.
+  if ( !mPendingAlternatives.empty() )
+  {
+    report( diag::diagnostic( diag::DiagnosticId::ALT_NEEDS_INSTRUCTION )
+                .at( mAlternativesAt.begin, mAlternativesAt.length ) );
+    mPendingAlternatives.clear();
+  }
   collectReferences( value.get() );
   defineSymbol( name, SymbolKind::CONSTANT, std::move( value ) );
 }
@@ -849,13 +861,14 @@ void ModuleBuilder::emitInstruction( syntax::Token mnemonic,
   }
   enterWiths( span );
   Section& holder = currentTarget( span );
-  applyTaking(
-      holder,
-      holder.appendChunk( InstructionContent{ .mnemonic = mnemonic, .shape = shape }, span, std::move( items ) ) );
+  ChunkIndex const chunk =
+      holder.appendChunk( InstructionContent{ .mnemonic = mnemonic, .shape = shape }, span, std::move( items ) );
+  applyTaking( holder, chunk );
+  applyAlternatives( holder, chunk );
   leaveWiths( span );
 }
 
-void ModuleBuilder::with( WithForm form,
+void ModuleBuilder::with( syntax::WithForm form,
                           syntax::ExpressionPtr what,
                           std::optional<syntax::Token> state,
                           diag::SourceSpan span )
@@ -880,7 +893,7 @@ void ModuleBuilder::dropWiths()
   mPendingWiths.clear();
 }
 
-void ModuleBuilder::taking( Taking kind, std::vector<syntax::Token> followers, diag::SourceSpan /*span*/ )
+void ModuleBuilder::taking( syntax::Taking kind, std::vector<syntax::Token> followers, diag::SourceSpan /*span*/ )
 {
   mPendingTaking = kind;
   mPendingFollowers = std::move( followers );
@@ -892,12 +905,37 @@ void ModuleBuilder::dropTaking()
   mPendingFollowers.clear();
 }
 
-void ModuleBuilder::declare( Declaring what,
-                             std::optional<DeclaredType> type,
+void ModuleBuilder::alternatives( std::vector<syntax::Token> mnemonics, diag::SourceSpan span )
+{
+  if ( mPendingAlternatives.empty() )
+  {
+    mAlternativesAt = span;
+  }
+  mPendingAlternatives.insert( mPendingAlternatives.end(), mnemonics.begin(), mnemonics.end() );
+}
+
+void ModuleBuilder::dropAlternatives()
+{
+  mPendingAlternatives.clear();
+}
+
+void ModuleBuilder::applyAlternatives( Section& holder, ChunkIndex chunk )
+{
+  if ( !mPendingAlternatives.empty() )
+  {
+    holder.markAlternatives( chunk, std::move( mPendingAlternatives ) );
+    mPendingAlternatives.clear();
+  }
+}
+
+void ModuleBuilder::declare( syntax::Declaring what,
+                             std::optional<syntax::DeclaredType> type,
                              std::string place,
                              diag::SourceSpan span )
 {
-  PendingDeclaration pending{ .what = what, .type = type, .span = span, .place = std::move( place ) };
+  PendingDeclaration pending{
+    .what = what, .type = type, .span = span, .place = std::move( place ), .elsewhere = {}, .elsewhereSpan = {}
+  };
 
   // Bytes that are all in registers wait for no reservation: they are the
   // Signature's at once, in the order the declarations stand in — see
@@ -911,6 +949,20 @@ void ModuleBuilder::declare( Declaring what,
   mPendingDeclarations.push_back( std::move( pending ) );
 }
 
+void ModuleBuilder::declareResultElsewhere( std::string name, diag::SourceSpan nameSpan, diag::SourceSpan span )
+{
+  // No reservation to wait for: the bytes are another Proc's, which Rules
+  // holds the name to once every Module is read.
+  PendingDeclaration const pending{ .what = syntax::Declaring::RESULT,
+                                    .type = std::nullopt,
+                                    .span = span,
+                                    .place = {},
+                                    .elsewhere = std::move( name ),
+                                    .elsewhereSpan = nameSpan };
+  bool argued = false;
+  applyDeclaration( pending, std::nullopt, argued );
+}
+
 void ModuleBuilder::applyDeclaration( PendingDeclaration const& pending,
                                       std::optional<SectionIndex> temporary,
                                       bool& argued )
@@ -920,14 +972,19 @@ void ModuleBuilder::applyDeclaration( PendingDeclaration const& pending,
     return;
   }
   Section& proc = mModule->sectionAt( *mOpenProcSection );
-  Declared const declared{ .temporary = temporary, .type = pending.type, .span = pending.span, .place = pending.place };
-  if ( pending.what == Declaring::ARGUMENT && argued )
+  Declared const declared{ .temporary = temporary,
+                           .type = pending.type,
+                           .span = pending.span,
+                           .place = pending.place,
+                           .elsewhere = pending.elsewhere,
+                           .elsewhereSpan = pending.elsewhereSpan };
+  if ( pending.what == syntax::Declaring::ARGUMENT && argued )
   {
     report(
         diag::diagnostic( diag::DiagnosticId::DECLARE_TWICE_ARGUMENT ).at( pending.span.begin, pending.span.length ) );
     return;
   }
-  if ( pending.what == Declaring::ARGUMENT )
+  if ( pending.what == syntax::Declaring::ARGUMENT )
   {
     // A register carries one argument: the result may be in one an argument
     // came in, since the caller has read nothing of it yet.
@@ -977,8 +1034,8 @@ void ModuleBuilder::enterWiths( diag::SourceSpan /*span*/ )
   for ( PendingWith& pending : mPendingWiths )
   {
     // What was named is the entry's one item, so that Expand can type it
-    // and the exit needs none: it shows the base of the Window the entry
-    // resolved to, which it learns from the entry.
+    // and the exit needs none: it shows again the Pane its Proc runs under,
+    // where that is one of the Window the entry resolved to, or nothing.
     std::vector<syntax::ExpressionPtr> items;
     items.push_back( std::move( pending.what ) );
     currentTarget( pending.span )
@@ -1033,16 +1090,20 @@ void ModuleBuilder::useMacro( std::vector<syntax::Token> path,
     mPendingWiths.clear();
     return;
   }
-  currentTarget( span ).appendChunk( MacroUseContent{ .path = std::move( path ),
-                                                      .name = name,
-                                                      .form = WithForm::NONE,
-                                                      .side = WithSide::NONE,
-                                                      .state = std::nullopt,
-                                                      .window = std::nullopt,
-                                                      .pane = std::nullopt,
-                                                      .shownState = std::nullopt },
-                                     span,
-                                     std::move( arguments ) );
+  Section& holder = currentTarget( span );
+  // A `.alt` above it stays on the Chunk, which the type check refuses once
+  // Expand has said it is a use and not an instruction.
+  ChunkIndex const chunk = holder.appendChunk( MacroUseContent{ .path = std::move( path ),
+                                                                .name = name,
+                                                                .form = syntax::WithForm::NONE,
+                                                                .side = WithSide::NONE,
+                                                                .state = std::nullopt,
+                                                                .window = std::nullopt,
+                                                                .pane = std::nullopt,
+                                                                .shownState = std::nullopt },
+                                               span,
+                                               std::move( arguments ) );
+  applyAlternatives( holder, chunk );
   leaveWiths( span );
 }
 
@@ -1079,7 +1140,7 @@ void ModuleBuilder::beginMacro( syntax::Token name, syntax::Pattern parameters, 
   MacroIndex const index = mModule->addMacro( MacroDefinition{
       .name = name,
       .parameters = std::move( parameters ),
-      .body = Section{ PlacementClass::ABSOLUTE, nullptr, nullptr, nullptr, false, false, SectionKind::PLAIN, span },
+      .body = Section{ syntax::PlacementClass::ABSOLUTE, nullptr, nullptr, nullptr, false, SectionKind::PLAIN, span },
       .parameterUses = {},
       .caseUses = {},
       .span = span,
@@ -1140,10 +1201,12 @@ void ModuleBuilder::checkParameters()
   // outside it the Symbol, and a reader of the body cannot tell which was
   // meant. The same rule a Region's name is held to, see 0038. What a
   // `.case` binds is a parameter of its block and is held to it too.
-  auto const check = [this]( syntax::Token const& parameter )
+  // The Symbols looked for are the ones the body would read the name as, so
+  // a Namespace's own are among them, as everywhere a name is found.
+  auto const check = [this]( std::string_view scope, syntax::Token const& parameter )
   {
     std::string_view const text = textOf( parameter );
-    if ( mModule->symbols().find( text ) == nullptr )
+    if ( findScoped( scope, text ) == nullptr )
     {
       return;
     }
@@ -1153,7 +1216,8 @@ void ModuleBuilder::checkParameters()
   };
   for ( MacroDefinition const& macro : mModule->macros() )
   {
-    std::ranges::for_each( macro.parameters.names, check );
+    auto const inScope = [&check, &macro]( syntax::Token const& parameter ) { check( macro.scope, parameter ); };
+    std::ranges::for_each( macro.parameters.names, inScope );
     for ( Conditional const& conditional : macro.body.conditionals() )
     {
       if ( !conditional.isMatch() )
@@ -1162,7 +1226,7 @@ void ModuleBuilder::checkParameters()
       }
       for ( Branch const& branch : conditional.branches )
       {
-        std::ranges::for_each( branch.pattern.names, check );
+        std::ranges::for_each( branch.pattern.names, inScope );
       }
     }
   }
@@ -1206,7 +1270,7 @@ void ModuleBuilder::reserve( syntax::ExpressionPtr size, diag::SourceSpan span )
 
 void ModuleBuilder::reserveTemporary( syntax::Token name,
                                       syntax::ExpressionPtr size,
-                                      PlacementClass placement,
+                                      syntax::PlacementClass placement,
                                       diag::SourceSpan span )
 {
   collectReferences( size.get() );
@@ -1216,8 +1280,8 @@ void ModuleBuilder::reserveTemporary( syntax::Token name,
   // as every Section is named by its first. The open Section, if
   // any, is not touched: a Temporary declared inside one is still a Section
   // beside it, exactly as the spelling promises.
-  SectionIndex const index = mModule->addSection(
-      Section{ placement, nullptr, nullptr, nullptr, false, false, SectionKind::TEMPORARY, span } );
+  SectionIndex const index =
+      mModule->addSection( Section{ placement, nullptr, nullptr, nullptr, false, SectionKind::TEMPORARY, span } );
   mModule->sectionAt( index ).setScope( currentScope() );
   std::vector<syntax::ExpressionPtr> items;
   items.push_back( std::move( size ) );
@@ -1259,6 +1323,17 @@ void ModuleBuilder::transition( syntax::Token phase, diag::SourceSpan span, bool
       .appendChunk( TransitionContent{ .name = phase, .target = std::nullopt, .fast = fast }, span, {} );
 }
 
+void ModuleBuilder::release( syntax::Token holder, diag::SourceSpan span )
+{
+  // Which Holder it is is the machine's to say, and the Trace asks when it
+  // reads the statement.
+  if ( refusedInTemporary( span ) )
+  {
+    return;
+  }
+  mModule->sectionAt( currentSection( span ) ).appendChunk( ReleaseContent{ .holder = holder }, span, {} );
+}
+
 void ModuleBuilder::dispatch( std::vector<syntax::ExpressionPtr> targets, diag::SourceSpan span )
 {
   for ( syntax::ExpressionPtr const& target : targets )
@@ -1279,8 +1354,8 @@ void ModuleBuilder::dispatch( std::vector<syntax::ExpressionPtr> targets, diag::
   // below it begins another — which the type check refuses as the dispatch
   // whose targets nothing reaches.
   ChunkIndex const next = holder.nextChunkIndex();
-  bool const cut = mLabelledAt.has_value() && mLabelledAt->second == next &&
-                   ( mOpenMacro.has_value() || mLabelledAt->first == currentSection( span ) );
+  bool const cut =
+      mLabelledAt.has_value() && mLabelledAt->second == next && mLabelledAt->first == currentSection( span );
   if ( !cut && next.value > 0 && std::holds_alternative<DispatchContent>( holder.chunks().back().content ) )
   {
     holder.extendLastChunk( std::move( targets ), span );
@@ -1293,13 +1368,13 @@ void ModuleBuilder::dispatch( std::vector<syntax::ExpressionPtr> targets, diag::
 }
 
 void ModuleBuilder::declareCharset( syntax::Token name,
-                                    std::optional<CharsetBase> base,
-                                    std::vector<CharsetEntry> entries,
+                                    std::optional<syntax::CharsetBase> base,
+                                    std::vector<syntax::CharsetEntry> entries,
                                     diag::SourceSpan span )
 {
   // The start bytes are References like any other: a `.charset` may be written
   // in terms of a Constant, and a Constant may be defined further down.
-  for ( CharsetEntry const& entry : entries )
+  for ( syntax::CharsetEntry const& entry : entries )
   {
     collectReferences( entry.start.get() );
   }
@@ -1319,7 +1394,10 @@ void ModuleBuilder::addAssertion( syntax::ExpressionPtr condition, diag::SourceS
   mModule->addAssertion( Assertion{ .condition = std::move( condition ), .span = span } );
 }
 
-void ModuleBuilder::declareSlot( syntax::Token name, Binding binding, PlacementClass placement, diag::SourceSpan span )
+void ModuleBuilder::declareSlot( syntax::Token name,
+                                 syntax::Binding binding,
+                                 syntax::PlacementClass placement,
+                                 diag::SourceSpan span )
 {
   // A Symbol like any other, whose Cell the end of Assemble supplies.
   (void)span;
@@ -1334,6 +1412,7 @@ void ModuleBuilder::implement( syntax::Token slot, syntax::Token symbol, diag::S
   mModule->addImplementation( Implementation{ .slot = textOf( slot ),
                                               .symbol = textOf( symbol ),
                                               .slotSpan = slot.span(),
+                                              .symbolSpan = symbol.span(),
                                               .span = span,
                                               .scope = currentScope() } );
 }
@@ -1390,21 +1469,8 @@ void ModuleBuilder::applyExports()
       continue;
     }
 
-    // A position inside a Proc is reached from nowhere outside it, so
-    // exporting one offers another Module a name it could never use. The
-    // Proc's own Label, at its first Chunk, is the entry and exports as
-    // anything does; a Temporary declared inside a Proc is a Section beside
-    // it and exports too.
-    if ( auto const* const label = std::get_if<LabelPosition>( &found->value );
-         label != nullptr && label->chunk != ChunkIndex{ 0 } && mModule->sectionAt( label->section ).isProc() )
-    {
-      report( diag::diagnostic( diag::DiagnosticId::EXPORT_FROM_INSIDE_PROC )
-                  .at( entry.name.location, entry.name.length )
-                  .arg( "symbol", std::string{ found->name } )
-                  .arg( "proc", mModule->displayNameOf( label->section, *mSources ) ) );
-      continue;
-    }
     mModule->symbols().markExported( found->name );
+    mModule->addExportSite( ExportSite{ .symbol = found->name, .span = entry.name.span() } );
   }
 
   // A Proc's declared bytes are its interface, and a caller in another Module
@@ -1501,14 +1567,15 @@ void ModuleBuilder::collectReferences( syntax::Expression* node, bool dotted )
 
 void ModuleBuilder::resolveLocalLabels()
 {
-  // A plain name of a body first: where the body defines one, the node is a
-  // local label and everything downstream reads it as `@name` is read; where
-  // it does not, the name is a Symbol and is left for whoever resolves one.
+  // A plain name of a body first: where the body defines it plainly, the node
+  // is that label of the body; where it does not, the name is a Symbol and is
+  // left for whoever resolves one. An `@` label of the body is no plain name,
+  // whatever its spelling: it is reached by `@` and by nothing else.
   for ( BodyName const& reference : mBodyNames )
   {
     auto const matches = [this, &reference]( LocalDefinition const& definition )
     {
-      return definition.proc == reference.scope && definition.name == reference.name &&
+      return definition.plain && definition.proc == reference.scope && definition.name == reference.name &&
              branchReaches( definition.branch, reference.branch );
     };
     auto const found = std::ranges::find_if( mLocalDefinitions, matches );
@@ -1526,9 +1593,10 @@ void ModuleBuilder::resolveLocalLabels()
     // order and "nearest in a direction" is the first or the last match.
     // A definition in a branch the reference does not stand in may not be
     // there at all, so it is not a definition this reference can choose.
+    // A plain label of a macro body is no `@` label, whatever its spelling.
     auto const matches = [this, &reference]( LocalDefinition const& definition )
     {
-      return definition.proc == reference.proc && definition.name == reference.name &&
+      return !definition.plain && definition.proc == reference.proc && definition.name == reference.name &&
              branchReaches( definition.branch, reference.branch );
     };
     // Whether a definition this reference could otherwise have chosen was
@@ -1537,7 +1605,7 @@ void ModuleBuilder::resolveLocalLabels()
     bool blocked = false;
     auto const named = [this, &reference, &blocked]( LocalDefinition const& definition )
     {
-      if ( definition.proc != reference.proc || definition.name != reference.name )
+      if ( definition.plain || definition.proc != reference.proc || definition.name != reference.name )
       {
         return false;
       }
@@ -1651,44 +1719,77 @@ void ModuleBuilder::applyTransforms()
 void ModuleBuilder::declareDriverRole( syntax::Token role, std::vector<syntax::Token> names, diag::SourceSpan span )
 {
   // How many names a role takes is the role's: `open`, `read` and `init` a
-  // macro, `show` and `showAt` a Window and a macro, `stream` a Window. A role
-  // nobody knows is refused once the Module is read, with the rest.
+  // macro, `unit` and `offset` a label, `show` a Window and a macro, `showAt`
+  // the same and the place it takes the state in, if it says one, `stream` a
+  // Window. A role nobody knows is refused once the Module is read, with the
+  // rest.
   std::string_view const text = textOf( role );
-  bool const windowed = text == "show" || text == "showAt" || text == "stream";
-  std::size_t const wanted = text == "show" || text == "showAt" ? 2 : 1;
-  bool const known = windowed || text == "open" || text == "read" || text == "init" || text == "seek" || text == "span";
+  std::optional<DriverRoleNames> const shape = driverRoleNamed( text );
+  bool const windowed = shape == DriverRoleNames::WINDOW || shape == DriverRoleNames::WINDOW_AND_MACRO;
+  std::size_t const wanted = shape == DriverRoleNames::WINDOW_AND_MACRO ? 2 : 1;
+  bool const known = shape.has_value();
+  std::optional<syntax::Token> place;
+  if ( text == "showAt" && names.size() == 3 )
+  {
+    place = names.back();
+    names.pop_back();
+  }
+  // `rom MODULE` names a Module and may name a second whose ranges it shows
+  // too, which is the one other role whose last name is optional.
+  std::optional<syntax::Token> also;
+  if ( shape == DriverRoleNames::MODULE && names.size() == 2 )
+  {
+    also = names.back();
+    names.pop_back();
+  }
   if ( known && names.size() != wanted )
   {
     report( diag::diagnostic( diag::DiagnosticId::DRIVER_ROLE_NAMES )
                 .at( role.location, role.length )
                 .arg( "role", std::string{ text } )
                 .arg( "count", static_cast<std::int64_t>( wanted ) )
+                .arg( "names", wanted == 1 ? "name" : "names" )
                 .arg( "given", static_cast<std::int64_t>( names.size() ) ) );
     return;
   }
   syntax::Token const last = names.back();
 
-  // `stream` names a Window, and `seek` and `span` a word about the medium;
-  // every other role names a macro of this Module.
-  bool const hasMacro = text != "stream" && text != "seek" && text != "span";
-  mModule->addDriverRole(
-      DriverRole{ .role = text,
-                  .window = windowed ? textOf( names.front() ) : std::string_view{},
-                  .windowSpan = windowed ? names.front().span() : role.span(),
-                  .label = hasMacro || text == "seek" || text == "span" ? textOf( last ) : std::string_view{},
-                  .roleSpan = role.span(),
-                  .labelSpan = hasMacro ? last.span() : role.span(),
-                  .span = span,
-                  .scope = currentScope() } );
+  // The name the role is: the Module a `rom` names, the word `seek` and `span`
+  // take, and the last name of every other role but `stream`, which names a
+  // Window alone — a role nobody knows included, so that it is refused by
+  // what it names.
+  std::string_view label;
+  if ( shape == DriverRoleNames::MODULE )
+  {
+    label = textOf( names.front() );
+  }
+  else if ( shape != DriverRoleNames::WINDOW )
+  {
+    label = textOf( last );
+  }
+  mModule->addDriverRole( DriverRole{ .role = text,
+                                      .window = windowed ? textOf( names.front() ) : std::string_view{},
+                                      .windowSpan = windowed ? names.front().span() : role.span(),
+                                      .label = label,
+                                      .roleSpan = role.span(),
+                                      .labelSpan = label.empty() ? role.span() : last.span(),
+                                      .span = span,
+                                      .scope = currentScope(),
+                                      .place = place.has_value() ? textOf( *place ) : std::string_view{},
+                                      .placeSpan = place.has_value() ? place->span() : diag::SourceSpan{},
+                                      .also = also.has_value() ? textOf( *also ) : std::string_view{},
+                                      .alsoSpan = also.has_value() ? also->span() : diag::SourceSpan{} } );
 }
 
 void ModuleBuilder::applyDriverRoles()
 {
-  // A role is declared once — per Window, for the roles that name one.
+  // A role is declared once — per Window, for the roles that name one, and
+  // per Module for `rom`, which a driver declares once for each ROM it
+  // switches.
   std::vector<std::pair<std::string_view, std::string_view>> seen;
   for ( DriverRole& role : mModule->driverRoles() )
   {
-    std::pair<std::string_view, std::string_view> const key{ role.role, role.window };
+    std::pair<std::string_view, std::string_view> const key{ role.role, role.role == "rom" ? role.label : role.window };
     if ( std::ranges::find( seen, key ) != seen.end() )
     {
       report( diag::diagnostic( diag::DiagnosticId::DRIVER_ROLE_REPEATED )
@@ -1698,24 +1799,20 @@ void ModuleBuilder::applyDriverRoles()
     }
     seen.push_back( key );
 
-    if ( role.role != "open" && role.role != "read" && role.role != "init" && role.role != "show" &&
-         role.role != "showAt" && role.role != "stream" && role.role != "seek" && role.role != "span" )
+    std::optional<DriverRoleNames> const shape = driverRoleNamed( role.role );
+    if ( !shape.has_value() )
     {
       report( diag::diagnostic( diag::DiagnosticId::UNKNOWN_DRIVER_ROLE )
                   .at( role.roleSpan.begin, role.roleSpan.length )
                   .arg( "role", std::string{ role.role } ) );
       continue;
     }
-    if ( role.role == "stream" )
-    {
-      // Whether the Window exists is the Target's question, asked at the end
-      // of Assemble where the driver is resolved.
-      continue;
-    }
-    // `seek forward` says the medium reaches an offset by reading up to it, so
-    // that an image an edge opens is worth beginning at a unit boundary. The
-    // word is checked where the driver is resolved, with the Windows.
-    if ( role.role == "seek" || role.role == "span" )
+    // Whether a Window exists is the Target's question, asked at the end of
+    // Assemble where the driver is resolved, and so is a word about the
+    // medium and a Module a `rom` names. `seek forward` says the medium
+    // reaches an offset by reading up to it, so that an image an edge opens is
+    // worth beginning at a unit boundary.
+    if ( shape == DriverRoleNames::WINDOW || shape == DriverRoleNames::WORD || shape == DriverRoleNames::MODULE )
     {
       continue;
     }
@@ -1725,6 +1822,25 @@ void ModuleBuilder::applyDriverRoles()
       report( diag::diagnostic( diag::DiagnosticId::DRIVER_LABEL_NOT_HERE )
                   .at( role.labelSpan.begin, role.labelSpan.length )
                   .arg( "label", std::string{ role.label } ) );
+      continue;
+    }
+    // `unit` and `offset` name the cells the stream stands in, which the
+    // routine writes the position into before it expands `open` — see
+    // docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
+    // How many bytes the reservation under the label holds is a question for
+    // the type check, which can evaluate it.
+    if ( shape == DriverRoleNames::CELL )
+    {
+      if ( found->kind != SymbolKind::LABEL )
+      {
+        report( diag::diagnostic( diag::DiagnosticId::DRIVER_CELL_NOT_A_LABEL )
+                    .at( role.labelSpan.begin, role.labelSpan.length )
+                    .arg( "label", std::string{ role.label } )
+                    .arg( "kind", std::string{ nameOf( found->kind ) } )
+                    .arg( "role", std::string{ role.role } ) );
+        continue;
+      }
+      role.label = found->name;
       continue;
     }
     // A role is a macro, and the tool reaches it from the declaration

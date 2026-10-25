@@ -60,12 +60,39 @@ struct Stored
 {
   StorageAddress at;
   std::span<std::uint8_t const> form;
+
+  /// The Section it is the bytes of, and nothing for a Frame.
+  std::optional<SectionRef> where;
 };
 
 /// Everything that waits in storage, by unit and then by offset: what a
 /// Container writes into the units, in the order that lets it switch a unit
 /// in once rather than once per image.
 std::vector<Stored> storedImages( Patched const& build );
+
+/// How far into storage, as a position of the Target's, the images reach:
+/// what a medium whose program follows its storage starts the program past.
+std::uint32_t storageUsedOf( Patched const& build );
+
+/// Refuses, one finding of `id` per Section, every Section with a Payload, for
+/// a Container that carries no loader and so nothing that would ever put the
+/// bytes where they belong. Whether one was refused.
+bool refusedPayloads( Patched const& build, diag::DiagnosticId id, diag::DiagnosticSink& sink );
+
+/// A Pane's Section with bytes in a named state of the Window the driver's
+/// stream reads through, at its offset within the Window: what a `.xex`
+/// writes into that state once the units are filled — see
+/// docs/decisions/0256-a-named-state-is-filled-where-a-xex-can-show-it.md.
+struct StateStored
+{
+  std::uint32_t state = 0;
+  std::uint32_t offset = 0;
+  std::span<std::uint8_t const> form;
+  SectionRef where{};
+};
+
+/// Every one, by state and then by offset, so that a state is shown once.
+std::vector<StateStored> stateImagesOf( Patched const& build );
 
 /// A Section that is in memory before anything of the program runs, and where
 /// its initialised extent stands.

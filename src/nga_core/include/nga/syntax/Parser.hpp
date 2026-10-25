@@ -8,11 +8,19 @@
 #include "nga/syntax/TokenCursor.hpp"
 
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
 namespace nga::syntax
 {
+
+/// Every word that follows a `.` as a directive, closers and both spellings of
+/// each included, in alphabetical order. The parser refuses any other word
+/// before it asks what a word may do, so a directive it handles and this list
+/// misses is refused, and one this lists and it does not handle is caught by
+/// the suite. `--vocabulary` hands it to an editor — see docs/spec/facts.md.
+[[nodiscard]] std::span<std::string_view const> directiveWords();
 
 /// The `.asm` grammar of docs/spec/syntax.md.
 ///
@@ -51,14 +59,13 @@ private:
   void parseNamespace( Token directive );
   void parseNamespaceEnd( Token directive, std::string_view spelling );
 
-  /// True when the cursor is on `.endnamespace` or `.endns`.
-  [[nodiscard]] bool atNamespaceEnd() const;
-
   void parseSection( Token directive );
 
-  /// `[ , attribute ]...` after a `.section` or `.proc` name. False when the
-  /// line was given up on and reported.
-  bool parseSectionAttributes( SectionAttributes& attributes, bool& quiet, bool leadingComma = true );
+  /// `[ , attribute ]...` after a `.section` or `.proc` name. An attribute
+  /// that is refused is dropped and the rest are read, so that the block
+  /// opens all the same.
+  void parseSectionAttributes( Token directive, SectionAttributes& attributes, bool& quiet, bool leadingComma = true );
+  void skipAttribute();
   void parseSectionEnd( Token directive, std::string_view spelling );
   void parseProc( Token directive );
   void parseProcEnd( Token directive, std::string_view spelling );
@@ -105,14 +112,16 @@ private:
   [[nodiscard]] bool atOffDirective() const;
   [[nodiscard]] bool atWithDirective() const;
   [[nodiscard]] bool atTakingDirective() const;
+  [[nodiscard]] bool atAltDirective() const;
   [[nodiscard]] bool atDeclareDirective() const;
   void parseWith( Token directive );
-  void parseTaking( Token directive, model::Taking kind );
+  void parseTaking( Token directive, Taking kind );
+  void parseAlternatives( Token directive );
   void parseDeclare( Token directive );
 
   /// The type a `.declare` may carry, read where one is written; nothing,
   /// and reported, where what stands there is not one of the subset's.
-  [[nodiscard]] std::optional<model::DeclaredType> parseDeclaredType();
+  [[nodiscard]] std::optional<DeclaredType> parseDeclaredType();
 
   /// Whether a word after `arg` or `ret` is a place — `a`, `xy`, `am` — and
   /// not a type.
@@ -127,8 +136,12 @@ private:
   [[nodiscard]] bool atTemporaryStatement() const;
 
   /// A `.own` or `.root` is waiting for the instruction or data below it.
-  std::optional<model::Taking> mPendingTaking;
+  std::optional<Taking> mPendingTaking;
   Token mTakingToken;
+
+  /// A `.alt` is waiting for the instruction below it.
+  bool mAltPending = false;
+  Token mAltToken;
 
   /// A `.declare` is waiting for the `.ztemp` below it; anything else there
   /// is reported and the Builder drops it.
@@ -149,6 +162,7 @@ private:
   /// refused as a whole can tell the Builder to drop it.
   bool mWithsHanded = false;
   bool mTakingHanded = false;
+  bool mAltHanded = false;
 
   /// Hands every pending `.off` the statement beginning at `statement`.
   void flushPendingOffs( std::optional<diag::SourceLocation> statement );
@@ -162,6 +176,7 @@ private:
   /// `.driver ROLE NAME [NAME]`: a role and the one or two names it takes.
   void parseDriver( Token directive );
   void parseTransition( Token directive );
+  void parseRelease( Token directive );
 
   /// `.macro NAME [PARAM, ...]` and `.endm`. A body holds instructions and
   /// data and nothing else, which the grammar holds it to, since that is a
@@ -191,7 +206,7 @@ private:
 
   /// One `"..." = EXPRESSION` line, appended when it was written well enough to
   /// mean something.
-  void parseCharsetEntry( std::vector<model::CharsetEntry>& into );
+  void parseCharsetEntry( std::vector<CharsetEntry>& into );
 
   /// True when the cursor is on `.endcharset` or `.endch`.
   [[nodiscard]] bool atCharsetEnd() const;
@@ -204,6 +219,9 @@ private:
   bool parseIndexSuffix( Token mnemonic, ExpressionPtr operand, diag::SourceSpan span );
 
   /// Whether the token after the current one touches it, with nothing between.
+  /// Whether the line is a prefix that waits for the statement below it with
+  /// any other that does: `.off`, `.with`, `.own`, `.root` or `.alt`.
+  [[nodiscard]] bool atJoiningPrefix() const;
   [[nodiscard]] bool nextIsAdjacent() const;
 
   /// How far ahead the parenthesis at the cursor is matched, or nothing when it

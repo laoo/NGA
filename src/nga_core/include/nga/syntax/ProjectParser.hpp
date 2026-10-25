@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace nga::syntax
@@ -44,24 +45,27 @@ private:
   void parseFrames( Token keyword );
   void parsePhase( Token keyword );
   void parseResident( Token name );
+  void parseLoad( Token name );
   void parseGroup( Token keyword );
   void parseTransform( Token keyword );
 
   /// The body of a block that holds one list of names — `resident`, `group`
   /// — comma-separated, where two names with nothing between them are
   /// reported once and both taken. `entryError` is what is said of an entry
-  /// that is not a name.
+  /// that is not a name. `readsBase` is a group's, which may hold the `base`
+  /// a group no longer has.
   void parseNameBody( Token name,
                       diag::DiagnosticId entryError,
                       std::function<void( Token )> const& take,
-                      std::function<void( Token, Token )> const* base = nullptr );
+                      bool readsBase = false );
 
-  /// `base WINDOW = STATE`, in a `phase` or a `group` block.
-  void parseBase( Token keyword, std::function<void( Token, Token )> const& take );
+  /// `base` and what followed it, reported as gone and passed over.
+  void skipBase();
   void parseTarget( Token name );
   void parseStorage( Token name );
   void parseRegion( Token keyword );
   void parseRegister( Token keyword );
+  void parseHolder( Token keyword );
   void parseUnitSet( Token keyword );
   void parseWindow( Token keyword );
   void parsePanes( Token name );
@@ -74,6 +78,10 @@ private:
   /// could not be read, which has been reported.
   [[nodiscard]] std::optional<std::pair<ExpressionPtr, ExpressionPtr>> parseRange( Token after );
   void parseInclude( Token keyword );
+  void parseChoose( Token name );
+
+  /// Reports that what follows `keyword` wanted quotes, which `what` names.
+  void reportUnquoted( Token keyword, std::string_view what ) const;
   void parseEntry( Token keyword );
 
   /// One value: an expression of the shared language, parsed by the parser
@@ -81,9 +89,6 @@ private:
   /// something — a value in the Project is written out, since there are no
   /// Symbols for a name to mean — and both have been reported.
   ExpressionPtr parseValue( Token after );
-
-  /// A comma-separated list of values, which ends where the commas stop.
-  void parseValueList( Token after, std::function<void( ExpressionPtr )> const& take );
 
   /// Whether the current token can begin a value.
   [[nodiscard]] bool atValueStart() const;

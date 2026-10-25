@@ -3,6 +3,7 @@
 #include "nga/c/Ir.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace nga::c
@@ -56,12 +57,20 @@ struct Range
 /// of the Proc's own — which nothing but its own stores reaches — is what its
 /// last store left, narrowed past a branch on it, and where ways meet what
 /// all of them agree on, where every way comes from an earlier block. A
-/// loop's header takes as given that its bytes hold no less than on the way
-/// in; where a store of the loop may go below, the header takes nothing of
-/// that byte and the sweep runs again, which only ever takes back and so ends.
+/// loop's header takes as given that its bytes hold what they held on the way
+/// in; where a store of the loop may go above, the header takes only the
+/// least, and where one may go below, nothing of that byte, and the sweep runs
+/// again, which only ever takes back and so ends.
 /// Any other byte is read as its type allows. See
 /// docs/decisions/0134-a-number-added-to-an-index-goes-into-the-address.md.
 [[nodiscard]] std::vector<Range> rangesOf( ir::Function const& function );
+
+/// Per comparison, by its result's value, the range its right operand holds
+/// where it stands: an object of the Proc's own as the sweep knows it there —
+/// a loop's bound stored before the loop and written in it by nothing — and
+/// anything else as `rangeOf` reads it. Nothing for a value that is no
+/// comparison.
+[[nodiscard]] std::vector<std::optional<Range>> comparedBoundsOf( ir::Function const& function );
 
 /// The range an operand reads as: a constant is itself, an object and a
 /// constant the text names by its name are their type's, and a value is what

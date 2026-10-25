@@ -52,6 +52,14 @@ public:
   {
     return std::nullopt;
   }
+
+  /// Where a Section of a Pane stands in the medium's own memory — in the
+  /// first member, for a family's — which needs Place to have run too. See
+  /// docs/decisions/0251-a-bank-has-a-linear-address.md.
+  [[nodiscard]] virtual std::optional<std::int64_t> linearAddressOf( SectionRef /*where*/ )
+  {
+    return std::nullopt;
+  }
 };
 
 /// A source that knows nothing, which is what a declared value is measured
@@ -87,5 +95,20 @@ std::optional<std::int64_t> declaredValueOf( diag::SourceManager const& sources,
                                              Charsets const* charsets,
                                              ModuleIndex home,
                                              syntax::Expression const& node );
+
+/// How far past the Label at Chunk `chunk` of Section `where` an expression
+/// stands, where it stands at a fixed distance from it: `ptr + 1` is one past,
+/// `ptr + OFFSET` with OFFSET declared is whatever OFFSET is, and an expression
+/// naming anything beside that Label says nothing. Found by evaluating it
+/// where the Label has an address and nothing else has one, twice, at two
+/// addresses, so that a shape the address does not pass through whole —
+/// `ptr * 2`, `<ptr` — is told from an offset.
+std::optional<std::int64_t> offsetPast( diag::SourceManager const& sources,
+                                        GlobalSymbols const& symbols,
+                                        Charsets const* charsets,
+                                        ModuleIndex home,
+                                        syntax::Expression const& node,
+                                        SectionRef where,
+                                        ChunkIndex chunk );
 
 } // namespace nga::model

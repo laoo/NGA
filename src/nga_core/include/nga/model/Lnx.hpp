@@ -40,15 +40,6 @@ constexpr std::uint32_t LYNX_CHUNK = LYNX_BLOCK + 1;
 /// writes is one block, which is why the rest of it is read unencrypted.
 constexpr std::uint32_t LYNX_MOST_BLOCKS = 5;
 
-/// One of the four geometries a board is wired for, named as a Project writes
-/// it: the page size in bytes, and the image's whole size, which is 256 pages of
-/// it.
-struct LynxBoard
-{
-  std::string_view name;
-  std::uint32_t pageSize;
-};
-
 /// In the order a finding lists them.
 std::span<LynxBoard const> lynxBoards();
 

@@ -31,6 +31,9 @@ public:
   void set( DiagnosticId id, SeverityOverride value );
   void clear( DiagnosticId id );
 
+  /// Whether something has already overridden this identifier's severity.
+  [[nodiscard]] bool overrides( DiagnosticId id ) const;
+
   /// Effective severity, or nothing when the diagnostic is suppressed.
   /// Notes are never overridden: they exist only as part of a parent.
   [[nodiscard]] std::optional<Severity> effectiveFor( DiagnosticId id ) const;

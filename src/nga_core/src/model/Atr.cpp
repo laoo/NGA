@@ -29,10 +29,10 @@ namespace
 /// first three sectors hold 128 bytes: a reader tells a double-density image
 /// with short boot sectors from one padded to 256 by whether the paragraph
 /// count divides by sixteen, and this one does not. See docs/spec/atr.md.
-std::array<std::uint8_t, 16> atrHeader( std::uint32_t length )
+std::array<std::uint8_t, ATR_HEADER_SIZE> atrHeader( std::uint32_t length )
 {
   std::uint32_t const paragraphs = length / 16;
-  std::array<std::uint8_t, 16> header{};
+  std::array<std::uint8_t, ATR_HEADER_SIZE> header{};
   header[0] = 0x96;
   header[1] = 0x02;
   header[2] = static_cast<std::uint8_t>( paragraphs & 0xFF );
@@ -97,13 +97,12 @@ void reportInRecord( diag::DiagnosticSink& sink, Patched const& build, Resident 
 {
   GlobalSymbols const& symbols = build.symbols();
   Section const& section = symbols.moduleAt( one.where.module ).sectionAt( one.where.section );
-  sink.add(
-      diag::diagnostic( diag::DiagnosticId::ATR_SECTION_IN_BOOT_RECORD )
-          .at( section.span().begin, section.span().length )
-          .arg( "section", symbols.moduleAt( one.where.module ).displayNameOf( one.where.section, build.sources() ) )
-          .arg( "address", static_cast<std::int64_t>( one.address ) )
-          .arg( "begin", static_cast<std::int64_t>( ATR_BOOT_ADDRESS ) )
-          .arg( "end", static_cast<std::int64_t>( ATR_BOOT_ADDRESS + ATR_BOOT_SIZE - 1 ) ) );
+  sink.add( diag::diagnostic( diag::DiagnosticId::ATR_SECTION_IN_BOOT_RECORD )
+                .at( section.span().begin, section.span().length )
+                .arg( "section", symbols.moduleAt( one.where.module ).displayNameOf( one.where.section ) )
+                .arg( "address", static_cast<std::int64_t>( one.address ) )
+                .arg( "begin", static_cast<std::int64_t>( ATR_BOOT_ADDRESS ) )
+                .arg( "end", static_cast<std::int64_t>( ATR_BOOT_ADDRESS + ATR_BOOT_SIZE - 1 ) ) );
 }
 
 } // namespace
@@ -174,11 +173,7 @@ AtrFile emitAtr( Patched const& build, diag::DiagnosticSink& sink )
     out.segment( one.address, one.content );
   }
 
-  diag::SeverityPolicy quietPolicy;
-  diag::DiagnosticSink quiet{ quietPolicy };
-  bool const alreadyReported = isEnteredByAnEdge( project.phases, project.phases.entry );
-  std::optional<std::uint32_t> const run =
-      entryAddressOf( build, project.phases.entry, alreadyReported ? quiet : sink );
+  std::optional<std::uint32_t> const run = startAddressOf( build, sink );
   if ( !run.has_value() )
   {
     return {};
@@ -194,12 +189,7 @@ AtrFile emitAtr( Patched const& build, diag::DiagnosticSink& sink )
   // **use**, which is why its sector is written into the record here and not
   // into the loader's source — see docs/spec/atr.md.
   std::vector<Stored> const stored = storedImages( build );
-  std::uint32_t used = 0;
-  for ( Stored const& one : stored )
-  {
-    used = std::max( used, target.positionOf( one.at ) + static_cast<std::uint32_t>( one.form.size() ) );
-  }
-  std::uint32_t const storageSectors = ( used + ATR_SECTOR_SIZE - 1 ) / ATR_SECTOR_SIZE;
+  std::uint32_t const storageSectors = ( storageUsedOf( build ) + ATR_SECTOR_SIZE - 1 ) / ATR_SECTOR_SIZE;
   std::uint32_t const imageSector = ATR_FIRST_STORAGE_SECTOR + storageSectors;
   std::uint32_t const imageSectors =
       ( static_cast<std::uint32_t>( stream.size() ) + ATR_SECTOR_SIZE - 1 ) / ATR_SECTOR_SIZE;
@@ -241,7 +231,7 @@ AtrFile emitAtr( Patched const& build, diag::DiagnosticSink& sink )
   }
   std::ranges::copy( stream, sectors.begin() + static_cast<std::ptrdiff_t>( atrOffsetOfSector( imageSector ) ) );
 
-  std::array<std::uint8_t, 16> const header = atrHeader( static_cast<std::uint32_t>( sectors.size() ) );
+  std::array<std::uint8_t, ATR_HEADER_SIZE> const header = atrHeader( static_cast<std::uint32_t>( sectors.size() ) );
   std::vector<std::uint8_t> file( header.begin(), header.end() );
   file.insert( file.end(), sectors.begin(), sectors.end() );
   return AtrFile{ .bytes = std::move( file ) };

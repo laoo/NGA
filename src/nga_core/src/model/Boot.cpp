@@ -46,7 +46,7 @@ ngaBootRecord
         .byte 0                 ; the OS ignores this byte
         .byte 3                 ; sectors it reads, from the first
         .word $0700             ; where it puts them
-        .root                   ; the OS calls what stands here
+        .root dosini            ; the OS calls what stands here
         .word ngaBootIdle       ; DOSINI, called once the load returns and on reset
 .ends
 
@@ -168,7 +168,7 @@ fill
 
 ; DOSINI: the OS calls it once the load has returned and on every reset, so it
 ; is in memory by then and the solver places it as it places any Proc.
-.proc ngaBootIdle, root
+.proc ngaBootIdle
         rts
 .endp
 )asm";
@@ -183,14 +183,10 @@ std::string bootRecordSource()
 void addBootRecord( Project& project, diag::SourceManager& sources )
 {
   diag::FileId const file = sources.addFile( "<nga>/boot.asm", bootRecordSource() );
-  ModuleIndex const index{ static_cast<std::uint32_t>( project.modules.size() ) };
-  project.modules.push_back( ProjectModule{
-      .name = std::string{ BOOT_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
-  for ( Phase& phase : project.phases.phases )
-  {
-    phase.needs.push_back( index );
-  }
-  deriveResidency( project );
+  addToolModule(
+      project,
+      ProjectModule{
+          .name = std::string{ BOOT_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
 }
 
 } // namespace nga::model

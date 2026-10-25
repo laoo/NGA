@@ -5,7 +5,10 @@
 #include "nga/model/Merge.hpp"
 #include "nga/model/Types.hpp"
 #include "nga/syntax/Expression.hpp"
+#include "nga/syntax/Operand.hpp"
 
+#include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -24,35 +27,61 @@ namespace nga::model
 /// something has been reported, so one bad operand costs one finding.
 Type typeOf( Merged const& build, ModuleIndex home, syntax::Expression const& node, diag::DiagnosticSink& sink );
 
-/// For every Movable Section, the Residencies across which a direct Reference
-/// holds it to one address: a Chunk encodes the address it sees, and it sees
-/// one in every Phase it is present in, so the Section may not move between
-/// those Phases. A Reference from the Section's own Module freezes it across
-/// its whole Residency, which is why a Section that names itself does not
-/// move at all. See docs/decisions/0030-movable-sections.md.
+/// What an instruction's operand, written in Module `home` in `shape`, makes
+/// of the instruction's width: its type and, for an Integer, the value the
+/// author declared, asked quietly, and the PlacementClass these give —
+/// nothing where they give none, which Size is the one to report. Only a
+/// direct shape has two widths to choose between, so of any other shape
+/// nothing is asked. Size sizes an instruction by it, and the type check
+/// knows by it how many bytes an operand the program writes in place has.
+struct OperandPlacement
+{
+  Type type{};
+  std::optional<std::int64_t> value{};
+  std::optional<syntax::PlacementClass> placement{};
+};
+
+[[nodiscard]] OperandPlacement operandPlacement( Merged const& build,
+                                                 ModuleIndex home,
+                                                 syntax::Expression const& operand,
+                                                 syntax::OperandShape shape );
+
+/// Whether `site`, written in Module `home`, names a byte of code the program
+/// may write in place: within the operand of the instruction at the Label
+/// `target`, where that instruction does not jump and its operand names no
+/// Temporary directly, or its opcode where `.alt` declares what else it may
+/// be — but not the start of a Proc, whose address is a way in. Taken without
+/// `.own` or `.root`, such an address is data, which nobody follows — see
+/// docs/decisions/0238-the-address-of-a-byte-the-program-may-write-is-data.md.
+[[nodiscard]] bool
+namesSettableByte( Merged const& build, ModuleIndex home, SymbolRef target, syntax::Expression const& site );
+
+/// Whether an address `site` takes through the Label `target`, with nothing
+/// said, is data rather than a way in: a byte the program may write, as
+/// `namesSettableByte` says, or a position reached through a Label that
+/// stands at data or a reservation in a `.section`, though the Section holds
+/// code too. Inside a Proc only the first — see
+/// docs/decisions/0240-an-address-of-data-in-a-section-of-code-is-data.md.
+[[nodiscard]] bool
+takenAsData( Merged const& build, ModuleIndex home, SymbolRef target, syntax::Expression const& site );
+
+/// For every Section, the Phases a Reference to it is made from, of any kind:
+/// the Residency of every Module whose Section names it. Where a Section is
+/// named its bytes must be visible, so it is hidden under a ROM nowhere in
+/// these — see docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
 ///
 /// Produced by the type check, which is where References are resolved, and
-/// read by Place and by the layout verifier. Keyed like every Step result.
-class Freezes
+/// read by Place. Keyed like every Step result.
+class Referrers
 {
 public:
-  explicit Freezes( std::span<Module const> modules );
+  explicit Referrers( std::span<Module const> modules );
 
-  void freeze( SectionRef where, Residency const& across );
-
-  [[nodiscard]] std::span<Residency const> of( SectionRef where ) const;
-
-  /// The second thing the type check learns for Place: a Section that runs,
-  /// or is named, while a `.with` shows some state of a Window is not seen
-  /// there if it stands in that Window's base state, so Place keeps it out
-  /// of the Window's ranges — see docs/decisions/0055-with.md.
-  void keepOut( SectionRef where, WindowIndex window );
-
-  [[nodiscard]] std::span<WindowIndex const> keptOutOf( SectionRef where ) const;
+  void add( SectionRef where, Residency const& from );
+  [[nodiscard]] Residency const& of( SectionRef where ) const;
 
 private:
-  std::vector<std::vector<std::vector<Residency>>> mByModule;
-  std::vector<std::vector<std::vector<WindowIndex>>> mKeepOut;
+  std::vector<std::vector<Residency>> mByModule;
 };
 
 /// Types every expression of the program, and applies the rules that belong to
@@ -64,9 +93,9 @@ private:
 /// target is there whenever the referrer is. The Phases are what names the one
 /// where it is not. See docs/decisions/0028-references-across-residency.md.
 ///
-/// The same walk over References is what finds where a Movable Section is
-/// held still, which is the result returned — and, with the `.with` rules of
-/// docs/decisions/0055-with.md, which Sections Place keeps out of a Window.
-Freezes checkTypes( Pruned const& build, diag::DiagnosticSink& sink );
+/// The same walk over References is what finds the Phases each Section is
+/// named from, which is the result returned; the `.with` rules of
+/// docs/decisions/0055-with.md are checked over the same walk.
+Referrers checkTypes( Pruned const& build, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

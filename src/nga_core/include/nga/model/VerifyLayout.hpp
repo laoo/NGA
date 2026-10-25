@@ -33,9 +33,6 @@ namespace nga::model
 /// - a pinned Section stands at the address its source declared
 /// - a Proc stands immediately after the Proc whose `then` names it, in
 ///   every Phase both stand in
-/// - a Movable Section stands at one address across every Residency a
-///   Reference sees it from — the Freezes — and at every address it stands
-///   at, the rules below hold
 /// - an aligned Section starts at a multiple of its alignment
 /// - a Section given a boundary does not cross a multiple of it
 /// - a zero page Section ends below `$0100`

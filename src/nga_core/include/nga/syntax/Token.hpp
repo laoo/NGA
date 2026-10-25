@@ -100,6 +100,14 @@ struct Token
   }
 };
 
+/// Whether nothing stands between two tokens, not even a space. The lexer
+/// drops whitespace, so this is read from the tokens' own extents: what tells
+/// `one.fill` from `lda .count`, and a Project file's `[N]` from a list.
+[[nodiscard]] inline bool touches( Token const& before, Token const& after )
+{
+  return after.location.rawOffset() == before.location.rawOffset() + before.length;
+}
+
 static_assert( sizeof( Token ) == 12, "Token must stay twelve bytes wide" );
 
 } // namespace nga::syntax

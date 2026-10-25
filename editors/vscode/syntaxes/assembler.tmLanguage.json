@@ -1,0 +1,32 @@
+{
+  "name": "NGA Assembler",
+  "scopeName": "source.nga.asm",
+  "patterns": [
+    {
+      "name": "comment.line.semicolon.nga",
+      "match": ";.*$"
+    },
+    {
+      "name": "string.quoted.double.nga",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.nga",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.nga",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.nga",
+          "match": "\\\\."
+        }
+      ]
+    }
+  ]
+}

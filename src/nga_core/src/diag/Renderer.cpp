@@ -14,20 +14,6 @@ namespace nga::diag
 namespace
 {
 
-std::string_view severityLabel( Severity severity )
-{
-  switch ( severity )
-  {
-  case Severity::ERROR:
-    return "error";
-  case Severity::WARNING:
-    return "warning";
-  case Severity::NOTE:
-    return "note";
-  }
-  return "error";
-}
-
 std::size_t digitCount( std::uint32_t value )
 {
   std::size_t digits = 1;
@@ -88,6 +74,20 @@ DisplayLine layOutLine( std::string_view line, std::uint32_t byteColumn, std::ui
       continue;
     }
 
+    // Any other control character is already a finding of the lexer's, and
+    // echoed as it is it would act on the terminal instead of being seen —
+    // a NUL ends the report wherever it is read as a C string. Its picture
+    // from Unicode's Control Pictures block stands in its column instead.
+    if ( auto const code = static_cast<unsigned char>( c ); code < 0x20U || code == 0x7FU )
+    {
+      unsigned const picture = code == 0x7FU ? 0x2421U : 0x2400U + code;
+      display.text.push_back( static_cast<char>( 0xE0U | ( picture >> 12U ) ) );
+      display.text.push_back( static_cast<char>( 0x80U | ( ( picture >> 6U ) & 0x3FU ) ) );
+      display.text.push_back( static_cast<char>( 0x80U | ( picture & 0x3FU ) ) );
+      ++width;
+      continue;
+    }
+
     display.text.push_back( c );
 
     // UTF-8 continuation bytes belong to the character before them and occupy
@@ -133,7 +133,7 @@ void appendLocated( std::string& out, SourceManager const& sources, Diagnostic c
 
 void appendDiagnostic( std::string& out, SourceManager const& sources, Diagnostic const& value, Severity severity )
 {
-  out.append( severityLabel( severity ) );
+  out.append( severityName( severity ) );
 
   // Notes print without an identifier: they cannot be controlled separately, so
   // a number the reader cannot act on would be noise. It survives in the JSON,
@@ -183,12 +183,26 @@ void appendJsonLocation( std::string& out,
   ExpandedLocation const where = sources.expand( span.begin );
   std::uint32_t const length = span.length == 0 ? 1 : span.length;
 
+  // The end is a position of its own, since a span over an expression may
+  // cross a line: one past its last byte, which a file has room for. A span
+  // of nothing is a character wide where it stands, and one that would end
+  // outside its file is held to the line it began on.
+  ExpandedLocation end{ .path = where.path, .line = where.line, .column = where.column + length };
+  if ( span.length > 0 )
+  {
+    ExpandedLocation const past = sources.expand( SourceLocation::fromRawOffset( span.begin.rawOffset() + length ) );
+    if ( past.path == where.path && past.line >= where.line )
+    {
+      end = past;
+    }
+  }
+
   out.append( indent ).append( R"("location": { "file": )" );
   nga::json::appendString( out, where.path );
   out.append( ", \"line\": " ).append( std::to_string( where.line ) );
   out.append( ", \"column\": " ).append( std::to_string( where.column ) );
-  out.append( ", \"endLine\": " ).append( std::to_string( where.line ) );
-  out.append( ", \"endColumn\": " ).append( std::to_string( where.column + length ) );
+  out.append( ", \"endLine\": " ).append( std::to_string( end.line ) );
+  out.append( ", \"endColumn\": " ).append( std::to_string( end.column ) );
   out.append( " },\n" );
 
   // Absent, never null, when no `.source` covers the position.
@@ -220,7 +234,7 @@ void appendJsonDiagnostic( std::string& out,
   out.append( ",\n" );
 
   out.append( indent ).append( "  \"severity\": " );
-  nga::json::appendString( out, severityLabel( severity ) );
+  nga::json::appendString( out, severityName( severity ) );
   out.append( ",\n" );
 
   out.append( indent ).append( "  \"message\": " );

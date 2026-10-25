@@ -63,6 +63,10 @@ An array given a string literal is given its characters **and its terminating
 `\0`**. So the Charset must map `\0` as well, or the tool reports that it does
 not map a character of the literal.
 
+The one exception is an array whose size holds the characters and nothing more.
+`u8 name[3] = "ABC";` is given the three characters and no `\0`, as C has it, so
+the Charset is not asked for a `\0` there.
+
 The escapes are the assembler's six: `\\`, `\"`, `\'`, `\n`, `\t` and `\0`.
 There is no `\xNN`.
 
@@ -157,6 +161,11 @@ that byte, so one function's control flow answers the question. Write
 Three cases go unchecked, because the tool cannot see the write: an array, an
 object whose address you take, and an object you gave a value.
 
+**`inline` asks for every call of a function to be replaced by its body.** The
+tool does that without being asked where a function is called once, or where
+its body takes no more bytes than a call of it, and under `optimize speed` a
+little more. `[[noinline]]` on a function keeps every call of it a call.
+
 **`volatile` is exact.** Every read in the source is one read in the output and
 every store one store, in order. None is held in a register, none leaves its
 loop, a store is not forwarded to a later read, and no byte is changed in place
@@ -204,10 +213,23 @@ name of the byte its `.declare` names.
 
 `const` on an `extern` keeps C from writing the name.
 
+A name the assembler exports from a `.namespace` is written with `::` where the
+assembler writes a dot. `cel.angle` is `cel::angle` in C, and `gfx.inner.deep`
+is `gfx::inner::deep`. An `extern` may declare such a name:
+
+```c
+extern const Sprite gfx::sprites[];
+cel::angle[SPRITE] = turned;            // sta cel.angle,x
+```
+
+When the first part is the name of an `enum`, the name is that type's
+enumerator, as before. C cannot define a name of its own in a Namespace, so a
+variable, a function or a parameter named `gfx::count` is refused.
+
 ## Attributes
 
 An attribute is written before a declaration, a function, a block or a `return`,
-with no prefix. The dialect has nine.
+with no prefix. The dialect has ten.
 
 | Attribute | Stands on | Means |
 |---|---|---|
@@ -220,6 +242,7 @@ with no prefix. The dialect has nine.
 | `[[implements(SLOT)]]` | a function or a file-scope object | writes `.implements SLOT, NAME` |
 | `[[striped]]` | an array | a Section per byte of an element |
 | `[[placement(...)]]` | a declaration, a block or a function | `zeropage` or `absolute` |
+| `[[noinline]]` | a function | no call of it is wrapped into its caller |
 
 An attribute with a prefix, one given arguments where it takes none, and any of
 C23's own are none of the dialect's.
@@ -297,11 +320,17 @@ you declared.
 Every byte the program names takes the class of the innermost `[[placement]]`
 over its declaration. The compiler's own scratch follows the function. With
 nothing over it a byte is `zeropage` inside a function and `absolute` at file
-scope.
+scope. A `static`, `volatile` or address-taken local is `absolute`, as a
+file-scope byte is, because it keeps its place for the whole program. So is a
+local array, which is a block of its own rather than bytes of the function:
+`[[placement(zeropage)]] u8 buf[4];` puts it in the zero page, and `u8 buf[4];`
+leaves it off.
 
 A pointer lies in the zero page whatever you ask. A `struct` or a `union` of
 more than four bytes lies off it. A `[[striped]]` array settles its own place.
-Asking for the class already in force is a warning.
+A local array or `struct` that is `const` and given constants is read-only data
+and lies off the zero page, so asking `zeropage` for it is an error. Asking for
+the class already in force is a warning.
 
 ## Function types
 
@@ -360,8 +389,10 @@ statement that neither assigns nor calls.
 The grammar reads these and the compiler does not compile them yet, so each is
 an error where it stands: a call of anything but a name, an assignment to
 anything but a name, an expression statement that neither assigns nor calls, a
-shift by a value that is not a `u8`, a comparison of two constants, and any
-operator of a pointer but `+`, `-`, `==` and `!=`.
+shift by a value that is not a `u8`, a comparison of a character a Charset
+translates with another constant, and any operator of a pointer but `+`, `-`,
+`==` and `!=`. Two constants the compiler knows are compared where it compiles
+them: `if (WINDOW > 8)` keeps one branch and tests nothing.
 
 ## What a program may not count on
 

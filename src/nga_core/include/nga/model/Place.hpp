@@ -17,8 +17,8 @@
 namespace nga::model
 {
 
-/// The result of the Place Step: the runtime address of every Section — one
-/// address, or for a Movable Section one per Phase it is present in.
+/// The result of the Place Step: the runtime address of every Section, one
+/// in every Phase it is present in.
 ///
 /// Held apart from the Sections, which is what makes the loop from address to
 /// size to PlacementClass unwritable rather than merely forbidden — while Size
@@ -34,66 +34,39 @@ public:
   void placePane( PaneIndex pane, std::uint32_t state );
   [[nodiscard]] std::optional<std::uint32_t> stateOfPane( PaneIndex pane ) const;
 
-  /// One address, in every Phase.
   void place( SectionRef where, std::uint32_t address );
-
-  /// This Phase's address, for a Movable Section.
-  void place( SectionRef where, PhaseIndex phase, std::uint32_t address );
 
   [[nodiscard]] bool isPlaced( SectionRef where ) const;
 
-  /// Where the Section stands in one Phase. Ask only of a Phase it is present
-  /// in and placed for.
-  [[nodiscard]] std::uint32_t addressIn( SectionRef where, PhaseIndex phase ) const;
-
-  /// The one address the Section has across every Phase of `across` it is
-  /// placed in — every Phase at all, when `across` is null — or nothing where
-  /// those differ. What a Chunk asking from a Module sees, by the rule of
-  /// docs/decisions/0030-movable-sections.md.
-  [[nodiscard]] std::optional<std::uint32_t> addressAcross( SectionRef where, Residency const* across ) const;
-
-  /// The one address of a Section that has one. A Movable Section standing
-  /// at several answers with its lowest Phase's, which no caller may rely on
-  /// unless it knows the Section is not one.
+  /// Where the Section stands, in every Phase it is present in. Ask only of
+  /// one that is placed.
   [[nodiscard]] std::uint32_t addressOf( SectionRef where ) const;
 
 private:
-  struct Placement
-  {
-    std::optional<std::uint32_t> everywhere;
-    std::vector<std::optional<std::uint32_t>> byPhase;
-  };
-
-  [[nodiscard]] Placement const& at( SectionRef where ) const;
-
-  std::vector<std::vector<Placement>> mByModule;
+  std::vector<std::vector<std::optional<std::uint32_t>>> mByModule;
   std::vector<std::optional<std::uint32_t>> mPaneStates;
 };
 
 /// The address space a Pane's Sections stand in, once the Layout gave the
 /// Pane its state: a number per Bank of a set, whichever Window shows it,
-/// and per named state of each Window — where `fixed` and a Window's base
-/// state are the one space with no number. Two Sections in different
+/// and per named state of each Window — where `fixed` is the one space
+/// with no number. Two Sections in different
 /// spaces never collide, since a Window shows one state at a time. Nothing
 /// for a Pane the Layout could not place.
 std::optional<std::uint32_t> addressSpaceOf( Target const& target, Layout const& layout, PaneIndex pane );
 
 /// Sizes and addresses together: what an expression can be evaluated against
 /// once both Steps have run.
-///
-/// An address is asked for from somewhere: a Chunk of a Module sees a Movable
-/// Section at the one address it holds across that Module's Residency, and
-/// sees nothing where it holds several — which the type check has made
-/// impossible for a Chunk, and which an Assertion may still ask.
 class Resolved final : public ValueSource
 {
 public:
   Resolved( Sizes const& sizes, Layout const& layout ) : mSizes( &sizes ), mLayout( &layout ) {}
 
-  /// Whose Residency addresses are asked across from now on.
-  void viewFrom( Residency const& residency )
+  /// Where the Target and the Modules are known as well, a Pane's Section
+  /// has a linear address too.
+  Resolved( Sizes const& sizes, Layout const& layout, Target const& target, std::span<Module const> modules )
+      : mSizes( &sizes ), mLayout( &layout ), mTarget( &target ), mModules( modules )
   {
-    mViewpoint = &residency;
   }
 
   [[nodiscard]] std::optional<std::int64_t> sizeOfSection( SectionRef where ) override
@@ -117,8 +90,7 @@ public:
     {
       return std::nullopt;
     }
-    std::optional<std::uint32_t> const address = mLayout->addressAcross( where, mViewpoint );
-    return address.has_value() ? std::optional<std::int64_t>{ *address } : std::nullopt;
+    return mLayout->addressOf( where );
   }
 
   [[nodiscard]] std::optional<std::int64_t> stateOfPane( PaneIndex pane ) override
@@ -127,10 +99,13 @@ public:
     return state.has_value() ? std::optional<std::int64_t>{ *state } : std::nullopt;
   }
 
+  [[nodiscard]] std::optional<std::int64_t> linearAddressOf( SectionRef where ) override;
+
 private:
   Sizes const* mSizes;
   Layout const* mLayout;
-  Residency const* mViewpoint = nullptr;
+  Target const* mTarget = nullptr;
+  std::span<Module const> mModules{};
 };
 
 /// The Place Step. Every Section becomes a Claim and the solver is asked about
@@ -145,12 +120,6 @@ private:
 /// that puts one inside it is an error: while a Bank is switched in for the
 /// copy, an address in the Window is the Bank. See
 /// docs/decisions/0017-payloads-and-banks.md.
-///
-/// A Movable Section is a Claim per Phase, held to one address wherever the
-/// Freezes say a Reference sees it, and the solver moves it between Phases
-/// only where that lets a layout exist — every move is bytes copied at run
-/// time, and the fewest of those is what it minimises. See
-/// docs/decisions/0030-movable-sections.md.
 ///
 /// Before the solver is asked, what every Phase's Sections take of each pool
 /// is summed against what the pool holds, and a Phase that outweighs one is
@@ -171,5 +140,67 @@ Layout placeSections(
 /// that is the whole point of them: they guard assumptions the solver knows
 /// nothing about.
 void checkAssertions( Placed const& build, diag::DiagnosticSink& sink );
+
+/// Whether the program can keep bytes hidden under a ROM at all: a `.xex`
+/// without storage, whose driver switches its ROMs and masks the machine's
+/// interrupts while the load has them out — see
+/// docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+[[nodiscard]] bool canHide( Merged const& build );
+
+/// Whether a Module is a ROM the driver switches out.
+[[nodiscard]] bool isSwitchedRom( Merged const& build, ModuleIndex module );
+
+/// Whether `section` may stand under `rom`, a Section of a ROM the driver
+/// switches out: in every Phase both are present in, `section` is held for a
+/// later Phase, its Module is not needed and nothing there names it. Its bytes
+/// are hidden there.
+[[nodiscard]] bool hidesUnder( Sized const& build, SectionRef section, SectionRef rom );
+
+/// The Phases a Section's bytes are held apart in: what `heldAcross` says of
+/// its Residency, with every Phase the hardware may hold it in counted as
+/// one that needs it — see
+/// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+[[nodiscard]] Residency heldAcrossOf( Traced const& build, SectionRef where );
+
+/// Whether a Section is the machine's memory while a `.xex` loads: pinned,
+/// with no bytes, in a Module the `load` block needs.
+[[nodiscard]] bool isMachineAtLoad( Merged const& build, SectionRef section );
+
+/// Whether the load Step places a Section rather than Place: `nga.load`'s, and
+/// what else a Module the `load` block needs holds — the program's own code
+/// for the load, which runs before the start is written and is overwritten by
+/// it — see
+/// docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+///
+/// Code of the load's that a Holder holds into a Phase is that Phase's, and
+/// Place places it — see
+/// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+/// So is a Section in a Pane or a unit set, which the units write — see
+/// docs/decisions/0261-a-section-of-the-load-in-a-medium-is-written-with-the-units.md.
+[[nodiscard]] bool placedByTheLoad( Traced const& build, SectionRef section );
+
+/// Whether a Section is the program's own code for the load: placed by the
+/// load Step and none of the tool's — see
+/// docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+[[nodiscard]] bool isLoadCode( Traced const& build, SectionRef section );
+
+/// A range of memory the machine holds while a `.xex` loads, and the Section
+/// of the Module the load needs that says so.
+struct HeldWhileLoading
+{
+  AddressRange range;
+  SectionRef holder;
+};
+
+/// What the machine holds while a `.xex` loads: every pinned Section with no
+/// bytes of the Modules the `load` block names. Nothing for another
+/// Container — see
+/// docs/decisions/0246-the-load-of-a-xex-needs-what-the-machine-holds-then.md.
+[[nodiscard]] std::vector<HeldWhileLoading> heldWhileLoading( Sized const& build );
+
+/// Whether the `.xex` writes this Section's bytes while it loads, so that
+/// nothing the machine holds then may stand under it: a Section with bytes
+/// present in the entry Phase.
+[[nodiscard]] bool writtenWhileLoading( Sized const& build, SectionRef section );
 
 } // namespace nga::model

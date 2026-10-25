@@ -1,11 +1,12 @@
 include "atari/130xe.ngp"
+include "atari/extension.ngp"
 
-modules { "print.asm" "run.asm" "shared.asm" "intro.asm" "level.asm"
+modules { "print.asm" "run.asm" "intro.asm" "level.asm"
   script( "tools/rows.js", map = "maps/level1.map", width = 37, in = level ) as maps }
 
 panes in ext { level }
 
-resident { print, run, shared }
+resident { print, run }
 
 phase intro { needs intro  then level  entry introStart }
 phase level { needs level, maps  entry levelStart }

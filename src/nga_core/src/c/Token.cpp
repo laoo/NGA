@@ -98,6 +98,50 @@ Keyword keywordOf( std::string_view spelling )
   return found != table.end() && found->spelling == spelling ? found->keyword : Keyword::NONE;
 }
 
+std::string nameSpelled( std::string_view text )
+{
+  if ( text.find_first_of( ": \t\n\r\v\f/" ) == std::string_view::npos )
+  {
+    return std::string{ text };
+  }
+  // The parser joins the parts across whatever the lexer set aside between
+  // them, so a space or a comment there is skipped and `::` is the dot.
+  std::string name;
+  for ( std::size_t at = 0; at < text.size(); )
+  {
+    std::string_view const rest = text.substr( at );
+    if ( rest.starts_with( "::" ) )
+    {
+      name.push_back( '.' );
+      at += 2;
+    }
+    else if ( rest.starts_with( "//" ) )
+    {
+      std::size_t const end = text.find( '\n', at );
+      at = end == std::string_view::npos ? text.size() : end;
+    }
+    else if ( rest.starts_with( "/*" ) )
+    {
+      std::size_t const end = text.find( "*/", at + 2 );
+      at = end == std::string_view::npos ? text.size() : end + 2;
+    }
+    else
+    {
+      char const c = text[at++];
+      if ( c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\v' && c != '\f' )
+      {
+        name.push_back( c );
+      }
+    }
+  }
+  return name;
+}
+
+bool isQualified( std::string_view text )
+{
+  return text.contains( "::" );
+}
+
 std::string_view nameOf( TokenKind kind )
 {
   switch ( kind )

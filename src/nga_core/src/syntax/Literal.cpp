@@ -12,23 +12,6 @@ namespace nga::syntax
 namespace
 {
 
-int valueOfDigit( char c )
-{
-  if ( c >= '0' && c <= '9' )
-  {
-    return c - '0';
-  }
-  if ( c >= 'a' && c <= 'f' )
-  {
-    return c - 'a' + 10;
-  }
-  if ( c >= 'A' && c <= 'F' )
-  {
-    return c - 'A' + 10;
-  }
-  return -1;
-}
-
 bool isQuote( char c )
 {
   return c == '"' || c == '\'';
@@ -57,6 +40,23 @@ std::optional<std::int64_t> valueOfEscape( char c )
 
 } // namespace
 
+int hexDigitValue( char c )
+{
+  if ( c >= '0' && c <= '9' )
+  {
+    return c - '0';
+  }
+  if ( c >= 'a' && c <= 'f' )
+  {
+    return c - 'a' + 10;
+  }
+  if ( c >= 'A' && c <= 'F' )
+  {
+    return c - 'A' + 10;
+  }
+  return -1;
+}
+
 std::optional<std::int64_t> numericValueOf( std::string_view text )
 {
   int base = 10;
@@ -75,7 +75,7 @@ std::optional<std::int64_t> numericValueOf( std::string_view text )
       continue;
     }
 
-    int const digit = valueOfDigit( c );
+    int const digit = hexDigitValue( c );
     if ( digit < 0 || digit >= base )
     {
       return std::nullopt;
@@ -272,6 +272,20 @@ std::optional<std::vector<std::uint8_t>> plainBytesOf( std::string_view text )
     ++at;
   }
   return bytes;
+}
+
+std::string quotedLiteral( std::string_view text )
+{
+  std::string out = "\"";
+  for ( char const c : text )
+  {
+    if ( c == '"' || c == '\\' )
+    {
+      out += '\\';
+    }
+    out += c;
+  }
+  return out + "\"";
 }
 
 std::uint32_t utf8LengthAt( std::string_view text, std::uint32_t pos )

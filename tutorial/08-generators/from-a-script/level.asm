@@ -13,12 +13,12 @@ levelTitle
 .ends
 ; end fills
 
-; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`
-; shown, which is what lets it name what the Pane holds.
-; A Trampoline: it stands in base RAM, out of the Window, but runs with `level`
-; shown, which is what lets it name what the Pane holds. It builds each line in
-; `levelRow` rather than drawing out of the map, so that the hero can stand on
-; a square without the map being written over.
+; A Trampoline: it stands outside the Window, but runs with `level` shown,
+; which is what lets it name what the Pane holds. A Trampoline: it stands
+; outside the Window, but runs with `level` shown, which is what lets it name
+; what the Pane holds. It builds each line in `levelRow` rather than drawing
+; out of the map, so that the hero can stand on a square without the map being
+; written over.
 .proc drawMap, under level
 at      .ztemp 2
 row     .ztemp 1

@@ -1,4 +1,5 @@
 #include "nga/model/Generator.hpp"
+#include "nga/syntax/Literal.hpp"
 
 #include "nga/diag/Diagnostic.hpp"
 
@@ -111,13 +112,13 @@ void emitSectionHeader( std::string& text, GeneratedSection const& section )
   {
     text += ", in " + *section.pane;
   }
+  for ( std::string const& also : section.alsoIn )
+  {
+    text += ", in " + also;
+  }
   if ( section.readOnly )
   {
     text += ", readonly";
-  }
-  if ( section.movable )
-  {
-    text += ", movable";
   }
   if ( section.root )
   {
@@ -276,6 +277,17 @@ std::optional<std::string> checkModule( GeneratedModule const& description )
     {
       return where + ".in: `" + *section.pane + "` is no name";
     }
+    for ( std::string const& also : section.alsoIn )
+    {
+      if ( !isName( also ) )
+      {
+        std::string message = where;
+        message += ".in: `";
+        message += also;
+        message += "` is no name";
+        return message;
+      }
+    }
 
     for ( std::size_t which = 0; which < section.items.size(); ++which )
     {
@@ -309,9 +321,7 @@ std::string emitModule( GeneratedModule const& description )
   // One mark for the Module, naming the file the generator worked from: a
   // finding on generated data is a finding on the `.section` line, since an
   // encoded payload cannot hold a byte out of range.
-  text += ".source \"";
-  text += description.source;
-  text += "\", 1\n";
+  text += ".source " + syntax::quotedLiteral( description.source ) + ", 1\n";
 
   if ( description.namespaceName.has_value() )
   {
@@ -387,11 +397,14 @@ struct Parameter
 {
   std::string_view name;
   Takes takes = Takes::TEXT;
+
+  /// Whether it may be given more than once, each a value of its own.
+  bool repeats = false;
 };
 
 /// `binary`: the file, and the attributes of the Section it becomes. The order
 /// is the order a message lists them in.
-constexpr std::array<Parameter, 11> BINARY_PARAMETERS{
+constexpr std::array<Parameter, 10> BINARY_PARAMETERS{
   {
       { .name = "section", .takes = Takes::WORD },
       { .name = "namespace", .takes = Takes::WORD },
@@ -399,8 +412,7 @@ constexpr std::array<Parameter, 11> BINARY_PARAMETERS{
       { .name = "at", .takes = Takes::NUMBER },
       { .name = "align", .takes = Takes::NUMBER },
       { .name = "within", .takes = Takes::NUMBER },
-      { .name = "in", .takes = Takes::WORD },
-      { .name = "movable", .takes = Takes::FLAG },
+      { .name = "in", .takes = Takes::WORD, .repeats = true },
       { .name = "root", .takes = Takes::FLAG },
       { .name = "temporary", .takes = Takes::FLAG },
       { .name = "readonly", .takes = Takes::FLAG },
@@ -439,7 +451,11 @@ public:
         continue;
       }
 
-      if ( !mGiven.emplace( argument.name, &argument ).second )
+      if ( parameter->repeats && mGiven.contains( argument.name ) )
+      {
+        mAgain.push_back( &argument );
+      }
+      else if ( !mGiven.emplace( argument.name, &argument ).second )
       {
         report( diag::DiagnosticId::GENERATOR_ARGUMENT_TWICE, argument.span );
         mFailed = true;
@@ -491,6 +507,20 @@ public:
     return find( name ) != nullptr;
   }
 
+  /// Every value after the first of a parameter that repeats, in order.
+  [[nodiscard]] std::vector<std::string> wordsAfterFirst( std::string_view name ) const
+  {
+    std::vector<std::string> words;
+    for ( GeneratorArgument const* argument : mAgain )
+    {
+      if ( argument->name == name && argument->word.has_value() )
+      {
+        words.push_back( *argument->word );
+      }
+    }
+    return words;
+  }
+
   [[nodiscard]] bool failed() const
   {
     return mFailed;
@@ -517,19 +547,20 @@ private:
   diag::DiagnosticSink* mSink;
   GeneratorArgument const* mPositional = nullptr;
   std::map<std::string, GeneratorArgument const*> mGiven;
+  std::vector<GeneratorArgument const*> mAgain;
   bool mFailed = false;
 };
 
 /// `placement = zeropage`, and `absolute` where nothing said.
-std::optional<PlacementClass> placementNamed( std::string const& word )
+std::optional<syntax::PlacementClass> placementNamed( std::string const& word )
 {
   if ( word == "absolute" )
   {
-    return PlacementClass::ABSOLUTE;
+    return syntax::PlacementClass::ABSOLUTE;
   }
   if ( word == "zeropage" )
   {
-    return PlacementClass::ZEROPAGE;
+    return syntax::PlacementClass::ZEROPAGE;
   }
   return std::nullopt;
 }
@@ -546,14 +577,14 @@ runBinary( GeneratorCall const& call, GeneratorFiles const& files, diag::Diagnos
   section.alignment = arguments.number( "align" );
   section.boundary = arguments.number( "within" );
   section.pane = arguments.word( "in" );
-  section.movable = arguments.flag( "movable" );
+  section.alsoIn = arguments.wordsAfterFirst( "in" );
   section.root = arguments.flag( "root" );
   section.temporary = arguments.flag( "temporary" );
   section.readOnly = arguments.flag( "readonly" );
 
   if ( std::optional<std::string> const placement = arguments.word( "placement" ) )
   {
-    std::optional<PlacementClass> const named = placementNamed( *placement );
+    std::optional<syntax::PlacementClass> const named = placementNamed( *placement );
     if ( !named.has_value() )
     {
       sink.add( diag::diagnostic( diag::DiagnosticId::GENERATOR_ARGUMENT_KIND )

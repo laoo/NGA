@@ -13,11 +13,14 @@
 #include "nga/model/ContainerFacts.hpp"
 #include "nga/model/Facts.hpp"
 #include "nga/model/MemoryMap.hpp"
+#include "nga/model/Overlay.hpp"
 #include "nga/model/Pipeline.hpp"
+#include "nga/model/Place.hpp"
 #include "nga/model/Project.hpp"
 #include "nga/model/ProjectFile.hpp"
 #include "nga/model/Symbols.hpp"
 #include "nga/model/Tokens.hpp"
+#include "nga/model/Vocabulary.hpp"
 
 // Asking the platform where the executable is takes a platform's header. Both
 // of Windows' macro habits are turned off first: `min` and `max` as macros
@@ -32,6 +35,7 @@
 #include <mach-o/dyld.h>
 #endif
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -43,10 +47,20 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
 {
+
+/// Says at debug level how long a part of the run took since `started`: what
+/// `--verbose` shows of the run beside the Steps, which the build times itself.
+void logTook( std::string_view what, std::chrono::steady_clock::time_point started )
+{
+  spdlog::debug( "{}: {:.1f} ms",
+                 what,
+                 std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - started ).count() );
+}
 
 /// The directory the running executable stands in, empty where the platform
 /// will not say. Only the CLI asks: nga_core is handed a path and never looks
@@ -107,8 +121,7 @@ std::string shippedLibrary()
   return NGA_LIB_DIR;
 }
 
-/// One `--deny`, `--allow` or `--off` group, resolved to identifiers once so it
-/// can be applied more than once without validating twice.
+/// One `--deny`, `--allow` or `--off` group, resolved to identifiers.
 struct Override
 {
   std::vector<nga::diag::DiagnosticId> ids;
@@ -133,6 +146,13 @@ class DiskFiles final : public nga::model::FileReader
 public:
   std::optional<std::string> read( std::filesystem::path const& path ) override
   {
+    // A directory opens as a stream on POSIX and then reads as nothing, which
+    // would be an empty file rather than one that cannot be read.
+    std::error_code failed;
+    if ( std::filesystem::is_directory( path, failed ) )
+    {
+      return std::nullopt;
+    }
     std::ifstream input{ path, std::ios::binary };
     if ( !input )
     {
@@ -144,7 +164,21 @@ public:
   }
 };
 
-/// Writes text to a file, or says why not.
+/// A path as the file system holds it, so that the path an editor holds and
+/// the one a Project names compare equal: absolute, with `.`, `..` and
+/// symbolic links resolved as far as the path exists.
+std::filesystem::path canonicalOf( std::filesystem::path const& path )
+{
+  std::error_code failed;
+  std::filesystem::path const absolute = std::filesystem::absolute( path, failed ).lexically_normal();
+  if ( failed )
+  {
+    return path.lexically_normal();
+  }
+  std::filesystem::path canonical = std::filesystem::weakly_canonical( absolute, failed );
+  return failed ? absolute : canonical;
+}
+
 /// `a,b,,c` as the three names it holds. An empty piece is nobody's name and
 /// is dropped, so a trailing comma is not an error worth a message.
 std::vector<std::string> splitOnCommas( std::string_view given )
@@ -167,6 +201,7 @@ std::vector<std::string> splitOnCommas( std::string_view given )
   return names;
 }
 
+/// Writes text to a file, or says why not.
 bool writeText( std::string const& path, std::string const& text )
 {
   std::ofstream out{ path, std::ios::binary };
@@ -206,7 +241,7 @@ int run( int argc, char** argv )
   app.add_option( "-j,--jobs", jobs, "Number of assembly threads; 0 selects one per core" );
 
   bool verbose = false;
-  app.add_flag( "-v,--verbose", verbose, "Log at debug level" );
+  app.add_flag( "-v,--verbose", verbose, "Log at debug level, which says how long each Step took" );
 
   // Where the drivers and decoders the tool ships are found when a document
   // names one that is not beside it — see docs/spec/project-file.md.
@@ -231,11 +266,23 @@ int run( int argc, char** argv )
                   cataloguePath,
                   "Write every diagnostic the tool can raise as JSON to this file, or to `-`; takes no project" );
 
+  std::string vocabularyPath;
+  app.add_option( "--vocabulary",
+                  vocabularyPath,
+                  "Write the words of the languages the tool reads as JSON to this file, or to `-`; takes no project" );
+
   std::vector<std::string> classifyPaths;
   app.add_option( "--classify",
                   classifyPaths,
                   "Classify these files for a highlighter and write the result as JSON; takes no project" )
       ->take_all();
+
+  // What an editor holds and has not saved — see
+  // docs/decisions/0258-an-editor-reads-the-facts.md. Two values rather than
+  // `PATH=FILE`, because `=` may stand in a file's name.
+  std::vector<std::pair<std::string, std::string>> overlays;
+  app.add_option( "--overlay", overlays, "Wherever the build reads PATH, read the text of FILE instead" )
+      ->type_name( "PATH FILE" );
 
   std::string factsPath;
   app.add_option( "--facts",
@@ -296,27 +343,62 @@ int run( int argc, char** argv )
     return writeText( cataloguePath, catalogue ) ? 0 : 2;
   }
 
+  // The tool's words, which describe it and no build, as the catalogue does.
+  if ( !vocabularyPath.empty() )
+  {
+    std::string const vocabulary = nga::model::renderVocabularyJson();
+    if ( vocabularyPath == "-" )
+    {
+      std::fwrite( vocabulary.data(), 1, vocabulary.size(), stdout );
+      return 0;
+    }
+    return writeText( vocabularyPath, vocabulary ) ? 0 : 2;
+  }
+
+  // Every file is read through the overlays, the classification below and the
+  // Project alike. A FILE that cannot be read is the run's error rather than
+  // a fall back to the disk, which would report on text nobody is looking at.
+  DiskFiles disk;
+  nga::model::OverlaidFiles files{ disk, canonicalOf };
+  std::vector<std::pair<std::string, std::string>> unreadable;
+  for ( auto const& [path, file] : overlays )
+  {
+    if ( std::optional<std::string> text = disk.read( file ); text.has_value() )
+    {
+      files.overlay( path, std::move( *text ) );
+    }
+    else
+    {
+      unreadable.emplace_back( path, file );
+    }
+  }
+
   // Text nobody built: the shapes of syntax a document is written in, or a
   // file an editor is holding. The classification never needed a build, so
   // neither does this.
   if ( !classifyPaths.empty() )
   {
+    if ( !unreadable.empty() )
+    {
+      auto const& [path, file] = unreadable.front();
+      std::fprintf( stderr, "nga: cannot read %s, which --overlay gives for %s\n", file.c_str(), path.c_str() );
+      return 2;
+    }
     nga::diag::SourceManager loose;
     nga::diag::SeverityPolicy allowAll;
     nga::diag::DiagnosticSink quiet{ allowAll };
-    std::vector<nga::diag::FileId> files;
+    std::vector<nga::diag::FileId> classified;
     for ( std::string const& path : classifyPaths )
     {
-      std::ifstream in{ path, std::ios::binary };
-      if ( !in )
+      std::optional<std::string> text = files.read( path );
+      if ( !text.has_value() )
       {
         std::fprintf( stderr, "nga: cannot read %s\n", path.c_str() );
         return 2;
       }
-      std::string text{ std::istreambuf_iterator<char>{ in }, std::istreambuf_iterator<char>{} };
-      files.push_back( loose.addFile( path, std::move( text ) ) );
+      classified.push_back( loose.addFile( path, std::move( *text ) ) );
     }
-    std::string const written = nga::model::renderClassificationJson( loose, files, quiet );
+    std::string const written = nga::model::renderClassificationJson( loose, classified, quiet );
     std::fwrite( written.data(), 1, written.size(), stdout );
     return 0;
   }
@@ -345,6 +427,28 @@ int run( int argc, char** argv )
                   .sortedBy( code ) );
   }
 
+  // A code given a severity twice is refused, as the Project file refuses it
+  // (NGA1119): the flags are applied in a fixed order, so which of the two won
+  // would be that order and not anything the command line says.
+  std::set<nga::diag::DiagnosticId> given;
+  std::set<nga::diag::DiagnosticId> twice;
+  for ( Override const& group : overrides )
+  {
+    for ( nga::diag::DiagnosticId const id : group.ids )
+    {
+      if ( !given.insert( id ).second )
+      {
+        twice.insert( id );
+      }
+    }
+  }
+  for ( nga::diag::DiagnosticId const id : twice )
+  {
+    std::string const code{ nga::diag::catalogEntryFor( id ).code };
+    sink.add(
+        nga::diag::diagnostic( nga::diag::DiagnosticId::SEVERITY_ALREADY_SET ).arg( "code", code ).sortedBy( code ) );
+  }
+
   // A set nobody has is refused rather than written as an empty one: a name
   // that answers with nothing looks like a set with nothing in it, and sends a
   // consumer looking for the reason it is empty.
@@ -356,23 +460,40 @@ int run( int argc, char** argv )
                   .sortedBy( name ) );
   }
 
-  // Applied before the Project is read, so that reading it obeys them, and
-  // again afterwards, so that they outlast anything its `diagnostics` block
-  // set. The command line is closer to the run and visible in the same place
-  // as its output, so it is the one that wins.
+  // Applied before the Project is read, so that reading it obeys them. Its
+  // `diagnostics` block leaves alone what they set: the command line is closer
+  // to the run and visible in the same place as its output, so it is the one
+  // that wins.
   applyOverrides( overrides, policy );
+
+  for ( auto const& [path, file] : unreadable )
+  {
+    sink.add( nga::diag::diagnostic( nga::diag::DiagnosticId::OVERLAY_UNREADABLE )
+                  .arg( "path", path )
+                  .arg( "file", file )
+                  .sortedBy( path ) );
+  }
+  bool const refusedOutput = !overlays.empty() && !output.empty();
+  if ( refusedOutput )
+  {
+    sink.add( nga::diag::diagnostic( nga::diag::DiagnosticId::OVERLAY_WITH_OUTPUT ).sortedBy( output ) );
+  }
 
   // A run always works on a Project, and the Project is the file it is given:
   // what a Module is called, which Phase it is resident in and what the Target
   // is are facts no source file carries — see
   // docs/decisions/0176-a-run-is-given-a-project.md.
+  // Nothing is read where an overlay could not be: the disk in its place is
+  // the text nobody is looking at.
   nga::model::Project project;
-  DiskFiles disk;
-  if ( std::filesystem::path{ projectPath }.extension() == ".ngp" )
+  bool const readable = unreadable.empty() && !refusedOutput;
+  if ( readable && std::filesystem::path{ projectPath }.extension() == ".ngp" )
   {
-    project = nga::model::loadProject( sources, disk, projectPath, library, policy, sink );
+    auto const loading = std::chrono::steady_clock::now();
+    project = nga::model::loadProject( sources, files, projectPath, library, policy, sink );
+    logTook( "loading the project", loading );
   }
-  else
+  else if ( readable )
   {
     sink.add( nga::diag::diagnostic( nga::diag::DiagnosticId::NOT_A_PROJECT )
                   .arg( "path", projectPath )
@@ -380,51 +501,22 @@ int run( int argc, char** argv )
                   .sortedBy( projectPath ) );
   }
 
-  applyOverrides( overrides, policy );
-
-  // The bytes are attributed through the Layout the map reports, so asking
-  // for them asks for it too.
-  bool const wantMap = !mapPath.empty() || wantedFacts.contains( nga::model::FactSet::MAP ) ||
-                       wantedFacts.contains( nga::model::FactSet::BYTES );
-
   // A Project that failed to load names no Modules to build, and building from
   // it would report the absence a second time. What Container is written was
   // settled by the document, `-o` being a path and nothing else — see
   // docs/decisions/0179-a-container-is-chosen-in-the-project.md.
-  std::vector<std::uint8_t> bytes;
-  std::optional<std::uint32_t> origin;
-  std::optional<nga::model::MemoryMap> map;
-  std::optional<std::vector<nga::model::SymbolFacts>> symbols;
-  std::optional<nga::model::ContainerFacts> container;
-  bool const wantSymbols = wantedFacts.contains( nga::model::FactSet::SYMBOLS ) && !factsPath.empty();
-  bool const wantBytes = wantedFacts.contains( nga::model::FactSet::BYTES ) && !factsPath.empty();
+  nga::model::Facts facts{ .projectPath = projectPath, .project = &project };
+  nga::model::Emitted emitted;
   if ( !sink.hasErrors() )
   {
     nga::model::BuildOptions const options{ .verifyLayout = verifyLayout, .explain = explain };
-    nga::model::build( sources,
-                       project,
-                       options,
-                       sink,
-                       [&]( nga::model::Patched const& patched, nga::model::Emitted const& emitted )
-                       {
-                         // The map is read off the finished build, deciding
-                         // nothing — see docs/spec/memory-map.md.
-                         if ( wantMap )
-                         {
-                           map = nga::model::memoryMapOf( patched );
-                         }
-                         if ( wantSymbols )
-                         {
-                           symbols = nga::model::symbolsOf( patched );
-                         }
-                         bytes = emitted.bytes;
-                         origin = emitted.origin;
-                         if ( wantBytes && map.has_value() )
-                         {
-                           container = nga::model::containerFactsOf(
-                               patched, *map, bytes, nga::model::nameOf( project.container ) );
-                         }
-                       } );
+    emitted = nga::model::buildWithFacts( sources,
+                                          project,
+                                          options,
+                                          sink,
+                                          factsPath.empty() ? std::set<nga::model::FactSet>{} : wantedFacts,
+                                          !mapPath.empty(),
+                                          facts );
   }
 
   // What the tool wrote rather than read — a generator's text, or what a `.ngc`
@@ -453,7 +545,9 @@ int run( int argc, char** argv )
   std::string const report = nga::diag::renderText( sources, sink );
   if ( !report.empty() )
   {
-    std::fputs( report.c_str(), stderr );
+    // Written by its length: a message quotes source text, and the text may
+    // hold a NUL that `fputs` would take for the end of the report.
+    std::fwrite( report.data(), 1, report.size(), stderr );
   }
 
   // Before the exit code, and whatever it turns out to be: a build that failed
@@ -461,11 +555,7 @@ int run( int argc, char** argv )
   // when it did -- see docs/spec/facts.md.
   if ( !factsPath.empty() )
   {
-    nga::model::Facts const facts{ .projectPath = projectPath,
-                                   .project = &project,
-                                   .map = map.has_value() ? &*map : nullptr,
-                                   .symbols = symbols.has_value() ? &*symbols : nullptr,
-                                   .bytes = container.has_value() ? &*container : nullptr };
+    auto const writing = std::chrono::steady_clock::now();
     std::string const written = nga::model::renderFactsJson( sources, sink, facts, wantedFacts );
     if ( factsPath == "-" )
     {
@@ -475,6 +565,7 @@ int run( int argc, char** argv )
     {
       return 2;
     }
+    logTook( "writing the facts", writing );
   }
 
   if ( sink.hasErrors() )
@@ -482,27 +573,33 @@ int run( int argc, char** argv )
     return 1;
   }
 
-  if ( map.has_value() && !mapPath.empty() && !writeText( mapPath, nga::model::renderMapText( *map ) ) )
+  if ( facts.map.has_value() && !mapPath.empty() )
   {
-    return 2;
+    auto const writing = std::chrono::steady_clock::now();
+    if ( !writeText( mapPath, nga::model::renderMapText( *facts.map ) ) )
+    {
+      return 2;
+    }
+    logTook( "writing the map", writing );
   }
 
   if ( !output.empty() )
   {
     std::ofstream out{ output, std::ios::binary };
-    out.write( reinterpret_cast<char const*>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) );
+    out.write( reinterpret_cast<char const*>( emitted.bytes.data() ),
+               static_cast<std::streamsize>( emitted.bytes.size() ) );
     if ( !out )
     {
       std::fprintf( stderr, "nga: cannot write %s\n", output.c_str() );
       return 2;
     }
-    if ( origin.has_value() )
+    if ( emitted.origin.has_value() )
     {
-      spdlog::info( "{} bytes at ${:04X}", bytes.size(), *origin );
+      spdlog::info( "{} bytes at ${:04X}", emitted.bytes.size(), *emitted.origin );
     }
     else
     {
-      spdlog::info( "{} bytes of .{}", bytes.size(), nga::model::nameOf( project.container ) );
+      spdlog::info( "{} bytes of .{}", emitted.bytes.size(), nga::model::nameOf( project.container ) );
     }
   }
 

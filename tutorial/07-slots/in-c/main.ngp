@@ -1,10 +1,11 @@
 include "atari/130xe.ngp"
+include "atari/extension.ngp"
 
-modules { "print.asm" "run.ngc" "shared.asm" "intro.ngc" "level.ngc" }
+modules { "print.asm" "run.ngc" "intro.ngc" "level.ngc" }
 
 panes in ext { level }
 
-resident { print, run, shared }
+resident { print, run }
 
 phase intro { needs intro  then level  entry introStart }
 phase level { needs level             entry levelStart }

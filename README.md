@@ -34,6 +34,11 @@ real hardware — an execution phase that does not fit in memory, a reference to
 data that is not there when the code runs, a call into a bank that is not
 switched in — are reported at build time instead.
 
+A Module may also be written in C. The tool compiles a subset of the language
+into an ordinary Module, so a function is placed and checked like any other
+code. [Chapter 17 of the tutorial](tutorial/17-c-dialect.md) lists where the
+subset differs from C.
+
 ## Building
 
 Requires CMake 3.25+, Ninja and a C++23 compiler (Apple clang 17+, GCC 13+, or
@@ -56,6 +61,14 @@ with `-DNGA_ORTOOLS_PREFIX=/path/to/or-tools-<version>-<platform>`.
 
 The archives exist for Linux x86_64 (libstdc++), macOS arm64 and Windows x64
 (MSVC); on anything else the configure step says so and stops.
+
+## Editor
+
+[`editors/vscode`](editors/vscode/README.md) is an extension for Visual Studio
+Code. It shows a build's findings in the file they concern, follows names
+across files and into the text the tool wrote, and says where the last build
+put each one. Every release carries it as a `.vsix` for each platform, with
+that platform's `nga` inside.
 
 ## Licence
 

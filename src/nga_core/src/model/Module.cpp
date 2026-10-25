@@ -1,9 +1,35 @@
 #include "nga/model/Module.hpp"
 
+#include <algorithm>
+#include <array>
+#include <utility>
 #include <variant>
 
 namespace nga::model
 {
+
+std::optional<DriverRoleNames> driverRoleNamed( std::string_view role )
+{
+  static constexpr std::array<std::pair<std::string_view, DriverRoleNames>, 15> ROLES{ {
+      { "open", DriverRoleNames::MACRO },
+      { "read", DriverRoleNames::MACRO },
+      { "init", DriverRoleNames::MACRO },
+      { "finalize", DriverRoleNames::MACRO },
+      { "select", DriverRoleNames::MACRO },
+      { "mask", DriverRoleNames::MACRO },
+      { "unmask", DriverRoleNames::MACRO },
+      { "unit", DriverRoleNames::CELL },
+      { "offset", DriverRoleNames::CELL },
+      { "show", DriverRoleNames::WINDOW_AND_MACRO },
+      { "showAt", DriverRoleNames::WINDOW_AND_MACRO },
+      { "stream", DriverRoleNames::WINDOW },
+      { "seek", DriverRoleNames::WORD },
+      { "span", DriverRoleNames::WORD },
+      { "rom", DriverRoleNames::MODULE },
+  } };
+  auto const found = std::ranges::find( ROLES, role, &std::pair<std::string_view, DriverRoleNames>::first );
+  return found == ROLES.end() ? std::nullopt : std::optional{ found->second };
+}
 
 SectionIndex Module::addSection( Section section )
 {
@@ -105,7 +131,7 @@ void Module::bindLocal( syntax::Expression const* reference, LabelPosition targe
   mLocalTargets.insert_or_assign( reference, target );
 }
 
-std::string Module::displayNameOf( SectionIndex index, diag::SourceManager const& /*sources*/ ) const
+std::string Module::displayNameOf( SectionIndex index ) const
 {
   // A Section is named by its first Label: the lowest position it holds a
   // Label at, and at one position the Label defined first — a Proc's, a

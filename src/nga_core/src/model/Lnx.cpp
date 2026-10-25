@@ -422,16 +422,18 @@ std::string lynxLoaderSource( std::uint32_t pageSize )
 
 void addLynxLoader( Project& project, diag::SourceManager& sources )
 {
-  std::uint32_t const pageSize = lynxBoardNamed( project.cartridge.value_or( "" ) ).value_or( BOARDS[2] ).pageSize;
-  diag::FileId const file = sources.addFile( "<nga>/lynx.asm", lynxLoaderSource( pageSize ) );
-  ModuleIndex const index{ static_cast<std::uint32_t>( project.modules.size() ) };
-  project.modules.push_back( ProjectModule{
-      .name = std::string{ LYNX_LOADER_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
-  for ( Phase& phase : project.phases.phases )
+  // The Project file sets a Lynx Container together with its board, so this
+  // is a Project put together by hand that named none, and the Container's
+  // writer says so.
+  if ( !project.lynxBoard.has_value() )
   {
-    phase.needs.push_back( index );
+    return;
   }
-  deriveResidency( project );
+  diag::FileId const file = sources.addFile( "<nga>/lynx.asm", lynxLoaderSource( project.lynxBoard->pageSize ) );
+  addToolModule(
+      project,
+      ProjectModule{
+          .name = std::string{ LYNX_LOADER_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
 }
 
 namespace
@@ -456,7 +458,7 @@ LnxFile emitLnx( Patched const& build, diag::DiagnosticSink& sink )
   Layout const& layout = build.layout();
   Target const& target = build.target();
 
-  std::optional<LynxBoard> const board = lynxBoardNamed( project.cartridge.value_or( "" ) );
+  std::optional<LynxBoard> const& board = project.lynxBoard;
   if ( !board.has_value() )
   {
     // The Project file refuses a name no board has, so this is the Container
@@ -531,12 +533,7 @@ LnxFile emitLnx( Patched const& build, diag::DiagnosticSink& sink )
   // and nothing tells it where storage is; the image begins on the first page
   // after the storage the program came to **use**, so that the loader has a page
   // number to shift in and no offset to read its way up to.
-  std::uint32_t used = 0;
-  for ( Stored const& one : storedImages( build ) )
-  {
-    used = std::max( used, target.positionOf( one.at ) + static_cast<std::uint32_t>( one.form.size() ) );
-  }
-  std::uint32_t const storagePages = ( used + page - 1 ) / page;
+  std::uint32_t const storagePages = ( storageUsedOf( build ) + page - 1 ) / page;
   std::uint32_t const imagePage = FIRST_STORAGE_PAGE + storagePages;
 
   std::size_t const bootstrap = encrypted.size() + body.size();
@@ -560,11 +557,7 @@ LnxFile emitLnx( Patched const& build, diag::DiagnosticSink& sink )
     return {};
   }
 
-  diag::SeverityPolicy quietPolicy;
-  diag::DiagnosticSink quiet{ quietPolicy };
-  bool const alreadyReported = isEnteredByAnEdge( project.phases, project.phases.entry );
-  std::optional<std::uint32_t> const run =
-      entryAddressOf( build, project.phases.entry, alreadyReported ? quiet : sink );
+  std::optional<std::uint32_t> const run = startAddressOf( build, sink );
   if ( !run.has_value() )
   {
     return {};
@@ -627,9 +620,9 @@ LnxFile emitLnx( Patched const& build, diag::DiagnosticSink& sink )
   header[4] = static_cast<std::uint8_t>( page & 0xFF );
   header[5] = static_cast<std::uint8_t>( ( page >> 8 ) & 0xFF );
   header[8] = 1;
-  std::ranges::copy( project.cartridgeName, header.begin() + 10 );
-  std::ranges::copy( project.cartridgeMaker, header.begin() + 10 + LNX_NAME_SIZE );
-  header[10 + LNX_NAME_SIZE + LNX_MAKER_SIZE] = project.cartridgeRotation;
+  std::ranges::copy( project.lynxHeader.name, header.begin() + 10 );
+  std::ranges::copy( project.lynxHeader.maker, header.begin() + 10 + LNX_NAME_SIZE );
+  header[10 + LNX_NAME_SIZE + LNX_MAKER_SIZE] = project.lynxHeader.rotation;
   header.insert( header.end(), file.begin(), file.end() );
   return LnxFile{ .bytes = std::move( header ) };
 }

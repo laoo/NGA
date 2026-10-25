@@ -6,6 +6,13 @@ This one lists the forms.
 The 6502 instruction set is not here. Mnemonics and addressing modes are the
 same as in every other assembler. What this chapter lists is what the tool adds.
 
+Three things are spelled differently from other assemblers. Names are
+case-sensitive, and the tool's own words are lowercase: `LDA` is not an
+instruction, and `.SECTION` is not a directive. The index registers are
+lowercase too: `lda table,x` is indexed, and `lda table,X` is an error. The
+accumulator is not written, so `asl` shifts it. `asl a` is an error, unless the
+program defines a Symbol `a`, which it then names.
+
 ## Lines and labels
 
 A line holds a label definition, a statement, or both:
@@ -86,13 +93,15 @@ literal with no prefix must be ASCII.
 .endsection
 .ends
 
-attribute = placement | movable | root | in NAME | temporary
+attribute = placement | root | in NAME | temporary | readonly | foreign
 placement = ( zeropage | absolute ) qualifier*
 qualifier = at EXPRESSION | align EXPRESSION | within EXPRESSION
 ```
 
-At most one placement, one `movable`, one `root`, one `in` and one `temporary`,
-in any order.
+At most one of each attribute, in any order. Only `in` may repeat, to name
+several Regions.
+
+A Section has one address in every Phase it is present in.
 
 A Section has no name of its own. Every Label it holds stands for it on the left
 of a dot. Its first Label is what the memory map and a finding call it. A
@@ -119,21 +128,10 @@ keeps it from crossing a multiple of `N`. Use `within` for a table indexed by
 
 `at`, `align` and `within` complete the placement, so they never follow a comma.
 The class always stands next to the address. Each takes an `Integer` that is a
-[declared value](#declared-values). Neither `align` nor `within` may be zero.
+[declared value](#declared-values). Neither `align` nor `within` may be zero,
+and `align` takes a power of two.
 
 A Section larger than its `within` boundary is an error.
-
-### `movable`
-
-A Movable Section may stand at a different address in each Phase it is present
-in. The solver moves it only where a layout needs it to.
-
-A Reference holds it still. Code that names it sees one address in every Phase
-that code is in. A Section that names itself never moves. A Section named from
-resident code never moves.
-
-`at` applies in every Phase, so `at` and `movable` together mean a Section that
-does not move.
 
 ### `root`
 
@@ -146,7 +144,24 @@ The entry Phase's entry Label is the other Root and needs no mark.
 ### `in NAME`
 
 Puts the Section in a [Pane](06-panes.md) the Project declares. The Section is
-then `absolute` and not `movable`. A pin must fall within the Pane's Window.
+then `absolute`. A pin must fall within the Pane's Window.
+
+`NAME` may also be a Region of RAM or ROM. The Section then stands inside that
+Region. The XL's variants name the RAM under the OS ROM `underOsLow`
+(`$C000-$CFFF`) and `underOsHigh` (`$D800-$FFFF`), so data a Phase without the
+OS needs is put there with `.section in underOsLow` rather than with an
+address.
+
+Repeat `in` to name several Regions, and the Section goes in whichever one the
+solver picks: `.section in underOsLow, in underOsHigh`. A Pane is always named
+alone.
+
+`NAME` may also be a unit set that declares `linear`, such as the MariaCEL
+board's `sdram`. The Section then stands in that memory as a blitter or a video
+chip reads it, and may run from one Bank into the next. The CPU has no address
+for it, so its Labels are linear addresses: take their bytes with `<`, `>` and
+`>>`. It holds data only, and a reservation there may be larger than 64 KB. A
+unit set is named alone too.
 
 Only code of the same Pane may name what a Pane holds, unless a
 [`.with`](#with) shows it.
@@ -154,7 +169,43 @@ Only code of the same Pane may name what a Pane holds, unless a
 ### `temporary`
 
 Makes the Section a [Temporary](#ztemp-and-temp). It holds reservations only. It
-goes with none of `in`, `movable` or `root`.
+goes with neither `in` nor `root`.
+
+### `readonly`
+
+Says the Section's bytes never change while the program runs, including through
+a pointer its address is handed to.
+
+The solver puts a Section that nothing writes in a `rom` Region, such as a
+cartridge's, without being told. It sees every write a statement makes, but not
+what a routine or the hardware does with an address it was given. So a Section
+whose address is taken goes in RAM unless it says `readonly`. See
+[Cartridges](14-cartridges.md).
+
+A statement that writes a `readonly` Section is an error. The word goes with
+neither `zeropage` nor `temporary`. It is a warning on a Section that emits no
+bytes, and on a `.proc`, whose code nothing writes anyway.
+
+### `foreign`
+
+Says the bytes are read by another master of the address space, such as a
+video chip, and not by the CPU. Such a Section may run over a `register` or a
+`reserved` Region, which say what the CPU finds at an address. A Lynx's display
+buffer is 8160 bytes at `$E000`, so it runs over the pages where the CPU finds
+the hardware's registers and the ROM, and the display reads RAM:
+
+```asm
+.section absolute at $E000 align 4, root, foreign
+screen
+        .res 8160
+.ends
+```
+
+A `foreign` Section must also be `root`, because its address goes to the
+hardware. It goes with neither `temporary` nor `readonly`, and never on a
+`.proc`. The CPU still writes what the Section holds, so emitting bytes where
+the CPU does not reach is an error, and so is an access with a constant offset
+that lands there. An access through a pointer is taken on trust.
 
 ## `.proc`
 
@@ -163,12 +214,12 @@ goes with none of `in`, `movable` or `root`.
 .endproc [ then NAME ]
 .endp    [ then NAME ]
 
-attribute = placement | movable | root | in NAME | under NAME | as NAME
+attribute = placement | root | in NAME | under NAME | as NAME
 ```
 
 A Proc is a Section of its own that holds code. It takes the attributes a
-`.section` takes, less `temporary`. It stands at the top level of a Module,
-never inside a `.section` and never inside another Proc.
+`.section` takes, less `temporary` and `foreign`. It stands at the top level of
+a Module, never inside a `.section` and never inside another Proc.
 
 `.proc NAME` defines a Label at the first byte of the code.
 
@@ -193,12 +244,52 @@ it.
 
 ### A Proc has one entry
 
-From outside, nothing names a position inside a Proc. You may not call one, read
-a table kept there, or patch an operand there.
+From outside a Proc, you may:
+
+- read anything in it, such as a table it keeps: `lda worker.table,x`;
+- call it or jump to it at its start, and take the address of its start;
+- write into the operand of an instruction that does not jump, with a Label
+  at the instruction: `sta shade.color + 1` where `color` stands at
+  `lda #$80`, or `sta copy.copyTo + 2` where `copyTo` stands at
+  `sta $FFFF,y`;
+- write into an opcode that `.alt` declares, at the Label itself;
+- take the address of any of those bytes to write through a pointer:
+  `.word shade.color + 1`, with no `.own` above it.
+
+Anything else is an error: a jump past the start, `jsr worker + 2`, a write
+into the operand of a `jmp`, `jsr` or branch, or a write into an opcode with
+no `.alt`.
 
 A second Label at the Proc's first Chunk is the entry under another name.
 
-What has to be reached from outside belongs in a `.section`.
+Code that is jumped into the middle of, or whose jump targets are patched from
+outside, belongs in a `.section`.
+
+### `.alt`
+
+```
+.alt MNEMONIC [ , MNEMONIC ]...
+```
+
+Lists the opcodes the instruction on the next line may be changed to while the
+program runs. Each one takes that instruction's operand, so you write only the
+mnemonic. The instruction's own mnemonic is always allowed.
+
+```asm
+direction
+.alt iny, dey
+        nop
+```
+
+The instruction must have no operand or an immediate one, so it reaches no
+memory. Each alternative must exist in that form at the same length, so it
+either goes on to the next instruction or returns: `rts` is allowed, `jmp` is
+not.
+
+Another routine then writes the opcode with `sta turn.direction`. Where it
+loads the value with `lda #` just before the store, the value must be one of
+the listed opcodes: `lda #$60` into the `direction` above is an error. A value
+read from a table is taken on trust.
 
 ### A Proc holds code
 
@@ -216,7 +307,7 @@ Proc's scope. `worker.ptr` is how a caller names an argument the Proc reads.
 
 ```asm
 .declare arg [ TYPE | PLACE ]
-.declare ret [ TYPE | PLACE ]
+.declare ret [ TYPE | PLACE | PROC.NAME ]
 
 TYPE  = u8 | i8 | u16 | i16 | bool | u8[N]
 PLACE = a letter per byte from the low one: a, x or y for a register,
@@ -255,6 +346,12 @@ A declaration whose bytes are all in registers takes no reservation. A register
 carries one argument. A place names no register twice. The result may use a
 register an argument came in.
 
+The result may be another Proc's. `.declare ret low.result` says that callers
+read the result from `low.result`, the reservation `low` declares its own
+result over. It takes no reservation of its own. A Proc that ends with `jsr low`
+then has nothing to copy, and its other paths write `low.result` themselves.
+The C compiler writes this for a function that returns another's result.
+
 The declarations are the contract of both sides of a call. A caller writes
 `draw.x`, calls `jsr draw`, and reads `draw.result`. An exported Proc exports
 its declared bytes with no `.export` of its own.
@@ -265,10 +362,16 @@ Chains this Proc to `NAME`. The solver places `NAME` immediately after this
 Proc, in every Phase. Control may fall through, and a conditional branch may
 reach `NAME`.
 
-Five rules hold the pair together. `NAME` must be a Proc of this Module. It
-follows one Proc only. It is neither pinned nor aligned. The two are both
-`movable` or neither. The two are in one Pane or in none. A chain that comes
+Four rules hold the pair together. `NAME` must be a Proc of this Module. It
+follows one Proc only. It is neither pinned nor aligned. The two are in one Pane
+or in none. A chain that comes
 back to where it started is an error.
+
+Without `then`, code that can run past the end of its Section gets a warning,
+`NGA4612`. Whatever the solver puts after it is what would run. End it with
+`rts` or `jmp`. A call to a routine that never returns, or a `brk`, also ends
+it. A branch you know is always taken, such as `bne` after `ldy #1`, takes
+`.off NGA4612` on the line before it.
 
 ### Branch reach
 
@@ -357,6 +460,7 @@ jumps to the entered Phase's entry and resumes no frame.
 
 ```asm
 .transition NAME
+.transition NAME, fast
 ```
 
 Enters the Phase named and never returns. What follows it is reached only by a
@@ -364,6 +468,19 @@ Label. It emits bytes and stands where an instruction stands.
 
 `NAME` must be a Phase of the Project. From every Phase in which the enclosing
 Section is present there must be a `then` to `NAME`.
+
+`fast` asks for a quick edge. Every image the edge loads, and its Frame, then
+starts at the beginning of a unit of storage, so the driver does not read its
+way up to an offset. That costs storage: the rest of the unit before each image
+stays empty. The tool applies it only where the driver declares
+`.driver seek forward`, as the Lynx's cartridge driver does, because elsewhere
+an offset costs nothing to reach.
+
+Where the statement says nothing, the Project's
+[`optimize`](15-project-file.md#optimize) decides: `speed` makes every edge
+fast, and `size` and `fit` do not. Where two
+statements take one edge and one of them says `fast`, the edge is fast. Any
+other word after the comma is an error.
 
 ## References across Phases
 
@@ -419,12 +536,17 @@ An Implementation stands in no Pane.
 ```asm
 .with PANE
 .with FAMILY, x
+.with FAMILY, xy
 .with WINDOW, x
+.with WINDOW, xy
 .with WINDOW = STATE
 ```
 
-Shows something over the one statement that follows. Then shows again what stood
-before. See [Panes](06-panes.md).
+Shows something over the one statement that follows, and leaves it shown. What a
+Window shows outside a `.with` is undefined, so nothing is put back. The one
+exception is code that runs under a Pane of the same Window, in a Proc declared
+`under` it: there the tool shows that Pane again after the statement, because
+the code returns into it. See [Panes](06-panes.md).
 
 | Form | Shows | State known |
 |---|---|---|
@@ -432,16 +554,20 @@ before. See [Panes](06-panes.md).
 | `.with FAMILY + n` | member `n` of a family | after Place |
 | `.with FAMILY, x` | the member whose state is in `X` | at run time |
 | `.with WINDOW, x` | the state of the Window that is in `X` | at run time |
+| `.with FAMILY, xy` | the member whose state is in `X` and `Y` | at run time |
+| `.with WINDOW, xy` | the state of the Window that is in `X` and `Y` | at run time |
 | `.with WINDOW = STATE` | a named state of the Window | where you write it |
 
 Several `.with` lines over one statement nest, each on a different Window. The
-tool shows them in textual order and puts them back in reverse.
+tool shows them in textual order, and where it owes a Pane again, shows those in
+reverse.
 
-A `.with` that shows what the Window shows already changes nothing. The tool
-says so.
+A `.with` that shows the Pane the code already runs with changes nothing. The
+tool says so.
 
-The statement under a `.with` may not return. It would leave the Window as
-shown. A `jsr` returns to where the exit stands, so you may write one.
+Where the tool owes a Pane again, the statement under the `.with` may not
+return: it would skip that. A `jsr` returns to where the exit stands, so you may
+write one. Anywhere else there is nothing to skip, and a return is allowed.
 
 Code in a Pane of the Window cannot switch that Window. The switch would take
 the code with it.
@@ -458,15 +584,15 @@ which contributes one state per Bank and has no name of its own, or a named
 state of the hardware. Only a named state may stand after `=`.
 
 ```asm
-window os $C000 .. $CFFF, $D800 .. $FFFF  views rom, ram  base rom
+window cel4000 $4000 .. $7FFF  views main, sprlist, textab, derived, stripmap, strip
 ```
 
 ```asm
-        .with os = ram
-        lda underTheRom
+        .with cel4000 = textab
+        lda texTab
 ```
 
-`rom` and `ram` are named states. A unit set's name is `NGA3003` here, and so is
+`main`, `sprlist` and the rest are named states. A unit set's name is `NGA3003` here, and so is
 a name the Window does not list.
 
 You name the state where you write it, so the tool knows what the statement
@@ -476,7 +602,23 @@ sees.
 
 `X` holds the state to show. The tool hands it to the driver's `showAt` role.
 
-Use these two forms where the state is data. A loop over Banks is the case they
+A Window with more than 256 states needs two bytes for a state, and the driver's
+`showAt` for it says `xy`. Write `.with WINDOW, xy` or `.with FAMILY, xy` there,
+with the low byte in `X` and the high byte in `Y`. MariaCEL's `cel8000`, with
+2047 states, is such a Window:
+
+```asm
+        ldx #<300
+        ldy #>300
+        .with cel8000, xy
+        jsr readThrough
+```
+
+The letters after the comma must be the ones the driver's `showAt` says. `, x`
+on a Window whose driver says `xy` is an error, and so is `, xy` where it says
+`x`.
+
+Use these forms where the state is data. A loop over Banks is the case they
 exist for.
 
 Where you know the state at the line you write, use `.with PANE`.
@@ -508,15 +650,16 @@ The solver decides those three bytes. Read one at run time and hand it over:
         bne @each
 ```
 
-Only `x` works. `.with ext, y` is an error.
+The 130XE's driver takes the state in `X`, so `ext` takes `, x`. `, y` alone is
+an error on any Window.
 
 A Pane's value stands in three places: an immediate operand, an item of `.byte`
 or `.word`, and the argument of a driver's role. You may compute nothing on it,
 so `.assert level == 4` is an error. The one admitted operation is `FAMILY + n`,
 with `n` from zero to the count.
 
-A unit set's name is the count of its Banks. `extension` is 4 where the variant
-declares four Banks.
+A unit set's name is the count of its Banks. `extension` is 5 on the 130XE,
+which declares five Banks.
 
 #### What you may do under one
 
@@ -560,7 +703,8 @@ Bank holds, declare a Pane and write `.with PANE`.
 
 ```asm
 .own [ NAME [ , NAME ]... ]
-.root
+.root HOLDER
+.release HOLDER
 ```
 
 Stands on the line before a statement that takes an address: `#<name`, `#>name`,
@@ -572,8 +716,15 @@ follower: a Section, a Proc, or a Label, and several separated by commas.
 The tool takes your word for it and checks nothing, except that the follower
 must be present wherever the code it follows is.
 
-`.root` says the address goes to the hardware. What it names becomes a Root from
-there.
+`.root HOLDER` says the address goes to the hardware, and to which: a `holder`
+the machine declares. What it names becomes a Root from there, and stays where
+it is in every Phase the Holder may still hold it in. The Holder lets go when it
+is handed another Section, or at `.release HOLDER`, which takes a line of its
+own. A name that is no Holder is an error.
+
+A `.root` with no name, or with two, is an error. Memory something outside the
+program uses for as long as its Module is present has no taking site, and is
+marked `root` on the Section instead.
 
 An address of code taken with neither is an error. So is the address of a
 Temporary.
@@ -607,8 +758,10 @@ Written over several rows it is one statement. A `.dispatch` with no Label
 between it and the one above continues it. A Label between two rows ends the
 statement.
 
-The form reaches 128 targets on a 65SC02 and 256 on a 6502. Above that is an
-error.
+On a 65SC02 the statement is `jmp (abs,x)` over a table of addresses, which
+reaches 128 targets. Above 128 the tool writes the 6502's form there too, the
+`rts` trick over two tables of bytes, which reaches 256. Above 256 is an error
+on either processor.
 
 It stands in a Section or a Proc and not in a macro body.
 
@@ -861,7 +1014,8 @@ A derived Charset takes every mapping of its base and applies one transform to
 each byte. `^` is the only transform.
 
 Entries in a derived block override the base and may add a code point the base
-does not map. The order is base, then transform, then overrides.
+does not map. The order is base, then transform, then overrides. Each code point
+is still mapped once inside the block.
 
 The base may come from another Module. A Charset derived from itself is an
 error.
@@ -885,8 +1039,11 @@ an error wherever an operand belongs.
 `.export` emits nothing. It may stand anywhere a statement may stand, and before
 the definition as readily as after it.
 
-Exporting a name the Module does not define is an error. So is exporting a
-position inside a Proc.
+Exporting a name the Module does not define is an error.
+
+A position inside a Proc is exported by an `.export` inside the Proc, and
+another Module may then read and write it as [A Proc has one
+entry](#a-proc-has-one-entry) says, but never enter it.
 
 An export is not a Root. A Module that uses the name provides the Reference that
 keeps it.
@@ -898,6 +1055,7 @@ The Project needs no export to reach a Section.
 ```asm
 .driver ROLE NAME
 .driver ROLE WINDOW NAME
+.driver showAt WINDOW NAME [ x | xy ]
 .driver stream WINDOW
 
 .transform FORMAT LABEL
@@ -905,6 +1063,9 @@ The Project needs no export to reach a Section.
 
 `.driver` declares that this Module is the storage driver and what provides each
 role. One Module of the program declares the driver, and its Module is resident.
+
+`showAt` takes the state to show in `X`, or with `xy` in `X` and `Y`, the high
+byte in `Y`. A [`.with`](#with) that hands it a state uses the same letters.
 
 `.transform` declares that this Module's `LABEL` decodes `FORMAT`. The Label is
 one of this Module's and the declaration exports it. A format has one decoder
@@ -954,7 +1115,7 @@ and applies by position, so it stands wherever a line may stand.
 | Type | Produced by |
 |---|---|
 | `Integer` | numeric and character literals, `label - label`, `runtimeSectionSize`, `resident`, comparisons, byte extraction |
-| `Address` | a Label, a Slot, `label + n`, `runtimeSectionAddress` |
+| `Address` | a Label, a Slot, `label + n`, `runtimeSectionAddress`, `linearSectionAddress`, `linearFamilyAddress` |
 | `String` | a string literal |
 | `Section` | the name of a Section, only before a dot |
 | `Pane` | the name of a Pane, and a family's member `pane + n` |
@@ -1024,6 +1185,8 @@ change to the source.
 Within one Section the rule gives two things. `dataEnd - data` is the size of
 what lies between them, known after Size and before any address exists. The
 offset of a Label inside its Section is `label - mySection.runtimeSectionAddress`.
+Like `runtimeSectionSize`, such a difference does not keep the Section in
+memory, and it needs no `.with` for a Section in a Pane.
 
 ### Precedence
 
@@ -1074,6 +1237,8 @@ apart.
 label.runtimeSectionAddress     Address: where the Section starts
 label.runtimeSectionSize        Integer: the Section's size, reservations included
 label.resident                  Integer: 1 when the Section is present in every Phase
+label.linearSectionAddress      Address: where a Pane's Section stands in the medium's memory
+label.linearFamilyAddress       Address: the same for a family's Section, in its first member
 ```
 
 The attributes belong to a Section. Every Label of the Section reaches them,
@@ -1084,6 +1249,21 @@ Proc's size.
 
 `resident` is read from the Project. `.assert vars.resident` is how source states
 that it depends on a Section being present in every Phase.
+
+`linearSectionAddress` is for memory the CPU sees through a Window a Bank at a
+time and a blitter or a video chip reads as one, as on VBXE and MariaCEL. It
+needs a Section in a Pane whose unit set declares `linear` in the variant, or a
+Section in that unit set itself. It
+needs no `.with`, because the CPU does not read through it. It is wider than 16
+bits, so it cannot be an operand or a `.word`; take its bytes instead:
+
+```asm
+        .byte <texels.linearSectionAddress, >texels.linearSectionAddress
+        .byte <(texels.linearSectionAddress >> 16), >(texels.linearSectionAddress >> 16)
+```
+
+In a family every member holds the Section, so the address of the first member
+is `linearFamilyAddress`. Member `n` is `n` Banks further.
 
 `storagePayloadAddress` and `storagePayloadSize` are reserved and not built.
 

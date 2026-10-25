@@ -30,7 +30,8 @@ zx0Invert .ztemp 1
         asl zx0Bits
         bne @have
         nga.read
-        rol                     ; the carry the asl left is the sentinel
+        sec                     ; the sentinel the asl shifted out, which `read` may not keep
+        rol
         sta zx0Bits
 @have
         lda #0

@@ -104,8 +104,7 @@ Reads readsOf( ir::Instruction const& instruction, ir::Value value )
     return read != nullptr && read->index == value.index ? 1U : 0U;
   };
   Reads reads;
-  ir::Instruction copy = instruction;
-  ir::eachOperand( copy, [&reads, &is]( ir::Operand& operand ) { reads.all += is( operand ); } );
+  ir::eachOperand( instruction, [&reads, &is]( ir::Operand const& operand ) { reads.all += is( operand ); } );
   std::visit(
       [&reads, &is]( auto const& operation )
       {
@@ -161,14 +160,34 @@ void narrowToWhatIsRead( ir::Function& function )
     // it names the value.
     std::vector<Reads> reads( function.values.size() );
     std::vector<bool> branchedOn( function.values.size(), false );
+    // The readers of each value that mask it with a number, and the largest
+    // such number: a shift right read only through masks below what its low
+    // byte keeps of the low byte shifted is that byte shifted.
+    std::vector<std::uint32_t> masked( function.values.size(), 0 );
+    std::vector<std::int64_t> widestMask( function.values.size(), 0 );
     for ( ir::Block const& block : function.blocks )
     {
       for ( ir::Instruction const& instruction : block.instructions )
       {
+        if ( auto const* const mask = std::get_if<ir::Binary>( &instruction.operation );
+             mask != nullptr && mask->op == ir::BinaryOperator::AND )
+        {
+          for ( auto const& [value, number] :
+                { std::pair{ &mask->left, &mask->right }, std::pair{ &mask->right, &mask->left } } )
+          {
+            auto const* const read = std::get_if<ir::Value>( value );
+            auto const* const constant = std::get_if<ir::Constant>( number );
+            if ( read != nullptr && constant != nullptr && constant->name.empty() && constant->value >= 0 )
+            {
+              masked.at( read->index ) += 1;
+              widestMask.at( read->index ) = std::max( widestMask.at( read->index ), constant->value );
+              break;
+            }
+          }
+        }
         std::vector<std::uint32_t> seen;
-        ir::Instruction copy = instruction;
-        ir::eachOperand( copy,
-                         [&seen]( ir::Operand& operand )
+        ir::eachOperand( instruction,
+                         [&seen]( ir::Operand const& operand )
                          {
                            if ( auto const* const value = std::get_if<ir::Value>( &operand );
                                 value != nullptr && std::ranges::find( seen, value->index ) == seen.end() )
@@ -195,9 +214,27 @@ void narrowToWhatIsRead( ir::Function& function )
       for ( ir::Instruction& instruction : block.instructions )
       {
         auto* const binary = std::get_if<ir::Binary>( &instruction.operation );
-        if ( binary == nullptr || !isNarrowable( binary->type ) || binary->op == ir::BinaryOperator::SHIFT_LEFT ||
-             binary->op == ir::BinaryOperator::SHIFT_RIGHT )
+        if ( binary == nullptr || !isNarrowable( binary->type ) || binary->op == ir::BinaryOperator::SHIFT_LEFT )
         {
+          continue;
+        }
+        // A shift right by one to seven places, every reader of which masks
+        // it below the bits its low byte gets from the low byte: the high
+        // byte's bits are all masked away, so the shift is the low byte's —
+        // see docs/decisions/0273-a-shift-a-mask-keeps-in-a-byte-is-a-byte.md.
+        if ( binary->op == ir::BinaryOperator::SHIFT_RIGHT )
+        {
+          auto const* const by = std::get_if<ir::Constant>( &binary->right );
+          std::uint32_t const at = binary->result.index;
+          if ( by == nullptr || !by->name.empty() || by->value < 1 || by->value > 7 || reads.at( at ).all == 0 ||
+               masked.at( at ) != reads.at( at ).all ||
+               widestMask.at( at ) >= ( std::int64_t{ 1 } << ( 8 - by->value ) ) || branchedOn.at( at ) )
+          {
+            continue;
+          }
+          binary->type = ir::Type::U8;
+          function.values.at( at ) = ir::Type::U8;
+          changed = true;
           continue;
         }
         Reads const& read = reads.at( binary->result.index );
@@ -249,6 +286,27 @@ void doubleOnce( ir::Function& function )
   }
 }
 
+/// Whether the instruction at `at` is a pair's sum with one stored straight
+/// back into that pair, read by nothing else: it stays a pair, since `inc i /
+/// bne / inc i+1` is shorter and quicker than a byte's sum stored with `#0`
+/// above it — see
+/// docs/decisions/0290-a-high-byte-the-ranges-know-is-read-as-a-number.md.
+bool steppedInPlace( ir::Function const& function, ir::Block const& block, std::size_t at )
+{
+  auto const* const sum = std::get_if<ir::Binary>( &block.instructions[at].operation );
+  auto const* const pair = std::get_if<ir::Object>( &sum->left );
+  auto const* const one = std::get_if<ir::Constant>( &sum->right );
+  if ( sum->op != ir::BinaryOperator::ADD || pair == nullptr || one == nullptr || !one->name.empty() ||
+       one->value != 1 || at + 1 >= block.instructions.size() )
+  {
+    return false;
+  }
+  auto const* const store = std::get_if<ir::Store>( &block.instructions[at + 1].operation );
+  return store != nullptr && store->name == pair->name && ir::sizeOf( store->type ) == 2 &&
+         std::holds_alternative<ir::Value>( store->value ) &&
+         std::get<ir::Value>( store->value ).index == sum->result.index && ir::readersOf( function, sum->result ) == 1;
+}
+
 void narrow( ir::Function& function )
 {
   // A dispatcher has no body, and a trampoline's is one jump.
@@ -268,10 +326,12 @@ void narrow( ir::Function& function )
   // one byte, and every reading of it as two gets `#0` above.
   for ( ir::Block& block : function.blocks )
   {
-    for ( ir::Instruction& instruction : block.instructions )
+    for ( std::size_t at = 0; at < block.instructions.size(); ++at )
     {
+      ir::Instruction& instruction = block.instructions[at];
       if ( auto* binary = std::get_if<ir::Binary>( &instruction.operation );
-           binary != nullptr && isNarrowable( binary->type ) && narrowsToByte( *binary, known ) )
+           binary != nullptr && isNarrowable( binary->type ) && !steppedInPlace( function, block, at ) &&
+           narrowsToByte( *binary, known ) )
       {
         binary->type = ir::Type::U8;
         function.values.at( binary->result.index ) = ir::Type::U8;
@@ -357,14 +417,7 @@ void narrow( ir::Function& function )
 
   for ( ir::Block& block : function.blocks )
   {
-    for ( ir::Instruction& instruction : block.instructions )
-    {
-      ir::eachOperand( instruction, rewrite );
-    }
-    if ( block.terminator.kind == ir::TerminatorKind::BRANCH )
-    {
-      rewrite( block.terminator.condition );
-    }
+    ir::eachOperand( block, rewrite );
   }
 
   for ( ir::Block& block : function.blocks )

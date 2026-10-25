@@ -1,5 +1,6 @@
 #include "nga/c/Result.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -14,13 +15,6 @@ namespace nga::c
 
 namespace
 {
-
-/// The object a name stands for, without the offset a byte of it carries:
-/// `__0made+1` is `__0made`.
-std::string baseOf( std::string const& name )
-{
-  return name.substr( 0, name.find( '+' ) );
-}
 
 /// The bytes a local holds, and the bytes the result does: a `struct` counts
 /// its own, and everything else the bytes of its type.
@@ -56,7 +50,7 @@ std::optional<std::vector<Write>> writesOfResult( ir::Function& function )
       ir::eachName( instruction,
                     [&mentions]( std::string& name )
                     {
-                      if ( baseOf( name ) == ir::RESULT )
+                      if ( ir::baseOf( name ) == ir::RESULT )
                       {
                         ++mentions;
                       }
@@ -108,41 +102,25 @@ std::optional<std::vector<Write>> writesOfResult( ir::Function& function )
   return writes;
 }
 
-/// Whether the function hands its bytes to Procs of its own, which name them
-/// through it — `f.__0i` — and which this pass does not see.
-bool hasSwitch( ir::Function const& function )
-{
-  for ( ir::Block const& block : function.blocks )
-  {
-    for ( ir::Instruction const& instruction : block.instructions )
-    {
-      if ( std::holds_alternative<ir::Switch>( instruction.operation ) )
-      {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 /// Every name of the object `chosen` in the function becomes the result's,
 /// or the other way about, and what were copies between the two become the
 /// one byte written from itself and are not written at all.
 void renameInto( ir::Function& function, std::string const& from, std::string_view to )
 {
+  auto const rename = [&from, to]( std::string& name )
+  {
+    if ( ir::baseOf( name ) == from )
+    {
+      name.replace( 0, from.size(), to );
+    }
+  };
   for ( ir::Block& block : function.blocks )
   {
     for ( ir::Instruction& instruction : block.instructions )
     {
-      ir::eachName( instruction,
-                    [&from, to]( std::string& name )
-                    {
-                      if ( baseOf( name ) == from )
-                      {
-                        name.replace( 0, from.size(), to );
-                      }
-                    } );
+      ir::eachName( instruction, rename );
     }
+    ir::eachName( block.terminator.condition, rename );
     std::erase_if( block.instructions,
                    [to]( ir::Instruction const& instruction )
                    {
@@ -193,7 +171,7 @@ bool fitsResult( ir::Local const& local, ir::Type result, std::uint32_t resultBy
 
 void mergeIn( ir::Function& function )
 {
-  if ( !function.result.has_value() || hasSwitch( function ) )
+  if ( !function.result.has_value() )
   {
     return;
   }
@@ -246,7 +224,7 @@ void mergeIn( ir::Function& function )
 /// a call written in one unit reads a byte chosen in another.
 std::string returnsThrough( ir::Function& function )
 {
-  if ( !function.result.has_value() || function.parameters.empty() || function.isTrampoline || hasSwitch( function ) )
+  if ( !function.result.has_value() || function.parameters.empty() || function.isTrampoline )
   {
     return {};
   }
@@ -346,7 +324,7 @@ void tell( ir::Unit& unit, Moved const& everywhere, Moved const& here )
         ir::eachName( instruction,
                       [&everywhere, &here]( std::string& name )
                       {
-                        std::string const base = baseOf( name );
+                        std::string const base = ir::baseOf( name );
                         std::size_t const dot = base.rfind( '.' );
                         if ( dot == std::string::npos || base.substr( dot + 1 ) != ir::RESULT )
                         {
@@ -359,6 +337,196 @@ void tell( ir::Unit& unit, Moved const& everywhere, Moved const& here )
                       } );
       }
     }
+  }
+}
+
+/// Every function of the program by the name a call writes it with, a
+/// `static` one under its own unit, which is asked first.
+struct Functions
+{
+  std::map<std::string, ir::Function*, std::less<>> everywhere;
+  std::vector<std::map<std::string, ir::Function*, std::less<>>> own;
+
+  [[nodiscard]] ir::Function* find( std::size_t unit, std::string const& name ) const
+  {
+    if ( auto const found = own[unit].find( name ); found != own[unit].end() )
+    {
+      return found->second;
+    }
+    auto const found = everywhere.find( name );
+    return found != everywhere.end() ? found->second : nullptr;
+  }
+};
+
+/// Whether nothing a function does after it writes its result can write
+/// another function's: every name of the result stands in a block that
+/// returns, after the last call in it. So the result may lie in a byte some
+/// call writes, as long as that call is not made in between.
+bool writesResultLast( ir::Function& function )
+{
+  for ( ir::Block& block : function.blocks )
+  {
+    std::optional<std::size_t> lastCall;
+    for ( std::size_t at = 0; at < block.instructions.size(); ++at )
+    {
+      if ( std::holds_alternative<ir::Call>( block.instructions[at].operation ) )
+      {
+        lastCall = at;
+      }
+    }
+    for ( std::size_t at = 0; at < block.instructions.size(); ++at )
+    {
+      bool names = false;
+      ir::eachName( block.instructions[at],
+                    [&names]( std::string const& name ) { names = names || ir::baseOf( name ) == ir::RESULT; } );
+      if ( names &&
+           ( block.terminator.kind != ir::TerminatorKind::RETURN || ( lastCall.has_value() && *lastCall > at ) ) )
+      {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/// Whether a function's result may be another's, or another's its: a scalar
+/// in memory every caller reaches by the function's own name.
+bool sharable( ir::Function const& function )
+{
+  return function.result.has_value() && *function.result != ir::Type::BLOCK && function.memberOf.empty() &&
+         function.implements.empty() && !function.isTrampoline && function.pane.empty() && function.under.empty() &&
+         function.withs.empty() && function.then.empty();
+}
+
+/// The function whose result this one's may be: the callee of the most
+/// `return g(...)`, the call's result stored to the function's and read by
+/// nothing else, of the same type — see
+/// docs/decisions/0278-a-result-may-be-another-procs-result.md.
+ir::Function* sharedWith( ir::Function& function, std::size_t unit, Functions const& functions )
+{
+  if ( !sharable( function ) || !function.resultByte.empty() || !writesResultLast( function ) )
+  {
+    return nullptr;
+  }
+  std::map<ir::Function*, std::uint32_t> returned;
+  for ( ir::Block const& block : function.blocks )
+  {
+    for ( std::size_t at = 0; at + 1 < block.instructions.size(); ++at )
+    {
+      auto const* const call = std::get_if<ir::Call>( &block.instructions[at].operation );
+      auto const* const store = std::get_if<ir::Store>( &block.instructions[at + 1].operation );
+      auto const* const value = store != nullptr ? std::get_if<ir::Value>( &store->value ) : nullptr;
+      if ( call == nullptr || !call->result.has_value() || value == nullptr || value->index != call->result->index ||
+           store->name != ir::RESULT || ir::readersOf( function, *call->result ) != 1 )
+      {
+        continue;
+      }
+      ir::Function* const callee = functions.find( unit, call->name );
+      if ( callee != nullptr && callee != &function && sharable( *callee ) && callee->result == function.result )
+      {
+        ++returned[callee];
+      }
+    }
+  }
+  ir::Function* chosen = nullptr;
+  std::uint32_t most = 0;
+  for ( auto const& [callee, count] : returned )
+  {
+    if ( count > most || ( count == most && chosen != nullptr && callee->name < chosen->name ) )
+    {
+      chosen = callee;
+      most = count;
+    }
+  }
+  return chosen;
+}
+
+/// Every function whose result is another's told so, its stores to `__ret`
+/// made stores to that byte, and the store after the call it shares with
+/// dropped: the call has left the value there. The callers learn where to
+/// read from `tell`, through `everywhere` and `here`.
+void share( std::span<std::optional<ir::Unit>> units, Moved& everywhere, std::vector<Moved>& ownStatics )
+{
+  Functions functions;
+  functions.own.resize( units.size() );
+  for ( std::size_t unit = 0; unit < units.size(); ++unit )
+  {
+    std::optional<ir::Unit>& one = units[unit];
+    if ( !one.has_value() )
+    {
+      continue;
+    }
+    for ( ir::Definition& definition : one->definitions )
+    {
+      if ( auto* const function = std::get_if<ir::Function>( &definition );
+           function != nullptr && !function->blocks.empty() )
+      {
+        ( function->isStatic ? functions.own[unit] : functions.everywhere ).emplace( function->name, function );
+      }
+    }
+  }
+
+  // Decided over the bodies as they are, and only then resolved: the
+  // function shared with may share with another in turn, and the byte is
+  // the last one's. There is no cycle, since nothing calls itself.
+  std::vector<std::pair<std::size_t, ir::Function*>> sharing;
+  std::map<ir::Function const*, ir::Function*> with;
+  for ( std::size_t unit = 0; unit < units.size(); ++unit )
+  {
+    std::optional<ir::Unit>& one = units[unit];
+    if ( !one.has_value() )
+    {
+      continue;
+    }
+    for ( ir::Definition& definition : one->definitions )
+    {
+      auto* const function = std::get_if<ir::Function>( &definition );
+      if ( function == nullptr )
+      {
+        continue;
+      }
+      if ( ir::Function* const callee = sharedWith( *function, unit, functions ) )
+      {
+        sharing.emplace_back( unit, function );
+        with[function] = callee;
+      }
+    }
+  }
+  auto const last = [&with]( ir::Function* function )
+  {
+    while ( with.contains( function ) )
+    {
+      function = with.at( function );
+    }
+    return function;
+  };
+
+  for ( auto const& [unit, function] : sharing )
+  {
+    ir::Function* const target = last( function );
+    target->resultShared = true;
+    std::string const byte =
+        target->name + "." + ( target->resultByte.empty() ? std::string{ ir::RESULT } : target->resultByte );
+    function->resultElsewhere = byte;
+    ( function->isStatic ? ownStatics[unit] : everywhere ).insert_or_assign( function->name, byte );
+
+    ir::Function* const callee = with.at( function );
+    for ( ir::Block& block : function->blocks )
+    {
+      for ( std::size_t at = 0; at + 1 < block.instructions.size(); ++at )
+      {
+        auto* const call = std::get_if<ir::Call>( &block.instructions[at].operation );
+        auto const* const store = std::get_if<ir::Store>( &block.instructions[at + 1].operation );
+        auto const* const value = store != nullptr ? std::get_if<ir::Value>( &store->value ) : nullptr;
+        if ( call != nullptr && call->name == callee->name && call->result.has_value() && value != nullptr &&
+             value->index == call->result->index && store->name == ir::RESULT )
+        {
+          call->result.reset();
+          block.instructions.erase( block.instructions.begin() + static_cast<std::ptrdiff_t>( at + 1 ) );
+        }
+      }
+    }
+    renameInto( *function, std::string{ ir::RESULT }, byte );
   }
 }
 
@@ -379,6 +547,7 @@ void returnThroughParameters( std::span<std::optional<ir::Unit>> units )
     }
     ++index;
   }
+  share( units, everywhere, ownStatics );
   index = 0;
   for ( std::optional<ir::Unit>& unit : units )
   {

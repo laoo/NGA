@@ -17,11 +17,13 @@ constexpr std::string_view C_RUNTIME_SOURCE =
 ; shifts, adds and masks. Each Proc is called as any Proc of the assembler is:
 ; its `.declare arg`s written, `jsr`, its `.declare ret` read. A product is the
 ; low half, one for either sign; a quotient and a remainder truncate towards
-; zero, as C does. See docs/decisions/0095-literals-and-the-runtime.md.
+; zero, as C does. See docs/decisions/0095-literals-and-the-runtime.md. And
+; what a loop that fills memory a byte at a time calls instead.
 
 .export __mul8, __udiv8, __umod8, __sdiv8, __smod8
 .export __mul16, __udiv16, __umod16, __sdiv16, __smod16
 .export __mul8to16
+.export __fill
 
 ; ---------------------------------------------------------------------------
 ; 8 bits
@@ -145,7 +147,10 @@ skip    dex
 ; the dividend.
 ;
 ; The remainder is left in `A`, where it was made — see
-; docs/decisions/0146-the-runtime-in-registers.md.
+; docs/decisions/0146-the-runtime-in-registers.md. The quotient is left in
+; `dividend`, and a caller that wants both reads it there rather than calling
+; `__udiv8` too: a contract, which whatever shape this Proc takes keeps — see
+; docs/decisions/0301-a-quotient-and-a-remainder-are-one-call.md.
 .proc __umod8, absolute within 256
         .declare arg u8
 dividend .ztemp 1
@@ -425,10 +430,13 @@ skip    dex
 .endp
 
 ; dividend % divisor, as `__udiv16`, the remainder kept: it is built in the
-; result's own bytes, and the dividend's, which hold the quotient nothing
-; here wants, are the Proc's own. The narrow loop is `__udiv16`'s, and leaves
-; in `A` the remainder that Proc throws away — see
-; docs/decisions/0171-a-divisor-of-one-byte.md.
+; result's own bytes, and the dividend's hold the quotient when it returns. A
+; caller that wants both reads the quotient there rather than calling
+; `__udiv16` too: a contract, which the narrow loop, the wide one and the
+; small shape all keep — see
+; docs/decisions/0301-a-quotient-and-a-remainder-are-one-call.md. The narrow
+; loop is `__udiv16`'s, and leaves in `A` the remainder that Proc throws away
+; — see docs/decisions/0171-a-divisor-of-one-byte.md.
 .proc __umod16, absolute within 256
         .declare arg u16
 dividend .ztemp 2
@@ -634,6 +642,41 @@ negative
         sta remainder+1
         rts
 .endp
+
+; ---------------------------------------------------------------------------
+; Memory
+
+; `count` bytes from `to` on, each set to the byte that comes in `A`: the
+; whole pages first, `Y` running through each and `X` counting them, then what
+; is left of the last. Eleven cycles a byte over a page, where the loop it
+; stands for took over thirty. A count of zero writes nothing, though the
+; compiler calls it with one at least: it is what a loop
+; `for (i = from; i < bound; i = i + 1) a[i] = v;` over a 16-bit counter
+; becomes — see docs/decisions/0265-a-loop-that-fills-calls-the-runtime.md.
+.proc __fill, absolute within 256
+        .declare arg u16
+to      .ztemp 2
+        .declare arg u16
+count   .ztemp 2
+        .declare arg a
+
+        ldy #0
+        ldx count+1
+        beq rest
+page    sta (to),y
+        iny
+        bne page
+        inc to+1
+        dex
+        bne page
+rest    ldx count
+        beq done
+last    sta (to),y
+        iny
+        dex
+        bne last
+done    rts
+.endp
 )asm";
 
 } // namespace
@@ -650,27 +693,25 @@ std::string cRuntimeSource( Intent intent )
   return source;
 }
 
+bool isCompiled( diag::SourceManager const& sources, ProjectModule const& entry )
+{
+  return entry.generated == Generated::NONE &&
+         std::filesystem::path{ sources.pathOf( entry.file ) }.extension() == ".ngc";
+}
+
 bool holdsC( diag::SourceManager const& sources, Project const& project )
 {
   return std::ranges::any_of( project.modules,
-                              [&sources]( ProjectModule const& entry )
-                              {
-                                return entry.generated == Generated::NONE &&
-                                       std::filesystem::path{ sources.pathOf( entry.file ) }.extension() == ".ngc";
-                              } );
+                              [&sources]( ProjectModule const& entry ) { return isCompiled( sources, entry ); } );
 }
 
 void addCRuntime( Project& project, diag::SourceManager& sources )
 {
   diag::FileId const file = sources.addFile( "<nga>/runtime.asm", cRuntimeSource( project.intent ) );
-  ModuleIndex const index{ static_cast<std::uint32_t>( project.modules.size() ) };
-  project.modules.push_back( ProjectModule{
-      .name = std::string{ C_RUNTIME_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
-  for ( Phase& phase : project.phases.phases )
-  {
-    phase.needs.push_back( index );
-  }
-  deriveResidency( project );
+  addToolModule(
+      project,
+      ProjectModule{
+          .name = std::string{ C_RUNTIME_MODULE }, .file = file, .residency = {}, .generated = Generated::NONE } );
 }
 
 } // namespace nga::model

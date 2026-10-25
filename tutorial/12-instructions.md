@@ -179,12 +179,12 @@ and one byte per target in each half.
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 0 of 128 bytes
   memory:    50 of 40960 bytes
-  $2000-$2000  state.state section            phase0
-  $2001-$2001  state.speed section            phase0
-  $2002-$2031  state.step  proc               phase0
+  $2000-$2000  state.state section            (implicit)
+  $2001-$2001  state.speed section            (implicit)
+  $2002-$2031  state.step  proc               (implicit)
 ```
 <!-- end -->
 
@@ -209,18 +209,19 @@ That project reads the same `state.asm`, changing nothing in it:
 ```
 NGA memory map
 
-phase phase0 (0)
+phase (implicit) (0)
   zero page: 0 of 128 bytes
   memory:    45 of 40960 bytes
-  $2000-$2000  state.state section            phase0
-  $2001-$2001  state.speed section            phase0
-  $2002-$202C  state.step  proc               phase0
+  $2000-$2000  state.state section            (implicit)
+  $2001-$2001  state.speed section            (implicit)
+  $2002-$202C  state.step  proc               (implicit)
 ```
 <!-- end -->
 
 Five bytes shorter, and ten cycles instead of twenty-two. The form indexes
 pairs rather than bytes, so it reaches 128 targets where the other reaches
-256.
+256. A `.dispatch` of more than 128 targets gets the 6502's form on a 65SC02
+as well.
 
 `cpu` governs the instructions a Module may write as well as the ones the tool
 writes for it. Every 6502 instruction is legal everywhere; the 65SC02's

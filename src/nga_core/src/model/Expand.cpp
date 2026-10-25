@@ -2,6 +2,7 @@
 
 #include "nga/model/Evaluate.hpp"
 #include "nga/model/Isa.hpp"
+#include "nga/model/Transition.hpp"
 #include "nga/model/TypeCheck.hpp"
 
 #include <algorithm>
@@ -149,10 +150,10 @@ private:
   /// One side of a `.with`: resolves what it names to a Window and what of
   /// it is shown, chooses the driver's `show` or `showAt` for that Window,
   /// and answers with the macro and its argument — the state to show on
-  /// the way in and, on the way out, what was shown where the statement
-  /// stands: the Section's own Pane, or the Window's base — or with nothing
-  /// where the side was refused, which it reported, or has no driver to
-  /// expand. `where` is the statement's own Chunk, or the use a body's
+  /// the way in and, on the way out, the Pane the Section's Proc runs under
+  /// where it is one of that Window — or with nothing where the exit owes
+  /// nothing, where the side was refused, which it reported, or where there
+  /// is no driver to expand. `where` is the statement's own Chunk, or the use a body's
   /// `.with` is instantiated at, whose Section is what the exit asks;
   /// `what` the entry's item, cloned where the `.with` stands in a body;
   /// `from` and `scope` where the name is looked up. The Windows shown so
@@ -180,15 +181,6 @@ private:
   /// every statement under a `.with` of a body inside one.
   void checkWithReturns( ModuleIndex module, SectionIndex index );
 
-  /// The base a Window has across every Phase the Module is present in —
-  /// one, or nothing, which is reported at `at`: code present in Phases
-  /// that give the Window different bases cannot show one of them again.
-  /// The variant's base for a Module in no Phase. See
-  /// docs/decisions/0056-a-phase-chooses-a-base.md.
-  std::optional<std::uint32_t> baseAcrossResidency( ModuleIndex module, WindowIndex window, diag::SourceSpan at );
-
-  /// The same, in silence, or nothing where the Phases differ.
-  [[nodiscard]] std::optional<std::uint32_t> baseIfOneAcrossResidency( ModuleIndex module, WindowIndex window ) const;
   void expandUse( Use const& use, MacroRef macro, std::vector<Argument> arguments );
 
   /// Appends the body of `macro`, instantiated for `arguments`, to `flat`,
@@ -544,9 +536,34 @@ std::optional<MacroRef> Expander::resolve( ModuleIndex from,
     return std::nullopt;
   }
 
+  // What decodes while a `.xex` loads reads the form where the loader put it,
+  // in memory, and not through the driver's stream: one text of a decoder,
+  // its `read` expanded for where it was assembled — see
+  // docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+  if ( text == "read" && mProject->loadModule == from )
+  {
+    std::vector<MacroDefinition> const& own = mSymbols->moduleAt( from ).macros();
+    for ( std::uint32_t index = 0; index < own.size(); ++index )
+    {
+      if ( mSources->textOf( own[index].name.span() ) == "ngaLoadRead" )
+      {
+        return MacroRef{ .module = from, .macro = MacroIndex{ index } };
+      }
+    }
+  }
+
   // The tool's namespace: the driver's roles, bound from its declaration.
   std::optional<Driver> const& driver = mProject->driver;
   std::optional<MacroIndex> role;
+  if ( ( text == "open" || text == "read" ) && driver.has_value() && !driver->streams )
+  {
+    // A driver of ROMs alone has no stream to open or read — see
+    // docs/decisions/0242-a-driver-may-switch-roms-and-have-no-stream.md.
+    report( diag::diagnostic( diag::DiagnosticId::DRIVER_WITHOUT_STREAM )
+                .at( name.location, name.length )
+                .arg( "name", std::string{ text } ) );
+    return std::nullopt;
+  }
   if ( text == "open" )
   {
     role = driver.has_value() ? std::optional{ driver->open } : std::nullopt;
@@ -562,6 +579,45 @@ std::optional<MacroRef> Expander::resolve( ModuleIndex from,
     // generates uses it, so the finding below reports it against a driver
     // that has no `init` rather than against a program.
     role = driver.has_value() ? driver->init : std::nullopt;
+  }
+  else if ( text == "select" )
+  {
+    // Nothing to switch is nothing at all, as for `finalize`: the routine
+    // expands it only under `.if ngaSelects`, and a program writing it on a
+    // machine whose driver switches no ROM asks for nothing.
+    if ( !driver.has_value() || !driver->select.has_value() )
+    {
+      return std::nullopt;
+    }
+    role = driver->select;
+  }
+  else if ( text == "mask" || text == "unmask" )
+  {
+    // Nothing said is nothing at all: only the load's own routine uses them,
+    // and it is there only where the driver said both — see
+    // docs/decisions/0241-bytes-kept-for-a-later-phase-may-lie-hidden-under-a-rom.md.
+    std::optional<MacroIndex> said;
+    if ( driver.has_value() )
+    {
+      said = text == "mask" ? driver->mask : driver->unmask;
+    }
+    if ( !said.has_value() )
+    {
+      return std::nullopt;
+    }
+    role = said;
+  }
+  else if ( text == "finalize" )
+  {
+    // Nothing to put back is nothing at all: a program writes `nga.finalize`
+    // where it ends, whatever machine it is built for, and one with no
+    // driver, or a driver with nothing to restore, expands it to nothing —
+    // see docs/decisions/0229-no-window-has-a-base.md.
+    if ( !driver.has_value() || !driver->finalize.has_value() )
+    {
+      return std::nullopt;
+    }
+    role = driver->finalize;
   }
   else if ( text == "show" || text == "showAt" )
   {
@@ -981,6 +1037,7 @@ void Expander::enter( Use const& use,
                 .at( at.location, at.length )
                 .arg( "name", std::string{ textOf( at ) } )
                 .arg( "expected", static_cast<std::int64_t>( definition.parameters.fixed() ) )
+                .arg( "arguments", definition.parameters.fixed() == 1 ? "argument" : "arguments" )
                 .arg( "given", static_cast<std::int64_t>( arguments.size() ) ) );
     return;
   }
@@ -1210,7 +1267,7 @@ void Expander::expandSection( ModuleIndex module, SectionIndex index )
       bool const wellShaped = isArgumentShape( instruction->shape );
       chunk.content = MacroUseContent{ .path = {},
                                        .name = mnemonic,
-                                       .form = WithForm::NONE,
+                                       .form = syntax::WithForm::NONE,
                                        .side = WithSide::NONE,
                                        .state = std::nullopt,
                                        .window = std::nullopt,
@@ -1303,11 +1360,11 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
   Target const& target = mProject->target;
   syntax::Token const at = use.name;
 
-  // The exit shows again what was shown where the statement stands — the
-  // Pane the Section is in, where that is a Pane of the Window the matching
-  // entry resolved to, and the Window's base otherwise — and nothing where
-  // that entry could not be resolved, which it reported. See
-  // docs/decisions/0068-with-shows-again-what-was-shown.md.
+  // The exit shows again the Pane a Proc runs under, where that is a Pane of
+  // the Window the matching entry resolved to, since the code returns into
+  // it; anywhere else it is empty, and the Window stays as the statement left
+  // it — see docs/decisions/0229-no-window-has-a-base.md. Nothing either
+  // where that entry could not be resolved, which it reported.
   if ( use.side == WithSide::LEAVE )
   {
     std::optional<WindowIndex> window;
@@ -1322,15 +1379,15 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
     }
     Driver const& driver = *mProject->driver;
     WindowIndex const which = *window;
-    // A Proc that runs under a Pane shows it again, where that is a Pane of
-    // this Window; every other Section is in the Window's base state, since
-    // the entry refused a Section in a Pane of the Window.
     std::optional<PaneIndex> const home = section.under();
-    bool const homeShown = home.has_value() && target.panes[home->value].window == which;
+    if ( !home.has_value() || target.panes[home->value].window != which )
+    {
+      return std::nullopt;
+    }
     use.window = window;
     std::vector<Argument> arguments;
     std::optional<syntax::Token> const paneName = section.underName();
-    if ( homeShown && !target.panes[home->value].state.has_value() && paneName.has_value() )
+    if ( !target.panes[home->value].state.has_value() && paneName.has_value() )
     {
       // The Pane by name, as the entry hands its Pane: the value is the
       // solver's, and the name is the one `under PANE` wrote on the Proc.
@@ -1343,8 +1400,7 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
     }
     else
     {
-      std::optional<std::uint32_t> const state =
-          homeShown ? target.panes[home->value].state : baseAcrossResidency( where.module, which, span );
+      std::optional<std::uint32_t> const state = target.panes[home->value].state;
       if ( !state.has_value() )
       {
         return std::nullopt;
@@ -1368,6 +1424,8 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
   std::optional<std::uint32_t> state;
   std::string kind = "name the program does not know";
   bool bareFamily = false;
+  std::uint32_t member = 0;
+  std::optional<std::uint32_t> memberCount;
   if ( what != nullptr && what->kind == syntax::ExpressionKind::NAME )
   {
     std::optional<SymbolRef> const found = mSymbols->lookupScoped( from, scope, textOf( what->token ) );
@@ -1393,14 +1451,17 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
       window = target.panes[type.pane.value].window;
       kind = "pane";
       bareFamily = what->kind == syntax::ExpressionKind::NAME && type.paneCount > 1;
+      member = type.member;
+      memberCount = type.paneCount;
     }
   }
 
   // Each form takes its own kind of name: a Pane or a member for SHOW, a
   // family or a Window for AT, a Window for STATE.
-  bool const fits = window.has_value() && ( ( use.form == WithForm::SHOW && pane.has_value() && !bareFamily ) ||
-                                            ( use.form == WithForm::AT && ( !pane.has_value() || bareFamily ) ) ||
-                                            ( use.form == WithForm::STATE && !pane.has_value() ) );
+  bool const atX = use.form == syntax::WithForm::AT || use.form == syntax::WithForm::AT_XY;
+  bool const fits = window.has_value() && ( ( use.form == syntax::WithForm::SHOW && pane.has_value() && !bareFamily ) ||
+                                            ( atX && ( !pane.has_value() || bareFamily ) ) ||
+                                            ( use.form == syntax::WithForm::STATE && !pane.has_value() ) );
   if ( !fits )
   {
     diag::SourceSpan const named = what != nullptr ? what->span : span;
@@ -1411,9 +1472,22 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
     mOpenWiths.emplace_back( std::nullopt );
     return std::nullopt;
   }
+  // A family's count is let through as the end of a range, one past its last
+  // member, and a range's end is no state a Window can show — see
+  // docs/decisions/0054-panes.md.
+  if ( use.form == syntax::WithForm::SHOW && pane.has_value() && memberCount.has_value() && member >= *memberCount )
+  {
+    reportWith( diag::diagnostic( diag::DiagnosticId::PANE_MEMBER_OUT_OF_RANGE )
+                    .at( what->span.begin, what->span.length )
+                    .arg( "name", target.panes[pane->value].name )
+                    .arg( "count", static_cast<std::int64_t>( *memberCount ) )
+                    .arg( "index", static_cast<std::int64_t>( member ) ) );
+    mOpenWiths.emplace_back( std::nullopt );
+    return std::nullopt;
+  }
   WindowIndex const found = *window;
   Window const& shown = target.windows[found.value];
-  if ( use.form == WithForm::STATE && use.state.has_value() )
+  if ( use.form == syntax::WithForm::STATE && use.state.has_value() )
   {
     syntax::Token const stateToken = *use.state;
     std::string_view const name = textOf( stateToken );
@@ -1461,7 +1535,8 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
     return std::nullopt;
   }
   // Against what is shown where the statement stands: the Pane the Proc runs
-  // under, where it is one of this Window, the Window's base otherwise.
+  // under, where it is one of this Window. Anywhere else nothing is known to
+  // be shown, so no `.with` there changes nothing.
   std::optional<PaneIndex> const home = section.under();
   bool changesNothing = ownPane;
   if ( ownPane )
@@ -1470,7 +1545,7 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
   }
   else if ( !home.has_value() || target.panes[home->value].window != *window )
   {
-    changesNothing = state.has_value() && state == baseIfOneAcrossResidency( where.module, *window );
+    changesNothing = false;
   }
   else if ( pane.has_value() )
   {
@@ -1498,9 +1573,24 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
       mRoleWithoutDriver = true;
       report( diag::diagnostic( diag::DiagnosticId::ROLE_WITHOUT_DRIVER )
                   .at( at.location, at.length )
-                  .arg( "name", std::string{ use.form == WithForm::AT ? "showAt" : "show" } ) );
+                  .arg( "name", std::string{ atX ? "showAt" : "show" } ) );
     }
     return std::nullopt;
+  }
+  // The letters of the form are the letters of the driver's `showAt` for the
+  // Window: `xy` where it takes the high byte in Y, `x` where it does not.
+  if ( atX )
+  {
+    std::uint32_t const wanted = stateBytesOf( *mProject, *window );
+    if ( ( use.form == syntax::WithForm::AT_XY ) != ( wanted > 1 ) )
+    {
+      reportWith( diag::diagnostic( diag::DiagnosticId::WITH_PLACE )
+                      .at( span.begin, span.length )
+                      .arg( "window", shown.name )
+                      .arg( "want", std::string{ wanted > 1 ? "xy" : "x" } )
+                      .arg( "given", std::string{ use.form == syntax::WithForm::AT_XY ? "xy" : "x" } ) );
+      return std::nullopt;
+    }
   }
   // What `show` is handed: the Pane itself, whose value the solver decides,
   // or the state's index where it is known already — a named state, or a
@@ -1508,11 +1598,11 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
   Driver const& driver = *mProject->driver;
   WindowRoles const& roles = driver.windows[window->value];
   std::vector<Argument> arguments;
-  if ( use.form == WithForm::SHOW && !state.has_value() )
+  if ( use.form == syntax::WithForm::SHOW && !state.has_value() )
   {
     arguments.emplace_back( makeArgument( where, *what, nullptr ) );
   }
-  else if ( use.form != WithForm::AT )
+  else if ( !atX )
   {
     syntax::ExpressionPtr value = syntax::makeExpression( syntax::ExpressionKind::VALUE, at, span );
     value->value = static_cast<std::int64_t>( state.value_or( 0 ) );
@@ -1522,83 +1612,8 @@ std::optional<Expander::WithExpansion> Expander::resolveWith( Use const& where,
     section.appendItems( std::move( keptItems ) );
     arguments.emplace_back( makeArgument( where, *kept, nullptr ) );
   }
-  return WithExpansion{ .macro = MacroRef{ .module = driver.module,
-                                           .macro = use.form == WithForm::AT ? roles.showAt : roles.show },
+  return WithExpansion{ .macro = MacroRef{ .module = driver.module, .macro = atX ? roles.showAt : roles.show },
                         .arguments = std::move( arguments ) };
-}
-
-std::optional<std::uint32_t> Expander::baseIfOneAcrossResidency( ModuleIndex module, WindowIndex window ) const
-{
-  Residency const& residency = mSymbols->moduleAt( module ).residency();
-  std::optional<std::uint32_t> one;
-  bool any = false;
-  for ( std::uint32_t phase = 0; phase < residency.phaseCount(); ++phase )
-  {
-    if ( !residency.includes( PhaseIndex{ phase } ) )
-    {
-      continue;
-    }
-    std::optional<std::uint32_t> const here = baseIn( *mProject, PhaseIndex{ phase }, window );
-    if ( any && here != one )
-    {
-      return std::nullopt;
-    }
-    one = here;
-    any = true;
-  }
-  return any ? one : mProject->target.windows[window.value].base;
-}
-
-std::optional<std::uint32_t>
-Expander::baseAcrossResidency( ModuleIndex module, WindowIndex window, diag::SourceSpan at )
-{
-  (void)at;
-  Window const& shown = mProject->target.windows[window.value];
-  Residency const& residency = mSymbols->moduleAt( module ).residency();
-  std::optional<std::uint32_t> one;
-  std::optional<std::uint32_t> first;
-  for ( std::uint32_t phase = 0; phase < residency.phaseCount(); ++phase )
-  {
-    if ( !residency.includes( PhaseIndex{ phase } ) )
-    {
-      continue;
-    }
-    std::optional<std::uint32_t> const here = baseIn( *mProject, PhaseIndex{ phase }, window );
-    if ( first.has_value() && here != one )
-    {
-      auto const stateName = [&shown, this]( std::optional<std::uint32_t> state )
-      {
-        std::uint32_t index = 0;
-        for ( WindowState const& candidate : shown.states )
-        {
-          if ( !candidate.units.has_value() && state == index )
-          {
-            return candidate.name;
-          }
-          index += candidate.units.has_value() ? mProject->target.unitSets[candidate.units->value].count : 1;
-        }
-        return std::string{ "none" };
-      };
-      reportWith( diag::diagnostic( diag::DiagnosticId::WITH_BASES_DIFFER )
-                      .at( at.begin, at.length )
-                      .arg( "window", shown.name )
-                      .arg( "state", stateName( one ) )
-                      .arg( "phase", mProject->phases.phases[*first].name.value_or( "(implicit)" ) )
-                      .arg( "other", stateName( here ) )
-                      .arg( "otherPhase", mProject->phases.phases[phase].name.value_or( "(implicit)" ) ) );
-      return std::nullopt;
-    }
-    if ( !first.has_value() )
-    {
-      first = phase;
-      one = here;
-    }
-  }
-  // Nothing where the Window has no base: what it shows outside a `.with` is
-  // undefined, so there is nothing to show again and the exit is no
-  // instructions at all — see
-  // docs/decisions/0217-a-window-without-a-base-is-switched-and-never-restored.md.
-  return first.has_value() ? one : shown.base;
 }
 
 void Expander::checkWithReturns( ModuleIndex module, SectionIndex index )
@@ -1611,10 +1626,12 @@ void Expander::checkWithReturns( ModuleIndex module, SectionIndex index )
     auto const* const use = std::get_if<MacroUseContent>( &chunk.content );
     if ( use != nullptr && use->side == WithSide::ENTER )
     {
-      // A `.with` on a Window with no base emits no exit, so a return under it
-      // skips nothing and leaves the Window exactly as the model says it is:
-      // switched, and whatever the last `.with` made it.
-      underWith = use->window.has_value() && mProject->target.windows[use->window->value].base.has_value();
+      // Only under a Pane of the Window does a `.with` emit an exit, so a
+      // return anywhere else skips nothing and leaves the Window exactly as
+      // the model says it is: whatever the last `.with` made it.
+      std::optional<PaneIndex> const home = section.under();
+      underWith =
+          use->window.has_value() && home.has_value() && mProject->target.panes[home->value].window == *use->window;
       continue;
     }
     if ( use != nullptr && use->side == WithSide::LEAVE )

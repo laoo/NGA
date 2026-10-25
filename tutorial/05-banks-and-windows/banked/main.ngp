@@ -1,4 +1,5 @@
 include "atari/130xe.ngp"
+include "atari/extension.ngp"
 
 modules { "print.asm" "intro.asm" "level.asm" }
 

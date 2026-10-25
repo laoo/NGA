@@ -49,11 +49,13 @@ private:
 /// that says it is refused.
 ///
 /// A Section of reservations alone is never read-only — it has no bytes for
-/// ROM to hold — nor is a `zeropage` one, a Movable one or a Temporary, each
+/// ROM to hold — nor is a `zeropage` one or a Temporary, each
 /// refused with the word where the word was written.
 ///
 /// **Standing in ROM** is the answer that follows: a read-only Section whose
-/// Target has a `rom` Region for it, or one pinned inside one. It is asked
+/// Target has a `rom` Region for it, or one pinned inside one. The Procs of a
+/// `then` chain stand in one run of bytes, so they stand in ROM together or not
+/// at all: one that may be written keeps the others in RAM, read-only still. It is asked
 /// here and nowhere else, because three Steps read it and they must not
 /// disagree — PlaceStorage, so that no Transition tries to copy into ROM;
 /// Place, for the pool; and the layout verifier, for the pool it holds a

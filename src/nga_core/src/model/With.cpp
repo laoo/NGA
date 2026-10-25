@@ -63,18 +63,6 @@ struct Gathered
   std::vector<Site> sites;
 };
 
-/// The Section a Symbol names as memory, or nothing for a Slot, a Region, a
-/// Pane and every other kind that is not one.
-std::optional<SectionRef> memoryOf( GlobalSymbols const& symbols, SymbolRef where )
-{
-  Symbol const& symbol = symbols.at( where );
-  if ( auto const* const label = std::get_if<LabelPosition>( &symbol.value ); label != nullptr )
-  {
-    return SectionRef{ .module = where.module, .section = label->section };
-  }
-  return std::nullopt;
-}
-
 class Collector final : public ReferenceVisitor
 {
 public:
@@ -85,7 +73,7 @@ public:
 
   void reference( SymbolRef target ) override
   {
-    if ( std::optional<SectionRef> const memory = memoryOf( *mSymbols, target ); memory.has_value() )
+    if ( std::optional<SectionRef> const memory = sectionNamedBy( *mSymbols, target ); memory.has_value() )
     {
       found.push_back( Ref{ .target = *memory, .kind = mKind, .site = mSite, .symbol = mSymbols->at( target ).name } );
     }
@@ -99,6 +87,11 @@ public:
                           .symbol = {} } );
   }
 
+  /// A linear address is read by the medium and never through a Window, so
+  /// it needs nothing shown — see
+  /// docs/decisions/0251-a-bank-has-a-linear-address.md.
+  void linearReference( SymbolRef /*target*/ ) override {}
+
   std::vector<Ref> found;
 
 private:
@@ -111,10 +104,7 @@ private:
 class Checker
 {
 public:
-  Checker( Pruned const& build, Freezes& freezes, diag::DiagnosticSink& sink )
-      : mBuild( &build ), mFreezes( &freezes ), mSink( &sink )
-  {
-  }
+  Checker( Pruned const& build, diag::DiagnosticSink& sink ) : mBuild( &build ), mSink( &sink ) {}
 
   void run()
   {
@@ -129,12 +119,6 @@ public:
           continue;
         }
         mGathered.emplace( keyOf( where ), gather( where ) );
-        // A Proc that runs under a Pane is not seen in the Window's base
-        // state: Place keeps it out of the Window.
-        if ( std::optional<PaneIndex> const under = underOf( where ); under.has_value() )
-        {
-          mFreezes->keepOut( where, mBuild->target().panes[under->value].window );
-        }
       }
     }
     for ( auto const& [key, gathered] : mGathered )
@@ -203,42 +187,22 @@ private:
 
   [[nodiscard]] std::string nameOf( SectionRef where ) const
   {
-    return mBuild->symbols().moduleAt( where.module ).displayNameOf( where.section, mBuild->sources() );
+    return mBuild->symbols().moduleAt( where.module ).displayNameOf( where.section );
   }
 
   /// The state of a Window a Section is in, where that is known before Place:
-  /// a Pane pinned to a named state gives it, and so does a pin inside a
-  /// Window's ranges, which puts the Section in the base state the variant
-  /// declares. Nothing for a Section the solver places, which Place keeps
-  /// where every Phase of its Residency shows it, and for a Bank of a set.
+  /// a Pane pinned to a named state. Nothing for any other Section — one in
+  /// no Pane stands outside every Window — and for a Bank of a set.
   [[nodiscard]] std::optional<std::pair<WindowIndex, std::uint32_t>> stateOf( SectionRef where ) const
   {
     Target const& target = mBuild->target();
     Section const& section = mBuild->symbols().moduleAt( where.module ).sectionAt( where.section );
-    if ( section.pane().has_value() )
-    {
-      Pane const& pane = target.panes[section.pane()->value];
-      return pane.state.has_value() ? std::optional{ std::pair{ pane.window, *pane.state } } : std::nullopt;
-    }
-    if ( section.pinnedAddress() == nullptr )
+    if ( !section.pane().has_value() )
     {
       return std::nullopt;
     }
-    std::optional<std::int64_t> const pinned = declaredValueOf(
-        mBuild->sources(), mBuild->symbols(), &mBuild->charsets(), where.module, *section.pinnedAddress() );
-    if ( !pinned.has_value() || *pinned < 0 )
-    {
-      return std::nullopt;
-    }
-    for ( std::uint32_t index = 0; index < target.windows.size(); ++index )
-    {
-      Window const& window = target.windows[index];
-      if ( window.covers( static_cast<std::uint32_t>( *pinned ) ) && window.base.has_value() )
-      {
-        return std::pair{ WindowIndex{ index }, *window.base };
-      }
-    }
-    return std::nullopt;
+    Pane const& pane = target.panes[section.pane()->value];
+    return pane.state.has_value() ? std::optional{ std::pair{ pane.window, *pane.state } } : std::nullopt;
   }
 
   /// The name of a Window's named state, for a finding.
@@ -257,10 +221,11 @@ private:
     return "bank " + std::to_string( state );
   }
 
-  /// A Section in a known state is seen from `from` in every Phase both are
-  /// in only where that Phase shows the state — or where `shown` does.
-  /// Reports the first Phase that does not, and says whether it was seen.
-  bool checkState( SectionRef from, Ref const& ref, std::span<Shown const> shown, diag::SourceSpan const* site ) const
+  /// A Section in a known state is seen from `from` only where `shown` shows
+  /// the state, since no Window shows anything outside a `.with` — see
+  /// docs/decisions/0229-no-window-has-a-base.md. Reports where it is not,
+  /// and says whether it was seen.
+  bool checkState( Ref const& ref, std::span<Shown const> shown, diag::SourceSpan const* site ) const
   {
     std::optional<std::pair<WindowIndex, std::uint32_t>> const state = stateOf( ref.target );
     if ( !state.has_value() )
@@ -276,37 +241,21 @@ private:
         return true;
       }
     }
-    Residency const& referrer = mBuild->symbols().moduleAt( from.module ).residency();
-    Residency const& referred = mBuild->symbols().moduleAt( ref.target.module ).residency();
-    for ( std::uint32_t phase = 0; phase < referrer.phaseCount(); ++phase )
+    diag::SourceSpan at{};
+    if ( site != nullptr )
     {
-      PhaseIndex const here{ phase };
-      if ( !referrer.includes( here ) || referred.phaseCount() <= phase || !referred.includes( here ) )
-      {
-        continue;
-      }
-      if ( baseIn( mBuild->project(), here, state->first ) == state->second )
-      {
-        continue;
-      }
-      diag::SourceSpan at{};
-      if ( site != nullptr )
-      {
-        at = *site;
-      }
-      else if ( ref.site != nullptr )
-      {
-        at = ref.site->span;
-      }
-      mSink->add( diag::diagnostic( diag::DiagnosticId::STATE_NOT_SHOWN )
-                      .at( at.begin, at.length )
-                      .arg( "symbol", std::string{ ref.symbol } )
-                      .arg( "state", stateName( state->first, state->second ) )
-                      .arg( "window", mBuild->target().windows[state->first.value].name )
-                      .arg( "phase", mBuild->phases().phases[phase].name.value_or( "(implicit)" ) ) );
-      return false;
+      at = *site;
     }
-    return true;
+    else if ( ref.site != nullptr )
+    {
+      at = ref.site->span;
+    }
+    mSink->add( diag::diagnostic( diag::DiagnosticId::STATE_NOT_SHOWN )
+                    .at( at.begin, at.length )
+                    .arg( "symbol", std::string{ ref.symbol } )
+                    .arg( "state", stateName( state->first, state->second ) )
+                    .arg( "window", mBuild->target().windows[state->first.value].name ) );
+    return false;
   }
 
   void collect( SectionRef where, Section const& section, Chunk const& chunk, std::vector<Ref>& into ) const
@@ -444,9 +393,9 @@ private:
     return gathered;
   }
 
-  /// Under no `.with`: a Section of a Pane the solver gives a Bank is named
-  /// only by the Pane's own code, and one in a known state — a Pane pinned to
-  /// it, or a pin inside a Window — only from Phases whose base shows it.
+  /// Under no `.with`: a Section of a Pane is named only by the Pane's own
+  /// code — one the solver gives a Bank as `NGA2412`, one pinned to a named
+  /// state as `NGA3011`.
   void checkPlain( SectionRef from, std::vector<Ref> const& refs ) const
   {
     std::optional<PaneIndex> const own = ownPaneOf( from );
@@ -477,7 +426,7 @@ private:
                         .arg( "pane", mBuild->target().panes[pane->value].name ) );
         continue;
       }
-      checkState( from, ref, {}, nullptr );
+      checkState( ref, {}, nullptr );
     }
   }
 
@@ -495,7 +444,7 @@ private:
   }
 
   /// One statement and everything it reaches: no Pane but the ones shown is
-  /// named or stood in, and what is in no Pane keeps out of the Windows.
+  /// named or stood in.
   void checkSite( SectionRef home, Site const& site )
   {
     if ( site.unresolved )
@@ -503,17 +452,6 @@ private:
       return;
     }
     Target const& target = mBuild->target();
-    auto const keepOut = [&]( SectionRef where )
-    {
-      if ( paneOf( where ).has_value() )
-      {
-        return;
-      }
-      for ( Shown const& shown : site.shown )
-      {
-        mFreezes->keepOut( where, shown.window );
-      }
-    };
     auto const check = [&]( SectionRef from, Ref const& ref )
     {
       // Such a Proc's own labels are its own; a call of it from elsewhere
@@ -539,18 +477,8 @@ private:
       std::optional<PaneIndex> const own = ownPaneUnder( from, site );
       if ( pane.has_value() && pane != own && target.panes[pane->value].state.has_value() )
       {
-        // Pinned to a named state: seen where the state is shown, by the
-        // `.with` or by the Phase's base.
-        if ( !checkState( from, ref, site.shown, &site.span ) )
-        {
-          return false;
-        }
-        keepOut( ref.target );
-        return true;
-      }
-      if ( !pane.has_value() && !checkState( from, ref, site.shown, &site.span ) )
-      {
-        return false;
+        // Pinned to a named state: seen where the `.with` shows the state.
+        return checkState( ref, site.shown, &site.span );
       }
       if ( pane.has_value() && pane != own && !shows( site, *pane ) )
       {
@@ -572,11 +500,9 @@ private:
         mSink->add( std::move( finding ) );
         return false;
       }
-      keepOut( ref.target );
       return true;
     };
 
-    keepOut( home );
     std::vector<SectionRef> pending;
     std::vector<std::uint64_t> visited;
     auto const follow = [&]( Ref const& ref )
@@ -602,7 +528,6 @@ private:
     {
       SectionRef const reached = pending.back();
       pending.pop_back();
-      keepOut( reached );
       auto const gathered = mGathered.find( keyOf( reached ) );
       if ( gathered == mGathered.end() )
       {
@@ -619,16 +544,15 @@ private:
   }
 
   Pruned const* mBuild;
-  Freezes* mFreezes;
   diag::DiagnosticSink* mSink;
   std::map<std::uint64_t, Gathered> mGathered;
 };
 
 } // namespace
 
-void checkWiths( Pruned const& build, Freezes& freezes, diag::DiagnosticSink& sink )
+void checkWiths( Pruned const& build, diag::DiagnosticSink& sink )
 {
-  Checker checker{ build, freezes, sink };
+  Checker checker{ build, sink };
   checker.run();
 }
 

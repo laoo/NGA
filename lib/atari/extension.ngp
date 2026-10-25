@@ -1,0 +1,11 @@
+; Storage in a 130XE's extended memory, for an `atari/130xe.ngp` program: the
+; Banks of the unit set `extension`, read through the Window `ext`, and the
+; decoders the tool ships. A Project includes this beside the machine. The
+; driver is the machine's, since it shows a Pane's Bank whether or not there is
+; storage.
+storage { units extension }
+
+; Every Transition calls the decoders, so they are resident; a decoder nothing
+; uses is dropped.
+modules { "stream/zx0.asm" }
+resident { zx0 }

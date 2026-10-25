@@ -47,6 +47,16 @@ private:
 /// See docs/decisions/0037-the-statement-names-its-frames.md.
 Bytes patch( Placed const& build, Storage const& storage, diag::DiagnosticSink& sink );
 
+/// The same for some Sections alone, into bytes already made: what the load
+/// Step places after the rest has been patched, since its Sections depend on
+/// their own addresses and nothing else does on theirs — see
+/// docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+void patchSections( Placed const& build,
+                    Storage const& storage,
+                    std::span<SectionRef const> which,
+                    Bytes& bytes,
+                    diag::DiagnosticSink& sink );
+
 /// The Frames, into Storage where the first half of PlaceStorage put them.
 ///
 /// After the second half, because a Frame names where each Payload waits,
@@ -55,5 +65,13 @@ Bytes patch( Placed const& build, Storage const& storage, diag::DiagnosticSink& 
 /// its size was known all along, so this is only writing. See
 /// docs/decisions/0036-frames.md.
 void patchFrames( Placed const& build, Storage& storage, diag::DiagnosticSink& sink );
+
+/// Where the cold start's Frame waits, into the bytes of `ngaColdFrame` — the
+/// unit as wide as the Target's, then the offset — once PlaceStorage has put
+/// it somewhere: a Container that writes the start from the bytes then writes
+/// the right ones, and one that patches its image itself finds them already
+/// there. Nothing where there is no cold start — see
+/// docs/decisions/0216-a-car-names-its-format-and-the-cold-start-is-an-edge.md.
+void patchColdFrame( Placed const& build, Storage const& storage, Bytes& bytes );
 
 } // namespace nga::model

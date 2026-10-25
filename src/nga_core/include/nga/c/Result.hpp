@@ -30,7 +30,7 @@ void mergeReturnedLocals( ir::Unit& unit );
 /// the result lies in is part of the Signature every caller reads: the calls
 /// of every unit are told where to read it. A function whose result the
 /// caller cannot know for certain is left alone — a member of a function
-/// type, one that implements a Slot, one a `switch` reaches. See
+/// type, one that implements a Slot. See
 /// docs/decisions/0120-a-function-returns-through-a-parameter.md.
 void returnThroughParameters( std::span<std::optional<ir::Unit>> units );
 

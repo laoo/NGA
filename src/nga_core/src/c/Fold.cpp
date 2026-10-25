@@ -1,6 +1,7 @@
 #include "nga/c/Fold.hpp"
 
 #include "nga/c/Loops.hpp"
+#include "nga/c/Ranges.hpp"
 
 #include <algorithm>
 #include <array>
@@ -39,10 +40,11 @@ std::int64_t valueOf( ir::Operand const& operand )
 }
 
 /// Every operand of an instruction a constant may stand in, which is every
-/// one but the **pointer** of a read or a write through one: `(zp),y` reads
-/// the address out of the zero page, and a number is no address to read it
-/// out of. Turning a read through a pointer the program knows into a read of
-/// the object itself is a different rewrite and not this one.
+/// one but a **pointer** read or written through, a copy's and an argument's
+/// included: `(zp),y` reads the address out of the zero page, and a number is
+/// no address to read it out of. Turning a read through a pointer the program
+/// knows into a read of the object itself is a different rewrite,
+/// `throughKnownAddress`'s.
 template <typename Visit>
 void eachOperandForAConstant( ir::Instruction& instruction, Visit const& visit )
 {
@@ -57,7 +59,79 @@ void eachOperandForAConstant( ir::Instruction& instruction, Visit const& visit )
     visit( store->value );
     return;
   }
+  if ( std::holds_alternative<ir::Copy>( instruction.operation ) )
+  {
+    return;
+  }
+  if ( auto* const call = std::get_if<ir::Call>( &instruction.operation ) )
+  {
+    for ( ir::Argument& argument : call->arguments )
+    {
+      visit( argument.value );
+    }
+    return;
+  }
   ir::eachOperand( instruction, visit );
+}
+
+/// A read or a write through a pointer known to hold the address of an
+/// object, at an index that is a number, made a read or a write of the
+/// object itself: `*a = *b` of a `swap(&x, &y)` wrapped into its caller is
+/// `y` read and `x` written, with no pointer on the zero page. The address is
+/// the object's name and a number of bytes on, which the index adds to — see
+/// docs/decisions/0282-a-pointer-known-to-hold-an-address-is-that-object.md.
+/// A volatile one is left as it is written.
+bool throughKnownAddress( ir::Instruction& instruction, Known const& known, std::set<std::string> const& volatiles )
+{
+  auto const address = [&known,
+                        &volatiles]( ir::Operand const& pointer,
+                                     ir::Operand const& index ) -> std::optional<std::pair<std::string, std::int64_t>>
+  {
+    auto const* const object = std::get_if<ir::Object>( &pointer );
+    auto const* const at = std::get_if<ir::Constant>( &index );
+    if ( object == nullptr || at == nullptr || !at->name.empty() )
+    {
+      return std::nullopt;
+    }
+    auto const found = known.find( object->name );
+    if ( found == known.end() || found->second.type != ir::Type::POINTER || found->second.name.empty() ||
+         !found->second.follower.empty() || volatiles.contains( ir::baseOf( found->second.name ) ) )
+    {
+      return std::nullopt;
+    }
+    return std::pair{ found->second.name, found->second.value + at->value };
+  };
+  auto const offset = []( std::int64_t bytes )
+  { return ir::Constant{ .type = ir::Type::U8, .value = bytes, .name = {}, .follower = {} }; };
+  if ( auto* const load = std::get_if<ir::LoadIndirect>( &instruction.operation );
+       load != nullptr && !load->isVolatile )
+  {
+    if ( auto const found = address( load->pointer, load->index ) )
+    {
+      instruction.operation = ir::Load{ .result = load->result,
+                                        .type = load->type,
+                                        .name = found->first,
+                                        .index = offset( found->second ),
+                                        .scaled = true,
+                                        .high = {} };
+      return true;
+    }
+  }
+  if ( auto* const store = std::get_if<ir::StoreIndirect>( &instruction.operation );
+       store != nullptr && !store->isVolatile )
+  {
+    if ( auto const found = address( store->pointer, store->index ) )
+    {
+      instruction.operation = ir::StoreElement{ .name = found->first,
+                                                .type = store->type,
+                                                .index = offset( found->second ),
+                                                .value = store->value,
+                                                .scaled = true,
+                                                .high = {} };
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Every operand of the function, the one a BRANCH ends its block with
@@ -249,6 +323,119 @@ std::optional<ir::Binary> insteadOfDividing( ir::Call const& call )
                                   : ir::Constant{ .type = type, .value = divisor - 1, .name = {}, .follower = {} } };
 }
 
+/// A byte of the Proc's own given a pair shifted right by one, and read back
+/// shifted left by one in the same block with nothing writing it between, is
+/// the pair with its low bit cleared: `middle = (low + high) >> 1;` and then
+/// `table[middle]` reads `(low + high) & 0xFFFE`, which the emitter folds into
+/// the sum the address is — see
+/// docs/decisions/0285-a-pair-halved-and-doubled-is-its-low-bit-cleared.md.
+bool unshiftIn( ir::Function& function )
+{
+  std::set<std::string> const own = ownBytesOf( function );
+  bool changed = false;
+  for ( ir::Block& block : function.blocks )
+  {
+    // Per byte, the pair it was last given halved, while nothing has written it
+    // since.
+    std::map<std::string, ir::Value, std::less<>> halved;
+    std::map<std::uint32_t, ir::Value> shifts;
+    for ( ir::Instruction& instruction : block.instructions )
+    {
+      if ( auto* const binary = std::get_if<ir::Binary>( &instruction.operation ) )
+      {
+        auto const* const by = std::get_if<ir::Constant>( &binary->right );
+        bool const byOne = by != nullptr && by->name.empty() && by->value == 1;
+        if ( binary->op == ir::BinaryOperator::SHIFT_RIGHT && binary->type == ir::Type::U16 && byOne )
+        {
+          if ( auto const* const value = std::get_if<ir::Value>( &binary->left ) )
+          {
+            shifts.emplace( binary->result.index, *value );
+          }
+        }
+        auto const* const object = std::get_if<ir::Object>( &binary->left );
+        if ( binary->op == ir::BinaryOperator::SHIFT_LEFT && byOne && ir::sizeOf( binary->type ) == 2 &&
+             object != nullptr && ir::sizeOf( object->type ) == 2 )
+        {
+          if ( auto const found = halved.find( object->name ); found != halved.end() )
+          {
+            binary->op = ir::BinaryOperator::AND;
+            binary->left = found->second;
+            binary->right = ir::Constant{ .type = binary->type, .value = 0xFFFE, .name = {}, .follower = {} };
+            changed = true;
+          }
+        }
+      }
+      // A write of the byte, whole or in part, ends what is known of it; a
+      // `[[with]]` block ends everything.
+      if ( std::holds_alternative<ir::EnterWith>( instruction.operation ) )
+      {
+        halved.clear();
+      }
+      if ( auto const* const store = std::get_if<ir::Store>( &instruction.operation ) )
+      {
+        std::erase_if(
+            halved, [store]( auto const& entry ) { return ir::baseOf( entry.first ) == ir::baseOf( store->name ); } );
+        auto const* const value = std::get_if<ir::Value>( &store->value );
+        auto const shifted = value != nullptr ? shifts.find( value->index ) : shifts.end();
+        if ( shifted != shifts.end() && store->name == ir::baseOf( store->name ) && own.contains( store->name ) &&
+             ir::sizeOf( store->type ) == 2 )
+        {
+          halved.insert_or_assign( store->name, shifted->second );
+        }
+      }
+      else if ( auto const* const element = std::get_if<ir::StoreElement>( &instruction.operation ) )
+      {
+        std::erase_if( halved,
+                       [element]( auto const& entry )
+                       { return ir::baseOf( entry.first ) == ir::baseOf( element->name ); } );
+      }
+      else if ( auto const* const copy = std::get_if<ir::Copy>( &instruction.operation ) )
+      {
+        std::erase_if(
+            halved, [copy]( auto const& entry ) { return ir::baseOf( entry.first ) == ir::baseOf( copy->to.name ); } );
+      }
+    }
+  }
+  return changed;
+}
+
+/// A comparison with a number on the left turned round, where the number one
+/// past it is still of the type: `c >= v` is `v < c + 1`, and `c < v` is `v >=
+/// c + 1`. The lowering writes `v <= c` and `v > c` with the operands swapped,
+/// which left the value on the right, where it has to wait in a scratch byte
+/// for `cmp` to read it; on the left it is in `A` and the number is `#c+1` —
+/// see docs/decisions/0268-a-number-on-the-left-of-a-comparison-goes-right.md.
+/// A number the text names is the assembler's, and is left where it is.
+bool turnIn( ir::Function& function )
+{
+  bool changed = false;
+  for ( ir::Block& block : function.blocks )
+  {
+    for ( ir::Instruction& instruction : block.instructions )
+    {
+      auto* const compare = std::get_if<ir::Compare>( &instruction.operation );
+      if ( compare == nullptr ||
+           ( compare->op != ir::Comparison::LESS && compare->op != ir::Comparison::GREATER_OR_EQUAL ) )
+      {
+        continue;
+      }
+      auto const* const number = std::get_if<ir::Constant>( &compare->left );
+      if ( number == nullptr || !number->name.empty() || std::holds_alternative<ir::Constant>( compare->right ) ||
+           number->value >= rangeOfType( compare->type ).max )
+      {
+        continue;
+      }
+      ir::Constant past = *number;
+      past.value = number->value + 1;
+      compare->left = compare->right;
+      compare->right = past;
+      compare->op = compare->op == ir::Comparison::LESS ? ir::Comparison::GREATER_OR_EQUAL : ir::Comparison::LESS;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 bool divideIn( ir::Function& function )
 {
   bool changed = false;
@@ -278,11 +465,11 @@ void forgetAfter( ir::Instruction const& instruction, Known& known, std::set<std
 {
   auto const forgetObject = [&known]( std::string const& name )
   {
-    std::string const base = baseOf( name );
-    std::erase_if( known, [&base]( auto const& entry ) { return baseOf( entry.first ) == base; } );
+    std::string const base = ir::baseOf( name );
+    std::erase_if( known, [&base]( auto const& entry ) { return ir::baseOf( entry.first ) == base; } );
   };
   auto const forgetReached = [&known, &own]
-  { std::erase_if( known, [&own]( auto const& entry ) { return !own.contains( baseOf( entry.first ) ); } ); };
+  { std::erase_if( known, [&own]( auto const& entry ) { return !own.contains( ir::baseOf( entry.first ) ); } ); };
   auto const forgetAll = [&known] { known.clear(); };
 
   std::visit(
@@ -308,13 +495,13 @@ void forgetAfter( ir::Instruction const& instruction, Known& known, std::set<std
           // Proc's own bytes, which nothing else has a name for — 0150.
           forgetReached();
         }
-        else if constexpr ( std::is_same_v<Operation, ir::Switch> || std::is_same_v<Operation, ir::EnterWith> )
+        else if constexpr ( std::is_same_v<Operation, ir::EnterWith> )
         {
-          // And these reach the Proc's own bytes as well, which is the whole
-          // difference: a `switch`'s cases are Procs of their own that name
-          // them through the function (0083), and a `[[with]]` block may be a
-          // Proc of its own besides changing which byte an address is (0096,
-          // 0098). Nothing known before one of them is known after it.
+          // And this reaches the Proc's own bytes as well, which is the whole
+          // difference: a `[[with]]` block may be a Proc of its own besides
+          // changing which byte an address is (0096, 0098). Nothing known
+          // before one is known after it. A `switch` is none of these: its
+          // cases are blocks of this function (0191).
           forgetAll();
         }
       },
@@ -326,34 +513,15 @@ void forgetAfter( ir::Instruction const& instruction, Known& known, std::set<std
 /// a straight line to be.
 std::vector<std::optional<std::uint32_t>> straightLine( ir::Function const& function )
 {
-  std::vector<std::uint32_t> count( function.blocks.size(), 0 );
+  std::vector<std::vector<std::uint32_t>> const before = ir::predecessorsOf( function.blocks );
   std::vector<std::optional<std::uint32_t>> only( function.blocks.size() );
-  for ( std::uint32_t index = 0; index < function.blocks.size(); ++index )
-  {
-    ir::Terminator const& end = function.blocks[index].terminator;
-    if ( end.kind != ir::TerminatorKind::JUMP && end.kind != ir::TerminatorKind::BRANCH )
-    {
-      continue;
-    }
-    for ( std::uint32_t target : end.kind == ir::TerminatorKind::BRANCH
-                                     ? std::vector<std::uint32_t>{ end.target, end.otherwise }
-                                     : std::vector<std::uint32_t>{ end.target } )
-    {
-      if ( target < count.size() )
-      {
-        ++count[target];
-        only[target] = index;
-      }
-    }
-  }
   for ( std::uint32_t index = 0; index < only.size(); ++index )
   {
     // Entered from more than one place, or from one that stands after it and
     // so has not been walked when this one is.
-    std::optional<std::uint32_t> const single = only[index];
-    if ( count[index] != 1 || !single.has_value() || *single >= index )
+    if ( before[index].size() == 1 && before[index].front() < index )
     {
-      only[index].reset();
+      only[index] = before[index].front();
     }
   }
   return only;
@@ -372,6 +540,7 @@ bool propagateIn( ir::Function& function, std::set<std::string> const& volatiles
     Known known = entered.has_value() ? atEnd[*entered] : Known{};
     for ( ir::Instruction& instruction : function.blocks[index].instructions )
     {
+      changed = throughKnownAddress( instruction, known, volatiles ) || changed;
       eachOperandForAConstant( instruction,
                                [&known, &changed]( ir::Operand& operand )
                                {
@@ -390,7 +559,7 @@ bool propagateIn( ir::Function& function, std::set<std::string> const& volatiles
       forgetAfter( instruction, known, own );
       if ( auto const* const store = std::get_if<ir::Store>( &instruction.operation );
            store != nullptr && std::holds_alternative<ir::Constant>( store->value ) &&
-           !volatiles.contains( baseOf( store->name ) ) )
+           !volatiles.contains( ir::baseOf( store->name ) ) )
       {
         ir::Constant held = std::get<ir::Constant>( store->value );
         held.type = store->type;
@@ -434,7 +603,19 @@ void foldConstants( ir::Unit& unit )
       bool const propagated = propagateIn( *function, unit.volatiles );
       bool const divided = divideIn( *function );
       bool const folded = foldIn( *function );
-      again = propagated || divided || folded;
+      bool const turned = turnIn( *function );
+      again = propagated || divided || folded || turned;
+    }
+  }
+}
+
+void unshiftHalves( ir::Unit& unit )
+{
+  for ( ir::Definition& definition : unit.definitions )
+  {
+    if ( auto* const function = std::get_if<ir::Function>( &definition ) )
+    {
+      unshiftIn( *function );
     }
   }
 }

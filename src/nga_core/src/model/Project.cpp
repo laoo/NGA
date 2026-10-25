@@ -9,87 +9,56 @@
 #include <filesystem>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 namespace nga::model
 {
 
+namespace
+{
+
+/// Each Container and its word, in the order a finding lists them.
+constexpr std::array<std::pair<Container, std::string_view>, 11> CONTAINER_WORDS{ {
+    { Container::RAW_IMAGE, "raw" },
+    { Container::XEX, "xex" },
+    { Container::ATR, "atr" },
+    { Container::CAR, "car" },
+    { Container::BS93, "bs93" },
+    { Container::LNX, "lnx" },
+    { Container::LYX, "lyx" },
+    { Container::PRG, "prg" },
+    { Container::D64, "d64" },
+    { Container::D80, "d80" },
+    { Container::D82, "d82" },
+} };
+
+constexpr std::array<Container, CONTAINER_WORDS.size()> CONTAINERS = []
+{
+  std::array<Container, CONTAINER_WORDS.size()> all{};
+  for ( std::size_t index = 0; index < all.size(); ++index )
+  {
+    all[index] = CONTAINER_WORDS[index].first;
+  }
+  return all;
+}();
+
+} // namespace
+
 std::optional<Container> containerNamed( std::string_view word )
 {
-  if ( word == "raw" )
-  {
-    return Container::RAW_IMAGE;
-  }
-  if ( word == "xex" )
-  {
-    return Container::XEX;
-  }
-  if ( word == "atr" )
-  {
-    return Container::ATR;
-  }
-  if ( word == "car" )
-  {
-    return Container::CAR;
-  }
-  if ( word == "bs93" )
-  {
-    return Container::BS93;
-  }
-  if ( word == "lnx" )
-  {
-    return Container::LNX;
-  }
-  if ( word == "lyx" )
-  {
-    return Container::LYX;
-  }
-  if ( word == "prg" )
-  {
-    return Container::PRG;
-  }
-  if ( word == "d64" )
-  {
-    return Container::D64;
-  }
-  if ( word == "d80" )
-  {
-    return Container::D80;
-  }
-  if ( word == "d82" )
-  {
-    return Container::D82;
-  }
-  return std::nullopt;
+  auto const found = std::ranges::find( CONTAINER_WORDS, word, &std::pair<Container, std::string_view>::second );
+  return found == CONTAINER_WORDS.end() ? std::nullopt : std::optional{ found->first };
 }
 
 std::string_view nameOf( Container container )
 {
-  switch ( container )
-  {
-  case Container::XEX:
-    return "xex";
-  case Container::ATR:
-    return "atr";
-  case Container::CAR:
-    return "car";
-  case Container::BS93:
-    return "bs93";
-  case Container::LNX:
-    return "lnx";
-  case Container::LYX:
-    return "lyx";
-  case Container::PRG:
-    return "prg";
-  case Container::D64:
-    return "d64";
-  case Container::D80:
-    return "d80";
-  case Container::D82:
-    return "d82";
-  case Container::RAW_IMAGE:
-    break;
-  }
-  return "raw";
+  auto const found = std::ranges::find( CONTAINER_WORDS, container, &std::pair<Container, std::string_view>::first );
+  return found == CONTAINER_WORDS.end() ? std::string_view{ "raw" } : found->second;
+}
+
+std::span<Container const> containers()
+{
+  return CONTAINERS;
 }
 
 std::optional<Cpu> cpuNamed( std::string_view word )
@@ -141,20 +110,30 @@ std::string_view nameOf( Intent intent )
   return "fit";
 }
 
+namespace
+{
+
+constexpr std::array<std::pair<RegionProperty, std::string_view>, 4> REGION_PROPERTY_WORDS{ {
+    { RegionProperty::RAM, "ram" },
+    { RegionProperty::ROM, "rom" },
+    { RegionProperty::RESERVED, "reserved" },
+    { RegionProperty::REGISTER, "register" },
+} };
+
+} // namespace
+
 std::string_view nameOf( RegionProperty property )
 {
-  switch ( property )
-  {
-  case RegionProperty::RAM:
-    return "ram";
-  case RegionProperty::ROM:
-    return "rom";
-  case RegionProperty::RESERVED:
-    return "reserved";
-  case RegionProperty::REGISTER:
-    return "register";
-  }
-  return "region";
+  auto const found =
+      std::ranges::find( REGION_PROPERTY_WORDS, property, &std::pair<RegionProperty, std::string_view>::first );
+  return found == REGION_PROPERTY_WORDS.end() ? std::string_view{ "region" } : found->second;
+}
+
+std::optional<RegionProperty> regionPropertyNamed( std::string_view word )
+{
+  auto const found =
+      std::ranges::find( REGION_PROPERTY_WORDS, word, &std::pair<RegionProperty, std::string_view>::second );
+  return found == REGION_PROPERTY_WORDS.end() ? std::nullopt : std::optional{ found->first };
 }
 
 std::string displayNameOf( Region const& region )
@@ -196,7 +175,7 @@ std::uint32_t Pools::readOnlySize() const
   return sumOf( readOnly );
 }
 
-Pools poolsOf( std::span<Region const> regions )
+Pools poolsOf( std::span<Region const> regions, std::span<AddressRange const> windows )
 {
   // One entry per address, holding the most restrictive property declared
   // over it, or nothing where no Region reaches. Sixty-four thousand bytes
@@ -212,6 +191,13 @@ Pools poolsOf( std::span<Region const> regions )
       {
         here = region.property;
       }
+    }
+  }
+  for ( AddressRange const& window : windows )
+  {
+    for ( std::uint32_t address = window.begin; address < window.end; ++address )
+    {
+      covered[address].reset();
     }
   }
 
@@ -275,8 +261,7 @@ bool Window::covers( std::uint32_t address ) const
 
 bool Window::meets( AddressRange other ) const
 {
-  return std::ranges::any_of(
-      ranges, [other]( AddressRange const& range ) { return range.begin < other.end && other.begin < range.end; } );
+  return std::ranges::any_of( ranges, [other]( AddressRange const& range ) { return range.overlaps( other ); } );
 }
 
 std::optional<std::uint32_t> Window::firstStateOf( UnitSetIndex set, std::span<UnitSet const> sets ) const
@@ -288,9 +273,19 @@ std::optional<std::uint32_t> Window::firstStateOf( UnitSetIndex set, std::span<U
     {
       return index;
     }
-    index += state.units.has_value() ? sets[state.units->value].count : 1;
+    index += state.indices( sets );
   }
   return std::nullopt;
+}
+
+std::uint64_t Window::stateCount( std::span<UnitSet const> sets ) const
+{
+  std::uint64_t count = 0;
+  for ( WindowState const& state : states )
+  {
+    count += state.indices( sets );
+  }
+  return count;
 }
 
 std::optional<std::uint32_t> Window::namedStateOf( std::string_view wanted, std::span<UnitSet const> sets ) const
@@ -302,7 +297,7 @@ std::optional<std::uint32_t> Window::namedStateOf( std::string_view wanted, std:
     {
       return index;
     }
-    index += state.units.has_value() ? sets[state.units->value].count : 1;
+    index += state.indices( sets );
   }
   return std::nullopt;
 }
@@ -355,6 +350,68 @@ std::optional<UnitSetIndex> Target::unitSetShownBy( WindowIndex window ) const
   return std::nullopt;
 }
 
+std::optional<std::uint32_t> Target::bankSizeOf( UnitSetIndex set ) const
+{
+  for ( Window const& window : windows )
+  {
+    if ( window.firstStateOf( set, unitSets ).has_value() )
+    {
+      return window.size();
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<AddressRange> Target::linearBanksOf( UnitSetIndex set ) const
+{
+  UnitSet const& units = unitSets[set.value];
+  if ( !units.linear.has_value() )
+  {
+    return std::nullopt;
+  }
+  std::optional<std::uint32_t> const bank = bankSizeOf( set );
+  if ( !bank.has_value() )
+  {
+    return units.linear;
+  }
+  return AddressRange{ .begin = units.linear->begin, .end = units.linear->begin + ( units.count * *bank ) };
+}
+
+std::optional<std::uint32_t> Target::linearAddressOf( PaneIndex pane, std::uint32_t state, std::uint32_t address ) const
+{
+  Pane const& one = panes[pane.value];
+  if ( one.state.has_value() )
+  {
+    return std::nullopt;
+  }
+  std::optional<UnitSetIndex> const set = unitSetShownBy( one.window );
+  if ( !set.has_value() )
+  {
+    return std::nullopt;
+  }
+  std::optional<AddressRange> const& linear = unitSets[set->value].linear;
+  if ( !linear.has_value() )
+  {
+    return std::nullopt;
+  }
+  Window const& window = windows[one.window.value];
+  std::optional<std::uint32_t> const first = window.firstStateOf( *set, unitSets );
+  if ( !first.has_value() || state < *first )
+  {
+    return std::nullopt;
+  }
+  std::uint32_t offset = 0;
+  for ( AddressRange const& range : window.ranges )
+  {
+    if ( address >= range.begin && address < range.end )
+    {
+      return linear->begin + ( ( state - *first ) * window.size() ) + offset + ( address - range.begin );
+    }
+    offset += range.size();
+  }
+  return std::nullopt;
+}
+
 StorageAddress Target::addressAt( std::uint32_t position ) const
 {
   if ( unitSize == 0 )
@@ -364,9 +421,54 @@ StorageAddress Target::addressAt( std::uint32_t position ) const
   return StorageAddress{ .bank = BankIndex{ position / unitSize }, .offset = position % unitSize };
 }
 
+std::uint32_t Target::widestUsableUnit() const
+{
+  std::uint32_t widest = 0;
+  for ( std::uint32_t unit = 0; bankSize() > 0 && unit * bankSize() < storageSize(); ++unit )
+  {
+    widest = std::max( widest, usableInUnit( unit ) );
+  }
+  return widest;
+}
+
 std::uint32_t Target::positionOf( StorageAddress at ) const
 {
   return ( at.bank.value * unitSize ) + at.offset;
+}
+
+std::optional<UnitSetIndex> Target::filledSet() const
+{
+  return hasStorage() ? storageUnits : streamUnits;
+}
+
+std::uint32_t Target::filledCount() const
+{
+  if ( hasStorage() )
+  {
+    return unitCount;
+  }
+  return streamUnits.has_value() ? unitSets[streamUnits->value].count : 0;
+}
+
+std::uint32_t Target::filledUnitSize() const
+{
+  return hasStorage() ? unitSize : streamUnitSize;
+}
+
+StorageAddress Target::filledAddressAt( std::uint32_t position ) const
+{
+  if ( hasStorage() )
+  {
+    return addressAt( position );
+  }
+  std::uint32_t const size = filledUnitSize();
+  return size == 0 ? StorageAddress{ .bank = BankIndex{ 0 }, .offset = position }
+                   : StorageAddress{ .bank = BankIndex{ position / size }, .offset = position % size };
+}
+
+std::uint32_t Target::filledPositionOf( StorageAddress at ) const
+{
+  return hasStorage() ? positionOf( at ) : ( at.bank.value * filledUnitSize() ) + at.offset;
 }
 
 std::optional<RegionIndex> Target::mostRestrictiveOver( AddressRange range ) const
@@ -388,16 +490,6 @@ std::optional<RegionIndex> Target::mostRestrictiveOver( AddressRange range ) con
     }
   }
   return found;
-}
-
-std::optional<std::uint32_t> baseIn( Project const& project, PhaseIndex phase, WindowIndex window )
-{
-  Phase const& one = project.phases.phases[phase.value];
-  if ( window.value < one.bases.size() && one.bases[window.value].has_value() )
-  {
-    return one.bases[window.value];
-  }
-  return project.target.windows[window.value].base;
 }
 
 bool Residency::intersects( Residency const& other ) const
@@ -437,6 +529,31 @@ void deriveResidency( Project& project )
       project.modules[module.value].residency.add( PhaseIndex{ phase } );
     }
   }
+}
+
+ModuleIndex addToolModule( Project& project, ProjectModule module )
+{
+  ModuleIndex const index{ static_cast<std::uint32_t>( project.modules.size() ) };
+  project.modules.push_back( std::move( module ) );
+  for ( Phase& phase : project.phases.phases )
+  {
+    phase.needs.push_back( index );
+  }
+  deriveResidency( project );
+  return index;
+}
+
+Residency notFinal( PhaseGraph const& phases )
+{
+  Residency residency{ phases.phases.size() };
+  for ( std::uint32_t phase = 0; phase < phases.phases.size(); ++phase )
+  {
+    if ( !phases.phases[phase].finalAt.has_value() || PhaseIndex{ phase } == phases.entry )
+    {
+      residency.add( PhaseIndex{ phase } );
+    }
+  }
+  return residency;
 }
 
 Project
@@ -479,6 +596,12 @@ synthesiseProject( diag::SourceManager& sources, std::span<diag::FileId const> f
   }
 
   return project;
+}
+
+bool imagesStayInOneUnit( Project const& project )
+{
+  return project.target.bankSize() > 0 &&
+         ( ( project.driver.has_value() && project.driver->spansNothing ) || !project.target.unitUsable.empty() );
 }
 
 } // namespace nga::model

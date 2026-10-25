@@ -12,8 +12,7 @@
 ; track, always, and the tool is held to that.
 ;
 ; The medium maps nothing, so this names no Window: `stream`, `show` and
-; `showAt` are not declared and the two Procs that put base memory back after a
-; Transition are a `rts`.
+; `showAt` are not declared.
 ;
 ; Resident, since every Transition calls it; the geometry document lists it so.
 ;
@@ -31,9 +30,11 @@
 ;   * **NRFD must be driven low on every byte.** NODISKEMU waits for it after it
 ;     asserts DAV, so a listener that leaves NRFD released hangs an SD2PET.
 
-.driver open  petOpen
-.driver read  petRead
-.driver span  none
+.driver open   petOpen
+.driver read   petRead
+.driver unit   petTrack
+.driver offset petAt
+.driver span   none
 
 .transform copy petCopy
 
@@ -50,24 +51,23 @@ petCommand = 15                         ; the channel a `U1` is sent on
 petBuffer  = 5                          ; and the one the sector arrives on
 
 ; Where the stream stands. A plain Section and not Temporaries, because it has
-; to survive between one call and the next while nothing here is running.
+; to survive between one call and the next while nothing here is running. The
+; first three bytes are also the cells the routine writes a position into
+; before it opens the stream: `petAt` the offset — bytes taken from the sector,
+; then the sector — and `petTrack` the unit.
 .section zeropage
+petAt           .res 2                  ; bytes taken from this sector, then the sector
 petTrack        .res 1
-petSector       .res 1
-petPos          .res 1                  ; bytes taken from this sector
 petNeed         .res 1                  ; non-zero when the sector is used up
 petOpened       .res 1                  ; non-zero once the two channels are open
 .ends
 
-; A = the unit, which is the track; X the offset's low byte, which is the
-; position in the sector; Y its high byte, which is the sector. Nothing crosses
-; a unit, so none of the three needs adding to anything.
+; The stream to the position in petAt and petTrack: the track is the unit, the
+; offset's high byte the sector and its low byte the position in it. Nothing
+; crosses a unit, so none of the three needs adding to anything.
 .proc petOpenStream
-        sta petTrack
-        sty petSector
-        stx petPos
         jsr petFill
-        ldx petPos
+        ldx petAt
         beq @ready
 @skip
         txa
@@ -85,13 +85,13 @@ petOpened       .res 1                  ; non-zero once the two channels are ope
 .proc petReadByte
         lda petNeed
         beq @have
-        inc petSector                   ; the next sector of the same track,
+        inc petAt+1                     ; the next sector of the same track,
         jsr petFill                     ; which is where a stream carries to
         lda #0
-        sta petPos
+        sta petAt
 @have
         jsr petPull
-        inc petPos
+        inc petAt
         bne @within
         ; 256 taken: the drive has no more of this sector. The flag is set from
         ; a constant and not from A, which holds the byte just read — a byte
@@ -105,7 +105,7 @@ petOpened       .res 1                  ; non-zero once the two channels are ope
         rts
 .endp
 
-; The sector in petTrack/petSector into the drive's buffer, and the bus left
+; The sector in petTrack/petAt+1 into the drive's buffer, and the bus left
 ; talking to us. `U1:5 0 <track> <sector>`, which is the shortest the DOS will
 ; take — every character is some 375 cycles against 58 for a byte of data.
 .proc petFill
@@ -129,7 +129,7 @@ petOpened       .res 1                  ; non-zero once the two channels are ope
         jsr petDecimal
         lda #$20
         jsr CHROUT
-        lda petSector
+        lda petAt+1
         jsr petDecimal
         lda #13
         jsr CHROUT

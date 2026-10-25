@@ -17,11 +17,6 @@ namespace nga::model
 /// Call and Jump the Sections they reach, with the walk Prune makes — names
 /// no Pane but the ones shown and stands in none but those (`NGA3008`). A
 /// callee inherits nothing: what it needs is read off its own References.
-///
-/// The second thing learned is for Place: every Section a `.with` on Window
-/// W runs or names, and that is in no Pane of W, would vanish if it stood in
-/// W's base state, so it is kept out of W's ranges — recorded in the Freezes
-/// and read by Place and the layout verifier.
-void checkWiths( Pruned const& build, Freezes& freezes, diag::DiagnosticSink& sink );
+void checkWiths( Pruned const& build, diag::DiagnosticSink& sink );
 
 } // namespace nga::model

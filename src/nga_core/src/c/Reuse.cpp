@@ -16,20 +16,6 @@ namespace nga::c
 namespace
 {
 
-/// The instruction of a block that defines a value, by its position.
-std::optional<std::size_t> definerIn( ir::Block const& block, ir::Value value )
-{
-  for ( std::size_t at = 0; at < block.instructions.size(); ++at )
-  {
-    std::optional<ir::Value> const defined = ir::resultOf( block.instructions[at] );
-    if ( defined.has_value() && defined->index == value.index )
-    {
-      return at;
-    }
-  }
-  return std::nullopt;
-}
-
 /// What an operand is computed from, spelled so that two computations of the
 /// same thing from the same objects spell the same: a constant by its type,
 /// value and name, an object by its name, and a value by the operator that
@@ -50,11 +36,11 @@ std::optional<std::string> spelling( ir::Block const& block, ir::Operand const& 
   }
   if ( auto const* const object = std::get_if<ir::Object>( &operand ) )
   {
-    reads.insert( baseOf( object->name ) );
+    reads.insert( ir::baseOf( object->name ) );
     return "o" + std::to_string( static_cast<int>( object->type ) ) + ":" + object->name;
   }
   ir::Value const value = std::get<ir::Value>( operand );
-  std::optional<std::size_t> const at = definerIn( block, value );
+  std::optional<std::size_t> const at = ir::definerIn( block, value );
   if ( !at.has_value() )
   {
     return std::nullopt;
@@ -125,11 +111,10 @@ bool writesAny( ir::Instruction const& instruction, std::set<std::string> const&
         using Operation = std::decay_t<decltype( operation )>;
         if constexpr ( std::is_same_v<Operation, ir::Store> || std::is_same_v<Operation, ir::StoreElement> )
         {
-          return names.contains( baseOf( operation.name ) );
+          return names.contains( ir::baseOf( operation.name ) );
         }
         else if constexpr ( std::is_same_v<Operation, ir::StoreIndirect> || std::is_same_v<Operation, ir::Copy> ||
-                            std::is_same_v<Operation, ir::Call> || std::is_same_v<Operation, ir::Switch> ||
-                            std::is_same_v<Operation, ir::EnterWith> )
+                            std::is_same_v<Operation, ir::Call> || std::is_same_v<Operation, ir::EnterWith> )
         {
           return true;
         }
@@ -231,14 +216,7 @@ void reuseIn( ir::Function& function )
           operand = ir::Object{ .name = byte, .type = type };
         }
       };
-      for ( ir::Instruction& reader : block.instructions )
-      {
-        ir::eachOperand( reader, reread );
-      }
-      if ( block.terminator.kind == ir::TerminatorKind::BRANCH )
-      {
-        reread( block.terminator.condition );
-      }
+      ir::eachOperand( block, reread );
     }
   }
 }

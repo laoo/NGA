@@ -35,11 +35,21 @@ struct Implementation
   std::string_view slot;
   std::string_view symbol;
   diag::SourceSpan slotSpan;
+  diag::SourceSpan symbolSpan;
   diag::SourceSpan span;
 
   /// The Namespace the directive stood in — `one.` — and so where both
   /// names are looked for first; empty at the top level. See 0045.
   std::string_view scope;
+};
+
+/// `.export NAME` as written: where the name stands, and the Symbol it named
+/// once the Module was read to the end. Nothing reads it but the facts, which
+/// count every place a name is written — see docs/spec/facts.md.
+struct ExportSite
+{
+  std::string_view symbol;
+  diag::SourceSpan span;
 };
 
 /// `.proc NAME, as TYPE` as written: the Proc, and the function type whose
@@ -74,6 +84,24 @@ struct TransformDeclaration
   std::string_view scope;
 };
 
+/// What a role of `.driver` names after its word: a macro of the Module
+/// (`open`, `read`, `init`, `finalize`, `select`, `mask`, `unmask`), the label
+/// of a cell (`unit`, `offset`), a Window and a macro (`show`, `showAt`), a
+/// Window (`stream`), a word about the medium (`seek`, `span`), or a Module
+/// (`rom`). See docs/spec/transition.md.
+enum class DriverRoleNames : std::uint8_t
+{
+  MACRO,
+  CELL,
+  WINDOW_AND_MACRO,
+  WINDOW,
+  WORD,
+  MODULE,
+};
+
+/// What the role of that word names, if a driver has such a role.
+std::optional<DriverRoleNames> driverRoleNamed( std::string_view role );
+
 /// `.driver ROLE LABEL` as written: what the storage driver provides, and
 /// where — or, for `window`, the range it occupies, as two expressions the
 /// end of Assemble evaluates. See docs/spec/transition.md.
@@ -94,6 +122,18 @@ struct DriverRole
   diag::SourceSpan labelSpan;
   diag::SourceSpan span;
   std::string_view scope;
+
+  /// Where a `showAt` takes the state, as written after its macro: `x`, or
+  /// `xy` for a state whose high byte is in `Y`; empty where nothing was
+  /// written, which is `x`.
+  std::string_view place{};
+  diag::SourceSpan placeSpan{};
+
+  /// For `rom`: the Module whose ranges showing this ROM shows too, written
+  /// after it; empty where none was — see
+  /// docs/decisions/0229-no-window-has-a-base.md.
+  std::string_view also{};
+  diag::SourceSpan alsoSpan{};
 };
 
 /// `.off CODE` as written: the warning it silences on the statement below,
@@ -199,6 +239,22 @@ public:
     return mResidency;
   }
 
+  /// Takes the Module out of every Phase `kept` leaves out. Only before Merge,
+  /// while Residency is still being derived — see
+  /// docs/decisions/0245-a-final-phase-keeps-nothing-only-an-exit-runs.md.
+  void keepOnlyIn( Residency const& kept )
+  {
+    Residency narrowed{ mResidency.phaseCount() };
+    for ( std::uint32_t phase = 0; phase < mResidency.phaseCount(); ++phase )
+    {
+      if ( mResidency.includes( PhaseIndex{ phase } ) && kept.includes( PhaseIndex{ phase } ) )
+      {
+        narrowed.add( PhaseIndex{ phase } );
+      }
+    }
+    mResidency = std::move( narrowed );
+  }
+
   /// Whether this Module runs while a Bank is switched in — the Target's
   /// Transition routine — so that none of its Sections may live in the Window.
   [[nodiscard]] bool outsideWindow() const
@@ -249,6 +305,11 @@ public:
   void addMember( Member what )
   {
     mMembers.push_back( what );
+  }
+
+  [[nodiscard]] std::vector<ExportSite> const& exportSites() const
+  {
+    return mExportSites;
   }
 
   [[nodiscard]] std::vector<Implementation> const& implementations() const
@@ -346,6 +407,12 @@ public:
   void addTransform( TransformDeclaration declaration );
   void addDriverRole( DriverRole role );
   void addImplementation( Implementation implementation );
+
+  void addExportSite( ExportSite site )
+  {
+    mExportSites.push_back( site );
+  }
+
   CharsetIndex addCharset( CharsetDeclaration declaration );
 
   /// Where a local label reference resolved to, or nothing when it did not —
@@ -361,7 +428,7 @@ public:
   /// `ngaCurrentPhase`, or whichever a `.section` holds first. One with no
   /// Label is named after the Module, because `(anonymous)` on its own
   /// identifies nothing once there are two of them.
-  [[nodiscard]] std::string displayNameOf( SectionIndex index, diag::SourceManager const& sources ) const;
+  [[nodiscard]] std::string displayNameOf( SectionIndex index ) const;
 
 private:
   std::string mName;
@@ -373,6 +440,7 @@ private:
   SymbolTable mSymbols;
   std::vector<Assertion> mAssertions;
   std::vector<Implementation> mImplementations;
+  std::vector<ExportSite> mExportSites;
   std::vector<Member> mMembers;
   std::vector<CharsetDeclaration> mCharsets;
   std::vector<Suppression> mSuppressions;

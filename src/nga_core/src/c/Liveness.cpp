@@ -24,36 +24,13 @@ std::optional<std::string> objectRead( ir::Operand const& operand )
   return object->name.substr( 0, object->name.find( '+' ) );
 }
 
-std::string baseOf( std::string const& name )
-{
-  return name.substr( 0, name.find( '+' ) );
-}
-
-/// The bytes of the Proc's own that liveness is about, by name.
-std::set<std::string> ownBytesOf( ir::Function const& function )
-{
-  std::set<std::string> own;
-  for ( ir::Local const& local : function.locals )
-  {
-    own.insert( local.name );
-  }
-  if ( function.memberOf.empty() )
-  {
-    for ( ir::Local const& parameter : function.parameters )
-    {
-      own.insert( parameter.name );
-    }
-  }
-  return own;
-}
-
 /// Every name an instruction reads, given to `use`, and the one it writes
 /// whole, given to `def` — a store to part of an object writes nothing whole,
 /// so it is a use of the rest and a def of none. A call touches only the
-/// callee's bytes; a `switch` reads every byte of ours, since its Procs name
-/// them through the function.
+/// callee's bytes, and a `switch` only the value it tests: its cases are
+/// blocks of this function (0191).
 template <typename Use, typename Def>
-void visitAccesses( ir::Instruction const& instruction, std::set<std::string> const& own, Use use, Def def )
+void visitAccesses( ir::Instruction const& instruction, Use use, Def def )
 {
   auto const read = [&use]( ir::Operand const& operand )
   {
@@ -75,7 +52,7 @@ void visitAccesses( ir::Instruction const& instruction, std::set<std::string> co
           }
           else
           {
-            use( baseOf( operation.name ) );
+            use( ir::baseOf( operation.name ) );
           }
         }
         else if constexpr ( std::is_same_v<Operation, ir::Unary> || std::is_same_v<Operation, ir::Convert> )
@@ -89,12 +66,12 @@ void visitAccesses( ir::Instruction const& instruction, std::set<std::string> co
         }
         else if constexpr ( std::is_same_v<Operation, ir::Load> )
         {
-          use( baseOf( operation.name ) );
+          use( ir::baseOf( operation.name ) );
           read( operation.index );
         }
         else if constexpr ( std::is_same_v<Operation, ir::StoreElement> )
         {
-          use( baseOf( operation.name ) );
+          use( ir::baseOf( operation.name ) );
           read( operation.index );
           read( operation.value );
         }
@@ -113,8 +90,8 @@ void visitAccesses( ir::Instruction const& instruction, std::set<std::string> co
         {
           // Both ends, whole: a copy into a local writes it, but a partial one
           // cannot be told from a whole one here, so it is a use.
-          use( baseOf( operation.from.name ) );
-          use( baseOf( operation.to.name ) );
+          use( ir::baseOf( operation.from.name ) );
+          use( ir::baseOf( operation.to.name ) );
           if ( operation.from.pointer.has_value() )
           {
             read( *operation.from.pointer );
@@ -131,7 +108,7 @@ void visitAccesses( ir::Instruction const& instruction, std::set<std::string> co
             read( argument.value );
             if ( argument.from.has_value() )
             {
-              use( baseOf( argument.from->name ) );
+              use( ir::baseOf( argument.from->name ) );
               if ( argument.from->pointer.has_value() )
               {
                 read( *argument.from->pointer );
@@ -142,10 +119,6 @@ void visitAccesses( ir::Instruction const& instruction, std::set<std::string> co
         else if constexpr ( std::is_same_v<Operation, ir::Switch> )
         {
           read( operation.value );
-          for ( std::string const& name : own )
-          {
-            use( name );
-          }
         }
         else if constexpr ( std::is_same_v<Operation, ir::EnterWith> )
         {
@@ -185,7 +158,7 @@ BlockAccess accessOf( ir::Block const& block, std::set<std::string> const& own )
   };
   for ( ir::Instruction const& instruction : block.instructions )
   {
-    visitAccesses( instruction, own, use, def );
+    visitAccesses( instruction, use, def );
   }
   if ( block.terminator.kind == ir::TerminatorKind::BRANCH )
   {
@@ -199,9 +172,26 @@ BlockAccess accessOf( ir::Block const& block, std::set<std::string> const& own )
 
 } // namespace
 
+std::set<std::string> liveBytesOf( ir::Function const& function )
+{
+  std::set<std::string> own;
+  for ( ir::Local const& local : function.locals )
+  {
+    own.insert( local.name );
+  }
+  if ( function.memberOf.empty() )
+  {
+    for ( ir::Local const& parameter : function.parameters )
+    {
+      own.insert( parameter.name );
+    }
+  }
+  return own;
+}
+
 std::vector<std::set<std::string>> liveInOf( ir::Function const& function )
 {
-  std::set<std::string> const own = ownBytesOf( function );
+  std::set<std::string> const own = liveBytesOf( function );
   std::vector<BlockAccess> access;
   access.reserve( function.blocks.size() );
   for ( ir::Block const& block : function.blocks )
@@ -257,7 +247,7 @@ namespace
 /// see docs/decisions/0151-volatile.md.
 void forwardStores( ir::Function& function, std::set<std::string> const& volatiles )
 {
-  auto const isVolatile = [&volatiles]( std::string const& name ) { return volatiles.contains( baseOf( name ) ); };
+  auto const isVolatile = [&volatiles]( std::string const& name ) { return volatiles.contains( ir::baseOf( name ) ); };
   for ( ir::Block& block : function.blocks )
   {
     for ( std::size_t at = 0; at + 1 < block.instructions.size(); ++at )
@@ -365,7 +355,7 @@ bool isRead( ir::Function const& function, ir::Value value )
 bool onlyComputes( ir::Instruction const& instruction, std::set<std::string> const& volatiles )
 {
   if ( auto const* const load = std::get_if<ir::Load>( &instruction.operation );
-       load != nullptr && volatiles.contains( baseOf( load->name ) ) )
+       load != nullptr && volatiles.contains( ir::baseOf( load->name ) ) )
   {
     return false;
   }
@@ -390,7 +380,7 @@ void dropIn( ir::Function& function, std::set<std::string> const& volatiles )
   }
   forwardStores( function, volatiles );
 
-  std::set<std::string> const own = ownBytesOf( function );
+  std::set<std::string> const own = liveBytesOf( function );
   std::vector<std::set<std::string>> const liveIn = liveInOf( function );
 
   // Each block backwards, carrying what is live: a store to a byte of ours
@@ -426,7 +416,6 @@ void dropIn( ir::Function& function, std::set<std::string> const& volatiles )
       }
       visitAccesses(
           instruction,
-          own,
           [&live]( std::string const& name ) { live.insert( name ); },
           [&live]( std::string const& name ) { live.erase( name ); } );
     }

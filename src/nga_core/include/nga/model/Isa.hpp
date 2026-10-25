@@ -1,12 +1,13 @@
 #pragma once
 
-#include "nga/model/PlacementClass.hpp"
 #include "nga/syntax/Operand.hpp"
+#include "nga/syntax/Statement.hpp"
 
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace nga::model
 {
@@ -65,6 +66,12 @@ std::span<Instruction const> instructionTable();
 
 [[nodiscard]] bool isMnemonic( std::string_view mnemonic );
 
+/// Every mnemonic a processor has, in alphabetical order: the table's, the
+/// Jccs and the certain jumps, and the 65SC02's own only where it is asked
+/// for — see docs/decisions/0182-the-target-names-its-processor.md. A certain
+/// jump whose branch the processor lacks is not its own either: `jra` is.
+[[nodiscard]] std::vector<std::string_view> mnemonicsOf( bool with65sc02 );
+
 /// Whether a mnemonic is one of the eight Jccs, which the processor does not
 /// have: the Bcc of the same letters where the distance fits one, the opposite
 /// Bcc over a `jmp` where it does not. `isMnemonic` is true of them, and
@@ -105,7 +112,7 @@ std::span<Instruction const> instructionTable();
 /// zero-page operand widens to absolute where the instruction has no zero-page
 /// form, because widening is always correct and narrowing never is.
 [[nodiscard]] std::optional<AddressingMode>
-modeFor( std::string_view mnemonic, syntax::OperandShape shape, PlacementClass placement );
+modeFor( std::string_view mnemonic, syntax::OperandShape shape, syntax::PlacementClass placement );
 
 /// What an instruction does to the memory its operand names, when it names
 /// memory at all: a load reads it, a store writes it, a shift on memory does

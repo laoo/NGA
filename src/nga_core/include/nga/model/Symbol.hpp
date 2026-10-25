@@ -60,8 +60,8 @@ constexpr SectionIndex MACRO_BODY_SECTION{ 0xFFFFFFFFU };
 /// docs/decisions/0031-slots.md.
 struct SlotDeclaration
 {
-  Binding binding = Binding::POINTER;
-  PlacementClass placement = PlacementClass::ABSOLUTE;
+  syntax::Binding binding = syntax::Binding::POINTER;
+  syntax::PlacementClass placement = syntax::PlacementClass::ABSOLUTE;
   std::optional<SectionRef> cell;
 };
 
@@ -99,6 +99,11 @@ struct Symbol
   SymbolValue value;
 };
 
+/// The Namespace around `scope`, which is a path ending in a dot, as the
+/// same: `one.two.` gives `one.`, and `one.` the top level, empty. A name is
+/// looked up from the innermost Namespace outwards, through these.
+std::string_view enclosingScopeOf( std::string_view scope );
+
 /// The Symbols one Module defines.
 ///
 /// Definition order is kept, and it is the order everything iterates in:
@@ -108,6 +113,10 @@ class SymbolTable
 {
 public:
   [[nodiscard]] Symbol const* find( std::string_view name ) const;
+
+  /// Where the Symbol of that name stands in `symbols()`, if this Module
+  /// defines one.
+  [[nodiscard]] std::optional<std::uint32_t> indexOf( std::string_view name ) const;
 
   /// Null when the Symbol was added; the existing definition when the name was
   /// already taken, so the caller can report both positions. The pointer is

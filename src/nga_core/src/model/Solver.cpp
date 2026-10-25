@@ -5,9 +5,13 @@
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/util/sorted_interval_list.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <map>
+#include <string_view>
+#include <utility>
 
 namespace nga::model
 {
@@ -17,9 +21,34 @@ namespace
 
 namespace sat = operations_research::sat;
 
+/// What one question took, said at debug level: the clock, and the
+/// deterministic time against the budget it had, which is what says how near
+/// a program stands to running out — see
+/// docs/decisions/0255-the-portfolio-has-a-budget-too.md.
+void logTook( std::string_view question, sat::CpSolverResponse const& response, double budget )
+{
+  spdlog::debug( "Place, {}: {:.1f} ms, {:.4f} of {} deterministic time",
+                 question,
+                 response.wall_time() * 1000.0,
+                 response.deterministic_time(),
+                 budget );
+}
+
+/// One worker and the decision strategies the model holds, within a budget
+/// of deterministic time and never a limit on the clock: more workers would
+/// make the layout a fact about the machine, and a clock would make running
+/// out one.
+sat::SatParameters fixedSearch( double budget )
+{
+  sat::SatParameters parameters;
+  parameters.set_num_workers( 1 );
+  parameters.set_search_branching( sat::SatParameters::FIXED_SEARCH );
+  parameters.set_max_deterministic_time( budget );
+  return parameters;
+}
+
 /// The part of the model every question shares: a start variable per Claim
-/// over its allowed starts — one per Phase for a movable Claim — and an
-/// interval of its size at each; a Bank variable per Pane, and for a Claim
+/// over its allowed starts, and an interval of its size; a Bank variable per Pane, and for a Claim
 /// in a Pane its offset within the Window, which is the coordinate its Bank
 /// is shared in.
 struct Built
@@ -27,13 +56,9 @@ struct Built
   sat::CpModelBuilder model;
   std::size_t phaseCount = 0;
 
-  /// Per Claim that is not movable: its start, or nothing for a Claim the
-  /// model does not hold — one with no allowed start, or one of no bytes.
+  /// Per Claim: its start, or nothing for a Claim the model does not hold —
+  /// one with no allowed start, or one of no bytes.
   std::vector<std::optional<sat::IntVar>> single;
-
-  /// Per movable Claim, per Phase: its start there, or nothing outside its
-  /// Residency.
-  std::vector<std::vector<std::optional<sat::IntVar>>> perPhase;
 
   /// Every start in the order the Claims were given, for the search.
   std::vector<sat::IntVar> inOrder;
@@ -62,27 +87,34 @@ struct Built
 
   std::vector<Taken> taken;
 
+  /// Per Claim of a unit set some Claim stands in itself: the set, and where
+  /// its bytes start on the set's axis with the interval they take there —
+  /// once, or once per member of a family. Nothing and empty for every other
+  /// Claim. Such a set is held apart on its axis as well as by rectangles,
+  /// since a Claim in the set itself may run across Banks and is no
+  /// rectangle; a set with no such Claim keeps the rectangles alone, and so
+  /// the layout it always had — see
+  /// docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+  std::vector<std::optional<std::uint32_t>> setOf;
+  std::vector<std::vector<sat::LinearExpr>> axisStarts;
+  std::vector<std::vector<sat::IntervalVar>> onAxis;
+
+  /// Per occupied range of a set held apart on its axis: its bytes there.
+  std::vector<std::optional<sat::IntervalVar>> takenOnAxis;
+
   /// Whether two Claims can collide at all in one address space: one group,
-  /// and neither in a Pane — a Pane's Claims are held apart by Bank and
-  /// offset, which is the other kind of collision.
+  /// and neither of a unit set — a Pane's Claims are held apart by Bank and
+  /// offset, and a Claim in a set itself on the set's axis, which are the
+  /// other kinds of collision.
   [[nodiscard]] static bool coVisible( Claim const& a, Claim const& b )
   {
-    return a.group == b.group && !a.pane.has_value() && !b.pane.has_value();
+    return a.group == b.group && !a.pane.has_value() && !b.pane.has_value() && !a.linear.has_value() &&
+           !b.linear.has_value();
   }
 
   /// Answered without the model: the first allowed start of a Claim of no
   /// bytes, which takes nothing from anyone.
   std::vector<std::optional<std::uint32_t>> settled;
-
-  /// The start a Claim has in a Phase, whichever kind it is.
-  [[nodiscard]] std::optional<sat::IntVar> startIn( std::size_t claim, std::size_t phase ) const
-  {
-    if ( !perPhase[claim].empty() )
-    {
-      return phase < perPhase[claim].size() ? perPhase[claim][phase] : std::nullopt;
-    }
-    return single[claim];
-  }
 
   /// The offset a Claim in a Pane has in a Phase it is present in.
   [[nodiscard]] std::optional<sat::LinearExpr> offsetIn( std::size_t claim, std::size_t phase ) const
@@ -102,11 +134,40 @@ struct Built
   }
 };
 
-/// Whether a Claim gets a start per Phase: movable, and in some Phase to
-/// begin with — a Module in no Phase is placed once, like any other.
-bool perPhase( Claim const& claim )
+/// The size of a Window's ranges laid end to end, which is what one Bank of
+/// the set it shows holds.
+std::int64_t windowSizeOf( PaneClaim const& pane )
 {
-  return claim.movable && !claim.residency.isEmpty();
+  std::int64_t total = 0;
+  for ( AddressRange const& range : pane.window )
+  {
+    total += range.size();
+  }
+  return total;
+}
+
+/// What one Bank of a set holds: its axis says, and where it does not, the
+/// Window of a Pane of the set, which is the size offsets are counted in.
+std::int64_t bankSizeOf( Problem const& problem, std::uint32_t set )
+{
+  if ( set < problem.axes.size() && problem.axes[set].bankSize > 0 )
+  {
+    return problem.axes[set].bankSize;
+  }
+  for ( PaneClaim const& pane : problem.panes )
+  {
+    if ( pane.set == set )
+    {
+      return windowSizeOf( pane );
+    }
+  }
+  return 0;
+}
+
+/// Where a set's axis starts: its first Bank's linear address, or zero.
+std::int64_t axisBeginOf( Problem const& problem, std::uint32_t set )
+{
+  return set < problem.axes.size() ? problem.axes[set].begin : 0;
 }
 
 /// A start's distance into the Window's ranges laid end to end: with one
@@ -148,7 +209,6 @@ Built build( Problem const& problem )
   std::span<Claim const> const claims = problem.claims;
   Built built;
   built.single.resize( claims.size() );
-  built.perPhase.resize( claims.size() );
   built.settled.resize( claims.size() );
 
   for ( Claim const& claim : claims )
@@ -158,35 +218,58 @@ Built build( Problem const& problem )
   built.byPhase.resize( built.phaseCount );
   built.claimsByPhase.resize( built.phaseCount );
   built.offsetByPhase.resize( built.phaseCount );
+  built.setOf.resize( claims.size() );
+  built.axisStarts.resize( claims.size() );
+  built.onAxis.resize( claims.size() );
+
+  // The sets some Claim stands in itself, which are held apart on an axis.
+  std::vector<std::uint32_t> axisSets;
+  for ( Claim const& claim : claims )
+  {
+    if ( claim.linear.has_value() && std::ranges::find( axisSets, *claim.linear ) == axisSets.end() )
+    {
+      axisSets.push_back( *claim.linear );
+    }
+  }
+  auto const onAnAxis = [&axisSets]( std::uint32_t set )
+  { return std::ranges::find( axisSets, set ) != axisSets.end(); };
 
   // A Bank per Pane, over the set's Banks that leave room for a family's
-  // run; pinned by number where the Pane was.
+  // run.
   built.paneBank.resize( problem.panes.size() );
   built.paneRow.resize( problem.panes.size() );
   for ( std::size_t index = 0; index < problem.panes.size(); ++index )
   {
     PaneClaim const& pane = problem.panes[index];
-    if ( pane.count == 0 || pane.banks < pane.count ||
-         ( pane.bank.has_value() && *pane.bank + pane.count > pane.banks ) )
+    if ( pane.count == 0 || pane.banks < pane.count )
     {
       built.paneWithoutBank = true;
       continue;
     }
     std::int64_t const last = pane.banks - pane.count;
-    sat::IntVar const bank = pane.bank.has_value() ? built.model.NewIntVar( { *pane.bank, *pane.bank } )
-                                                   : built.model.NewIntVar( { 0, last } );
+    sat::IntVar const bank = built.model.NewIntVar( { 0, last } );
     built.paneBank[index] = bank;
     built.paneRow[index] = built.model.NewFixedSizeIntervalVar( bank, pane.count );
-    if ( !pane.bank.has_value() )
-    {
-      built.banksInOrder.push_back( bank );
-    }
+    built.banksInOrder.push_back( bank );
   }
   for ( Occupied const& occupied : problem.occupied )
   {
     built.taken.push_back( Built::Taken{
         .x = built.model.NewFixedSizeIntervalVar( static_cast<std::int64_t>( occupied.offset ), occupied.size ),
         .y = built.model.NewFixedSizeIntervalVar( static_cast<std::int64_t>( occupied.bank ), 1 ) } );
+
+    // On the axis, only what lies within a Bank: past that no Claim of the
+    // set stands, and the rectangle never reached the next Bank either.
+    std::int64_t const bankSize = bankSizeOf( problem, occupied.set );
+    if ( !onAnAxis( occupied.set ) || bankSize == 0 || std::cmp_greater_equal( occupied.offset, bankSize ) )
+    {
+      built.takenOnAxis.emplace_back( std::nullopt );
+      continue;
+    }
+    std::int64_t const at = axisBeginOf( problem, occupied.set ) + ( std::int64_t{ occupied.bank } * bankSize ) +
+                            static_cast<std::int64_t>( occupied.offset );
+    built.takenOnAxis.emplace_back( built.model.NewFixedSizeIntervalVar(
+        at, std::min<std::int64_t>( occupied.size, bankSize - occupied.offset ) ) );
   }
 
   for ( std::size_t index = 0; index < claims.size(); ++index )
@@ -215,7 +298,16 @@ Built build( Problem const& problem )
 
     // A Section of no bytes takes nothing from anyone, and the first start
     // its Constraints allow is as good as any — the first aligned one, where
-    // it asks to be aligned. A boundary means nothing to it.
+    // it asks to be aligned. A boundary means nothing to it. One that follows
+    // another stands where that one ends, wherever it does: a start of its
+    // own, which the adjacency below ties, and no interval, since there is
+    // nothing of it to hold apart — up to the end of what its starts allow,
+    // which is where a Proc ending its pool leaves it.
+    if ( claim.size == 0 && claim.follows.has_value() )
+    {
+      built.single[index] = built.model.NewIntVar( { intervals.front().start, intervals.back().end + 1 } );
+      continue;
+    }
     if ( claim.size == 0 )
     {
       for ( operations_research::ClosedInterval const& interval : intervals )
@@ -268,108 +360,70 @@ Built build( Problem const& problem )
       return start;
     };
 
-    // The interval a Phase holds apart: at the address for a Claim of the
+    // The interval each Phase holds apart: at the address for a Claim of the
     // address space, and at the offset within the Window for one in a Pane,
     // whose Bank is the other coordinate.
-    auto const present = [&]( std::size_t phase, sat::IntVar start )
-    {
-      std::optional<sat::LinearExpr> offset;
-      if ( pane != nullptr )
-      {
-        offset = offsetOf( built, start, claim.size, *pane );
-      }
-      built.byPhase[phase].push_back( built.model.NewFixedSizeIntervalVar( offset.value_or( start ), claim.size ) );
-      built.claimsByPhase[phase].push_back( index );
-      built.offsetByPhase[phase].push_back( offset );
-    };
+    sat::IntVar const start = newStart();
+    std::optional<sat::LinearExpr> const offset =
+        pane != nullptr ? std::optional<sat::LinearExpr>{ offsetOf( built, start, claim.size, *pane ) } : std::nullopt;
+    sat::IntervalVar const interval = built.model.NewFixedSizeIntervalVar( offset.value_or( start ), claim.size );
 
-    if ( !perPhase( claim ) )
+    // On the set's axis where the set has one: a Claim in the set itself at
+    // its start, which is a linear address already, and a Pane's at its
+    // Bank's start plus its offset, once per member of a family — in a
+    // variable of its own, since an interval starts at an expression of one
+    // variable and this one has the Bank's and the offset's.
+    if ( claim.linear.has_value() )
     {
-      sat::IntVar const start = newStart();
-      std::optional<sat::LinearExpr> const offset =
-          pane != nullptr ? std::optional<sat::LinearExpr>{ offsetOf( built, start, claim.size, *pane ) }
-                          : std::nullopt;
-      sat::IntervalVar const interval = built.model.NewFixedSizeIntervalVar( offset.value_or( start ), claim.size );
-      for ( std::size_t phase = 0; phase < claim.residency.phaseCount(); ++phase )
-      {
-        if ( claim.residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
-        {
-          built.byPhase[phase].push_back( interval );
-          built.claimsByPhase[phase].push_back( index );
-          built.offsetByPhase[phase].push_back( offset );
-        }
-      }
-      built.single[index] = start;
-      continue;
+      built.setOf[index] = claim.linear;
+      built.axisStarts[index].emplace_back( start );
+      built.onAxis[index].push_back( interval );
     }
-
-    // A start per Phase, and the Claim's intervals are each in one Phase.
-    built.perPhase[index].resize( built.phaseCount );
+    else if ( pane != nullptr && onAnAxis( pane->set ) )
+    {
+      std::int64_t const bankSize = windowSizeOf( *pane );
+      std::int64_t const begin = axisBeginOf( problem, pane->set );
+      for ( std::uint32_t member = 0; member < pane->count; ++member )
+      {
+        sat::IntVar const at = built.model.NewIntVar( { begin, begin + ( std::int64_t{ pane->banks } * bankSize ) } );
+        built.model.AddEquality( at,
+                                 sat::LinearExpr::Term( *built.paneBank[*claim.pane], bankSize ) + *offset +
+                                     ( begin + ( member * bankSize ) ) );
+        built.axisStarts[index].emplace_back( at );
+        built.onAxis[index].push_back( built.model.NewFixedSizeIntervalVar( at, claim.size ) );
+      }
+      built.setOf[index] = pane->set;
+    }
     for ( std::size_t phase = 0; phase < claim.residency.phaseCount(); ++phase )
     {
-      if ( !claim.residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
+      if ( claim.residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
       {
-        continue;
-      }
-      sat::IntVar const start = newStart();
-      present( phase, start );
-      built.perPhase[index][phase] = start;
-    }
-
-    // Held still wherever a Reference sees it: one start across every Phase
-    // of each Residency that refers to it.
-    for ( Residency const& across : claim.frozenOver )
-    {
-      std::optional<sat::IntVar> first;
-      for ( std::size_t phase = 0; phase < std::min( across.phaseCount(), built.phaseCount ); ++phase )
-      {
-        std::optional<sat::IntVar> const start = built.perPhase[index][phase];
-        if ( !across.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) || !start.has_value() )
-        {
-          continue;
-        }
-        if ( first.has_value() )
-        {
-          built.model.AddEquality( *first, *start );
-        }
-        else
-        {
-          first = start;
-        }
+        built.byPhase[phase].push_back( interval );
+        built.claimsByPhase[phase].push_back( index );
+        built.offsetByPhase[phase].push_back( offset );
       }
     }
+    built.single[index] = start;
   }
   // Adjacency, once every start exists: a Claim that follows another starts
-  // where that one ends, in every Phase both have a start. A Claim of no
-  // bytes was settled without a variable, and what follows it is held to
-  // the settled address.
+  // where that one ends. A Claim of no bytes that follows nothing was settled
+  // without a variable, and what follows it is held to the settled address.
   for ( std::size_t index = 0; index < claims.size(); ++index )
   {
-    if ( !claims[index].follows.has_value() )
+    std::optional<sat::IntVar> const& start = built.single[index];
+    std::optional<std::size_t> const& follows = claims[index].follows;
+    if ( !follows.has_value() || !start.has_value() )
     {
       continue;
     }
-    std::size_t const before = *claims[index].follows;
-    bool const bothSingle = built.perPhase[index].empty() && built.perPhase[before].empty();
-    for ( std::size_t phase = 0; phase < std::max<std::size_t>( built.phaseCount, 1 ); ++phase )
+    std::size_t const before = follows.value();
+    if ( std::optional<sat::IntVar> const& previous = built.single[before]; previous.has_value() )
     {
-      std::optional<sat::IntVar> const start = built.startIn( index, phase );
-      if ( !start.has_value() )
-      {
-        continue;
-      }
-      if ( std::optional<sat::IntVar> const previous = built.startIn( before, phase ); previous.has_value() )
-      {
-        built.model.AddEquality( *start, *previous + claims[before].size );
-      }
-      else if ( built.settled[before].has_value() )
-      {
-        built.model.AddEquality( *start, static_cast<std::int64_t>( *built.settled[before] ) + claims[before].size );
-      }
-      if ( bothSingle )
-      {
-        break;
-      }
+      built.model.AddEquality( start.value(), previous.value() + claims[before].size );
+    }
+    else if ( std::optional<std::uint32_t> const& settled = built.settled[before]; settled.has_value() )
+    {
+      built.model.AddEquality( start.value(), static_cast<std::int64_t>( settled.value() ) + claims[before].size );
     }
   }
   return built;
@@ -391,30 +445,6 @@ void readBack( Built const& built,
     if ( std::optional<sat::IntVar> const& start = built.single[index]; start.has_value() )
     {
       into.addresses[index] = static_cast<std::uint32_t>( sat::SolutionIntegerValue( response, *start ) );
-      continue;
-    }
-    if ( built.perPhase[index].empty() )
-    {
-      continue;
-    }
-    into.byPhase[index].assign( built.phaseCount, std::nullopt );
-    std::optional<std::uint32_t> one;
-    bool uniform = true;
-    for ( std::size_t phase = 0; phase < built.phaseCount; ++phase )
-    {
-      std::optional<sat::IntVar> const& start = built.perPhase[index][phase];
-      if ( !start.has_value() )
-      {
-        continue;
-      }
-      auto const address = static_cast<std::uint32_t>( sat::SolutionIntegerValue( response, *start ) );
-      into.byPhase[index][phase] = address;
-      uniform = uniform && ( !one.has_value() || *one == address );
-      one = address;
-    }
-    if ( uniform )
-    {
-      into.addresses[index] = one;
     }
   }
   for ( std::size_t index = 0; index < built.paneBank.size(); ++index )
@@ -452,9 +482,7 @@ sat::BoolVar overlapOf( sat::CpModelBuilder& model,
 /// Whether taken bytes are taken in a Phase.
 bool takenIn( Occupied const& occupied, std::size_t phase )
 {
-  return occupied.live.phaseCount() == 0 ||
-         ( occupied.live.phaseCount() > phase &&
-           occupied.live.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) );
+  return occupied.live.phaseCount() == 0 || occupied.live.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } );
 }
 
 /// Whether two Claims in Panes can collide at all: Panes of one set.
@@ -466,32 +494,17 @@ bool sameSet( Problem const& problem, Claim const& a, Claim const& b )
 
 } // namespace
 
-Solution solve( Problem const& problem, PhaseGraph const& phases )
+Solution solve( Problem const& problem )
 {
   std::span<Claim const> const claims = problem.claims;
   Built built = build( problem );
   Solution solution;
   solution.addresses = built.settled;
-  solution.byPhase.resize( claims.size() );
   solution.paneBanks.resize( problem.panes.size() );
-  for ( std::size_t index = 0; index < claims.size(); ++index )
-  {
-    if ( perPhase( claims[index] ) && built.settled[index].has_value() )
-    {
-      solution.byPhase[index].assign( built.phaseCount, std::nullopt );
-      for ( std::size_t phase = 0; phase < claims[index].residency.phaseCount(); ++phase )
-      {
-        if ( claims[index].residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
-        {
-          solution.byPhase[index][phase] = built.settled[index];
-        }
-      }
-    }
-  }
 
   // A Pane with no Bank to have is a layout that does not exist, and the
   // arithmetic above the solver has already said which Pane.
-  if ( built.paneWithoutBank )
+  if ( built.paneWithoutBank || problem.refused )
   {
     solution.feasible = false;
     return solution;
@@ -531,7 +544,7 @@ Solution solve( Problem const& problem, PhaseGraph const& phases )
           rectangles[problem.panes[*claim.pane].set].emplace_back( built.byPhase[phase][k], *row );
         }
       }
-      else if ( !pairwise[present[k]] )
+      else if ( !claim.linear.has_value() && !pairwise[present[k]] )
       {
         apart[claim.group].push_back( built.byPhase[phase][k] );
       }
@@ -562,6 +575,35 @@ Solution solve( Problem const& problem, PhaseGraph const& phases )
         apartInSet.AddRectangle( x, y );
       }
     }
+
+    // A set some Claim stands in itself is one axis as well: that Claim's
+    // bytes may run across Banks, which no rectangle holds, so every Claim of
+    // the set and every byte taken there is one interval on it — see
+    // docs/decisions/0254-a-section-may-stand-in-a-unit-set.md.
+    std::map<std::uint32_t, std::vector<sat::IntervalVar>> onAxis;
+    for ( std::size_t const claim : present )
+    {
+      if ( std::optional<std::uint32_t> const set = built.setOf[claim]; set.has_value() )
+      {
+        std::vector<sat::IntervalVar>& ofSet = onAxis[*set];
+        ofSet.insert( ofSet.end(), built.onAxis[claim].begin(), built.onAxis[claim].end() );
+      }
+    }
+    for ( auto& [set, ofSet] : onAxis )
+    {
+      for ( std::size_t index = 0; index < problem.occupied.size(); ++index )
+      {
+        std::optional<sat::IntervalVar> const& taken = built.takenOnAxis[index];
+        if ( problem.occupied[index].set == set && takenIn( problem.occupied[index], phase ) && taken.has_value() )
+        {
+          ofSet.push_back( *taken );
+        }
+      }
+      if ( ofSet.size() > 1 )
+      {
+        built.model.AddNoOverlap( ofSet );
+      }
+    }
     for ( std::size_t ka = 0; ka < present.size(); ++ka )
     {
       std::size_t const a = present[ka];
@@ -586,38 +628,6 @@ Solution solve( Problem const& problem, PhaseGraph const& phases )
     }
   }
 
-  // A move: a movable Claim standing at two addresses across an edge, which
-  // at run time is its bytes copied again. One boolean per edge and Claim,
-  // weighed by the bytes, and decided before any start so that the search
-  // tries "no move" first.
-  std::vector<sat::BoolVar> moves;
-  std::vector<std::int64_t> weights;
-  for ( std::uint32_t from = 0; from < phases.phases.size(); ++from )
-  {
-    for ( PhaseIndex const to : phases.phases[from].then )
-    {
-      for ( std::size_t index = 0; index < claims.size(); ++index )
-      {
-        std::optional<sat::IntVar> const before = built.startIn( index, from );
-        std::optional<sat::IntVar> const after = built.startIn( index, to.value );
-        if ( built.perPhase[index].empty() || !before.has_value() || !after.has_value() )
-        {
-          continue;
-        }
-        sat::BoolVar const move = built.model.NewBoolVar();
-        built.model.AddNotEqual( *before, *after ).OnlyEnforceIf( move );
-        built.model.AddEquality( *before, *after ).OnlyEnforceIf( move.Not() );
-        moves.push_back( move );
-        weights.push_back( claims[index].size );
-      }
-    }
-  }
-
-  if ( !moves.empty() )
-  {
-    built.model.AddDecisionStrategy(
-        moves, sat::DecisionStrategyProto::CHOOSE_FIRST, sat::DecisionStrategyProto::SELECT_MIN_VALUE );
-  }
   // Highest Bank first: the Panes go to the top of the set, and storage,
   // packed from the bottom, meets them as late as it can.
   if ( !built.banksInOrder.empty() )
@@ -631,54 +641,61 @@ Solution solve( Problem const& problem, PhaseGraph const& phases )
         built.inOrder, sat::DecisionStrategyProto::CHOOSE_FIRST, sat::DecisionStrategyProto::SELECT_MIN_VALUE );
   }
 
-  // One worker and the fixed search above, and never a limit on the clock:
-  // more workers would make the layout a fact about the machine, and a clock
-  // would make "no layout" one.
-  sat::SatParameters parameters;
-  parameters.set_num_workers( 1 );
-  parameters.set_search_branching( sat::SatParameters::FIXED_SEARCH );
-
-  // Whether a layout exists is answered first and without any budget, so
-  // that the answer never depends on one.
-  sat::CpSolverResponse found = sat::SolveWithParameters( built.model.Build(), parameters );
+  // Whether a layout exists is answered first: by the fixed search within
+  // its budget, and where that runs out by CP-SAT's portfolio, interleaved
+  // in fixed batches, within one of its own — see
+  // docs/decisions/0244-the-fixed-search-has-a-budget-and-a-portfolio-after-it.md
+  // and docs/decisions/0255-the-portfolio-has-a-budget-too.md.
+  sat::CpSolverResponse found = sat::SolveWithParameters( built.model.Build(), fixedSearch( FIND_BUDGET ) );
+  logTook( "finding a layout", found, FIND_BUDGET );
+  if ( found.status() == sat::CpSolverStatus::UNKNOWN )
+  {
+    // With no stop at the first layout: the tasks of a batch run on threads,
+    // and the first of them to find one would win by the clock. A model with
+    // no objective ends with the batch that found it — see
+    // docs/decisions/0257-the-portfolio-ends-with-its-batch-and-the-raise-is-the-fixed-search.md.
+    sat::SatParameters portfolio;
+    portfolio.set_num_workers( PORTFOLIO_WORKERS );
+    portfolio.set_interleave_search( true );
+    portfolio.set_max_deterministic_time( PORTFOLIO_BUDGET );
+    found = sat::SolveWithParameters( built.model.Build(), portfolio );
+    logTook( "the portfolio", found, PORTFOLIO_BUDGET );
+  }
   if ( !hasSolution( found ) )
   {
     solution.feasible = false;
+    solution.decided = found.status() != sat::CpSolverStatus::UNKNOWN;
     return solution;
   }
 
-  // Then, where there is a choice, the layout moving the fewest bytes, and
-  // among those the one whose Panes stand highest — every byte moved
-  // outweighing every Bank, so that tidiness never costs a copy — from the
-  // one found, within a budget, and keeping the one found where the budget
-  // runs out before a better one is proven.
-  if ( !moves.empty() || !built.banksInOrder.empty() )
+  // Then, where there is a choice, the layout whose Panes stand highest, from
+  // the one found, within a budget, and keeping the one found where the
+  // budget runs out before a better one is proven. Asked by the fixed search
+  // whichever search found the layout: the same question gets the same
+  // answer, and no parameter of the portfolio's is carried into it — see
+  // docs/decisions/0257-the-portfolio-ends-with-its-batch-and-the-raise-is-the-fixed-search.md.
+  //
+  // The layout found is the hint, every variable of it and not only the ones
+  // the search decides: CP-SAT searches for a hint short of a single variable
+  // again before it starts on the proof, and a whole one it only checks, which
+  // also hands presolve the objective to beat. On the Kung Fu Master port that
+  // took the question from a quarter of a second to a sixteenth, and no layout
+  // of the suite moved.
+  if ( !built.banksInOrder.empty() )
   {
-    for ( sat::IntVar const& start : built.inOrder )
+    int const variables = built.model.Proto().variables_size();
+    for ( int index = 0; index < variables; ++index )
     {
-      built.model.AddHint( start, sat::SolutionIntegerValue( found, start ) );
-    }
-    for ( sat::IntVar const& bank : built.banksInOrder )
-    {
-      built.model.AddHint( bank, sat::SolutionIntegerValue( found, bank ) );
-    }
-    std::int64_t banksAtMost = 1;
-    for ( PaneClaim const& pane : problem.panes )
-    {
-      banksAtMost += pane.banks;
+      built.model.AddHint( built.model.GetIntVarFromProtoIndex( index ), found.solution( index ) );
     }
     sat::LinearExpr objective;
-    for ( std::size_t index = 0; index < moves.size(); ++index )
-    {
-      objective += sat::LinearExpr::Term( moves[index], weights[index] * banksAtMost );
-    }
     for ( sat::IntVar const& bank : built.banksInOrder )
     {
       objective += sat::LinearExpr::Term( bank, -1 );
     }
     built.model.Minimize( objective );
-    parameters.set_max_deterministic_time( MOVE_BUDGET );
-    sat::CpSolverResponse const better = sat::SolveWithParameters( built.model.Build(), parameters );
+    sat::CpSolverResponse const better = sat::SolveWithParameters( built.model.Build(), fixedSearch( RAISE_BUDGET ) );
+    logTook( "raising the Panes", better, RAISE_BUDGET );
     if ( hasSolution( better ) )
     {
       found = better;
@@ -689,12 +706,12 @@ Solution solve( Problem const& problem, PhaseGraph const& phases )
   return solution;
 }
 
-Solution solve( std::span<Claim const> claims, PhaseGraph const& phases )
+Solution solve( std::span<Claim const> claims )
 {
-  return solve( Problem{ .claims = { claims.begin(), claims.end() }, .panes = {}, .occupied = {} }, phases );
+  return solve( Problem{ .claims = { claims.begin(), claims.end() }, .panes = {}, .occupied = {}, .axes = {} } );
 }
 
-Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
+Explanation explain( Problem const& problem )
 {
   std::span<Claim const> const claims = problem.claims;
   Built built = build( problem );
@@ -734,8 +751,9 @@ Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
   {
     for ( std::size_t a = 0; a < claims.size(); ++a )
     {
-      std::optional<sat::IntVar> const startOfA = built.startIn( a, phase );
-      if ( !startOfA.has_value() || !claims[a].residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
+      std::optional<sat::IntVar> const startOfA = built.single[a];
+      if ( !startOfA.has_value() || claims[a].size == 0 ||
+           !claims[a].residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) )
       {
         continue;
       }
@@ -756,12 +774,24 @@ Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
           built.model.AddBoolOr( { offsets.Not(), banks.Not() } );
         }
       }
+      if ( claims[a].linear.has_value() )
+      {
+        for ( std::size_t index = 0; index < problem.occupied.size(); ++index )
+        {
+          if ( problem.occupied[index].set == *claims[a].linear && takenIn( problem.occupied[index], phase ) &&
+               built.takenOnAxis[index].has_value() )
+          {
+            built.model.AddNoOverlap( { built.onAxis[a].front(), *built.takenOnAxis[index] } );
+          }
+        }
+      }
       for ( std::size_t b = a + 1; b < claims.size(); ++b )
       {
-        std::optional<sat::IntVar> const startOfB = built.startIn( b, phase );
-        if ( !startOfB.has_value() ||
+        std::optional<sat::IntVar> const startOfB = built.single[b];
+        if ( !startOfB.has_value() || claims[b].size == 0 ||
              !claims[b].residency.includes( PhaseIndex{ static_cast<std::uint32_t>( phase ) } ) ||
-             std::ranges::find( claims[a].sharesWith, b ) != claims[a].sharesWith.end() )
+             std::ranges::find( claims[a].sharesWith, b ) != claims[a].sharesWith.end() ||
+             std::ranges::find( claims[b].sharesWith, a ) != claims[b].sharesWith.end() )
         {
           continue;
         }
@@ -784,6 +814,26 @@ Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
           built.model.AddBoolOr( { offsets.Not(), banks.Not() } ).OnlyEnforceIf( both.Not() );
           overlap = both;
         }
+        else if ( ( claims[a].linear.has_value() || claims[b].linear.has_value() ) && built.setOf[a].has_value() &&
+                  built.setOf[a] == built.setOf[b] )
+        {
+          // On the axis, where a family's member meeting the other is enough.
+          std::vector<sat::BoolVar> meets;
+          for ( sat::LinearExpr const& atA : built.axisStarts[a] )
+          {
+            for ( sat::LinearExpr const& atB : built.axisStarts[b] )
+            {
+              meets.push_back( overlapOf( built.model, atA, claims[a].size, atB, claims[b].size ) );
+            }
+          }
+          sat::BoolVar const any = built.model.NewBoolVar();
+          built.model.AddBoolOr( meets ).OnlyEnforceIf( any );
+          for ( sat::BoolVar const& one : meets )
+          {
+            built.model.AddImplication( one, any );
+          }
+          overlap = any;
+        }
         if ( !overlap.has_value() )
         {
           continue;
@@ -805,6 +855,7 @@ Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
   parameters.set_max_deterministic_time( EXPLAIN_BUDGET );
 
   sat::CpSolverResponse const response = sat::SolveWithParameters( built.model.Build(), parameters );
+  logTook( "explaining", response, EXPLAIN_BUDGET );
   explanation.minimal = response.status() == sat::CpSolverStatus::OPTIMAL;
   if ( !hasSolution( response ) )
   {
@@ -823,9 +874,9 @@ Explanation explain( Problem const& problem, PhaseGraph const& /*phases*/ )
   return explanation;
 }
 
-Explanation explain( std::span<Claim const> claims, PhaseGraph const& phases )
+Explanation explain( std::span<Claim const> claims )
 {
-  return explain( Problem{ .claims = { claims.begin(), claims.end() }, .panes = {}, .occupied = {} }, phases );
+  return explain( Problem{ .claims = { claims.begin(), claims.end() }, .panes = {}, .occupied = {}, .axes = {} } );
 }
 
 } // namespace nga::model

@@ -86,7 +86,7 @@ line. Neither Phase names the other, and `run.asm` names neither.
 ```
 phase level (1)
   zero page: 145 of 256 bytes
-  memory:    16661 of 56576 bytes
+  memory:    16239 of 40192 bytes
   ...
   $0083-$0084  level.drawMap.at             temporary          level  shares with ngaDst ngaPtr portbDst
   ...
@@ -94,15 +94,15 @@ phase level (1)
   ...
   $008F-$0090  nga.slots.title              section            intro..level
   ...
-  $20DF-$20F3  run.showScreen               proc               intro..level
-  $20F4-$2118  level.drawMap                proc               level  waits in bank 0 at $0026 (copy, 39 bytes)
-  $2119-$2122  level.levelTitle             section            level  waits in bank 0 at $004D (copy, 12 bytes)
-  $2123-$2130  level.levelDraw              proc               level  waits in bank 0 at $0059 (copy, 16 bytes)
-  $2131-$2136  level.levelStart             proc               level  waits in bank 0 at $0069 (copy, 8 bytes)
+  $20F9-$210D  run.showScreen               proc               intro..level
+  $210E-$2132  level.drawMap                proc               level  waits in bank 0 at $0025 (copy, 39 bytes)
+  $2133-$213C  level.levelTitle             section            level  waits in bank 0 at $004C (copy, 12 bytes)
+  $213D-$2145  level.levelDraw              proc               level  waits in bank 0 at $0058 (copy, 11 bytes)
+  $2146-$214B  level.levelStart             proc               level  waits in bank 0 at $0063 (copy, 8 bytes)
   ...
-  $2226-$2228  nga.slots.draw               section            intro..level
+  $224E-$2250  nga.slots.draw               section            intro..level
   ...
-  $4000-$4171  level.levelMap               section            level  in pane level (state 4)
+  $4000-$4171  level.levelMap               section kept       intro..level  in pane level (state 4)
   ...
 ```
 <!-- end -->
@@ -117,19 +117,20 @@ declared a Slot.
 <!-- map 07-slots/per-phase storage -->
 ```
 storage
-  bank 0: 113 of 16384 bytes
-    $0000-$0025  frame intro -> level          live intro
-    $0026-$004C  level.drawMap                copy (39 bytes)  live intro
-    $004D-$0058  level.levelTitle             copy (12 bytes)  live intro
-    $0059-$0068  level.levelDraw              copy (16 bytes)  live intro
-    $0069-$0070  level.levelStart             copy (8 bytes)  live intro
+  bank 0: 107 of 16384 bytes
+    $0000-$0024  frame intro -> level          live intro
+    $0025-$004B  level.drawMap                copy (39 bytes)  live intro
+    $004C-$0057  level.levelTitle             copy (12 bytes)  live intro
+    $0058-$0062  level.levelDraw              copy (11 bytes)  live intro
+    $0063-$006A  level.levelStart             copy (8 bytes)  live intro
   bank 1: 0 of 16384 bytes
   bank 2: 0 of 16384 bytes
   bank 3: 0 of 16384 bytes
+  bank 4: 0 of 16384 bytes
 ```
 <!-- end -->
 
-The Frame is thirty-eight bytes where chapter six's was eighteen. Twelve of the
+The Frame is thirty-seven bytes where chapter six's was seventeen. Twelve of the
 twenty are two more Sections to load, `levelTitle` and `levelDraw` being
 Sections of `level` like any other. The remaining eight are the two **Cell
 writes**, four bytes each: where the Cell is, and what this edge is to put in

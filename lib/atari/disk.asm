@@ -9,8 +9,7 @@
 ; driver needs no register of its own and knows nothing about a drive.
 ;
 ; The medium maps nothing, so this driver names no Window: `stream`, `show`
-; and `showAt` are not declared, and the two Procs that put base memory back
-; after a Transition are a `rts`.
+; and `showAt` are not declared.
 ;
 ; Resident, since every Transition calls it; the variant lists it so.
 
@@ -24,8 +23,10 @@ DAUX2  = $030B
 
 diskFirst = 4                   ; the sector unit zero begins at
 
-.driver open diskOpen
-.driver read diskRead
+.driver open   diskOpen
+.driver read   diskRead
+.driver unit   diskUnit
+.driver offset diskAt
 
 .transform copy diskCopy
 
@@ -37,13 +38,17 @@ diskFirst = 4                   ; the sector unit zero begins at
         jsr diskReadByte
 .endm
 
-; The stream: which sector the buffer holds, where in it the next byte is, and
-; whether the position has run off its end. A plain Section rather than
-; Temporaries, because the value has to survive between one call and the next
-; while nothing here is running.
+; The stream: where in the sector the next byte is, which sector the buffer
+; holds, and whether the position has run off its end. A plain Section rather
+; than Temporaries, because the value has to survive between one call and the
+; next while nothing here is running. The first three bytes are also the cells
+; the routine writes a position into before it opens the stream, and they are
+; ordered so that the position **is** the stream: `diskAt` the offset — the
+; place in the sector, then the sector's low byte — and `diskUnit` the unit,
+; which is the sector's high byte.
 .section zeropage
 diskAt          .res 2
-diskPos         .res 1
+diskUnit        .res 1
 diskNeed        .res 1
 .ends
 
@@ -56,20 +61,17 @@ diskBuffer
         .res 256
 .ends
 
-; A = the unit, X/Y = the offset in it: the stream stands there. An offset past
-; the unit's end carries into the units after, since the routine counts on in a
-; Frame without knowing where a unit ends — and here it carries by itself, the
-; three bytes being one position that the sector number takes the top two of.
+; The stream to the position in diskAt and diskUnit. Nothing carries here: the
+; three bytes are one position that the sector number takes the top two of, so
+; the one thing to do is move the sector past the boot record.
 .proc diskOpenStream
-        stx diskPos
-        sta diskAt+1            ; the unit is the sector number's high byte
-        tya                     ; and the offset's high byte is its low one
         clc
-        adc #<diskFirst
-        sta diskAt
         lda diskAt+1
-        adc #>diskFirst
+        adc #<diskFirst
         sta diskAt+1
+        lda diskUnit
+        adc #>diskFirst
+        sta diskUnit
         jmp diskFill
 .endp
 
@@ -77,14 +79,14 @@ diskBuffer
 .proc diskReadByte
         lda diskNeed
         beq @have
-        inc diskAt
-        bne @next
         inc diskAt+1
+        bne @next
+        inc diskUnit
 @next
         jsr diskFill
 @have
-        ldy diskPos
-        inc diskPos
+        ldy diskAt
+        inc diskAt
         bne @within
         sty diskNeed            ; Y is $FF here, and any non-zero will do
 @within
@@ -92,15 +94,15 @@ diskBuffer
         rts
 .endp
 
-; The sector in diskAt into the buffer, asked for again until the handler says
-; it has it: a Transition that cannot read cannot go on, and the drive answered
-; when the OS read the boot record off this diskette.
+; The sector in diskAt+1 and diskUnit into the buffer, asked for again until
+; the handler says it has it: a Transition that cannot read cannot go on, and
+; the drive answered when the OS read the boot record off this diskette.
 .proc diskFill
         lda #0
         sta diskNeed
-        lda diskAt
-        sta DAUX1
         lda diskAt+1
+        sta DAUX1
+        lda diskUnit
         sta DAUX2
 @again
         lda #1

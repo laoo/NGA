@@ -59,11 +59,13 @@ TokenClass ofPunctuation( syntax::TokenKind kind )
 // grammar, and kept honest by what a miss costs: a word this misses is drawn
 // as an ordinary name, which is a colour too few and never a colour that
 // lies. A word added to the grammar and forgotten here degrades the same way.
-constexpr std::array<std::string_view, 33> PROJECT_WORDS = {
-  "after",       "allow",  "as",    "base",      "constants", "container", "containers", "cpu",      "deny",
-  "diagnostics", "entry",  "group", "in",        "include",   "modules",   "needs",      "next",     "off",
-  "optimize",    "panes",  "phase", "previous",  "region",    "register",  "resident",   "reserved", "size",
-  "storage",     "target", "then",  "transform", "units",     "views",
+constexpr std::array<std::string_view, 47> PROJECT_WORDS = {
+  "after",      "allow",  "as",        "base",        "cartridge", "compress", "constants", "container",
+  "containers", "cpu",    "deny",      "diagnostics", "entry",     "except",   "final",     "frames",
+  "group",      "held",   "holder",    "in",          "include",   "init",     "linear",    "load",
+  "modules",    "needs",  "next",      "off",         "optimize",  "panes",    "phase",     "previous",
+  "ram",        "region", "register",  "reserved",    "resident",  "rom",      "size",      "storage",
+  "target",     "then",   "transform", "units",       "views",     "window",   "without",
 };
 
 bool isProjectWord( std::string_view word )
@@ -212,6 +214,11 @@ classifyC( diag::SourceManager const& sources, diag::FileId file, diag::Diagnost
 }
 
 } // namespace
+
+std::span<std::string_view const> projectWords()
+{
+  return PROJECT_WORDS;
+}
 
 std::string_view nameOf( Grammar grammar )
 {

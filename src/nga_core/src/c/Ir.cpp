@@ -235,6 +235,27 @@ std::vector<std::uint32_t> successorsOf( Terminator const& terminator )
   return {};
 }
 
+std::string baseOf( std::string const& name )
+{
+  return name.substr( 0, name.find( '+' ) );
+}
+
+std::vector<std::vector<std::uint32_t>> predecessorsOf( std::vector<Block> const& blocks )
+{
+  std::vector<std::vector<std::uint32_t>> before( blocks.size() );
+  for ( std::uint32_t index = 0; index < blocks.size(); ++index )
+  {
+    for ( std::uint32_t const next : successorsOf( blocks[index].terminator ) )
+    {
+      if ( next < before.size() && ( before[next].empty() || before[next].back() != index ) )
+      {
+        before[next].push_back( index );
+      }
+    }
+  }
+  return before;
+}
+
 std::uint32_t sizeOf( Type type )
 {
   switch ( type )
@@ -338,6 +359,34 @@ std::optional<Value> resultOf( Instruction const& instruction )
   return std::nullopt;
 }
 
+std::uint32_t readersOf( Function const& function, Value value )
+{
+  std::uint32_t readers = 0;
+  for ( Block const& block : function.blocks )
+  {
+    eachOperand( block,
+                 [&readers, value]( Operand const& operand )
+                 {
+                   auto const* const other = std::get_if<Value>( &operand );
+                   readers += other != nullptr && other->index == value.index ? 1 : 0;
+                 } );
+  }
+  return readers;
+}
+
+std::optional<std::size_t> definerIn( Block const& block, Value value )
+{
+  for ( std::size_t at = 0; at < block.instructions.size(); ++at )
+  {
+    std::optional<Value> const defined = resultOf( block.instructions[at] );
+    if ( defined.has_value() && defined->index == value.index )
+    {
+      return at;
+    }
+  }
+  return std::nullopt;
+}
+
 std::string dump( Unit const& unit )
 {
   std::string text;
@@ -412,6 +461,10 @@ std::string dump( Unit const& unit )
       if ( !function.resultByte.empty() )
       {
         text.append( " in " ).append( function.resultByte );
+      }
+      if ( !function.resultElsewhere.empty() )
+      {
+        text.append( " in " ).append( function.resultElsewhere );
       }
       text.append( "\n" );
     }

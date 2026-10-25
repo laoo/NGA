@@ -31,10 +31,28 @@ target {
 
   ; What the driver writes. Any address of $D500-$D5FF is the same register.
   register CARTSEL $D5FF
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`: what it holds stays where it is for that long. See
+  ; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  holder dlist                          ; ANTIC's display list: SDLSTL, or DLISTL
+  holder dli                            ; the display list interrupt: VDSLST
+  holder vbi                            ; the immediate vertical blank: VVBLKI
+  holder vbd                            ; the deferred vertical blank: VVBLKD
+  holder nmi                            ; $FFFA, where the OS ROM is switched out
+  holder irq                            ; $FFFE, where the OS ROM is switched out
+  holder chbase                         ; the character set: CHBAS, or CHBASE
+  holder pmbase                         ; the player-missile memory: PMBASE
+  holder dosini                         ; DOSINI: called once a boot returns, and on every reset
+  holder cartinit                       ; $BFFE: called in the middle of the cold start, and on every reset
 }
 
 ; The OS, the driver for this storage and the decoders the tool ships. Every
 ; Transition calls the driver and the decoders, so they are resident; a decoder
 ; nothing uses is dropped.
-modules { "atari/os.asm"  "atari/charsets.asm"  "atari/cart.asm"  "stream/zx0.asm" }
-resident { os, charsets, cart, zx0 }
+modules {
+  "atari/osram.asm"  "atari/osrom.asm"  "atari/mathpack.asm"
+  "atari/charsets.asm"  "atari/cart.asm"  "stream/zx0.asm"
+}
+resident { osram, osrom, mathpack, charsets, cart, zx0 }

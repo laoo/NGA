@@ -18,7 +18,9 @@ namespace
 {
 
 /// The instruction kinds worth moving: an operator, whose answer is one value
-/// of one or two bytes and whose computing changes nothing else.
+/// of one or two bytes and whose computing changes nothing else, and a call of
+/// the runtime's arithmetic, which is one too — see
+/// docs/decisions/0304-a-product-a-loop-computes-the-same-is-computed-before-it.md.
 bool hoistable( ir::Instruction const& instruction, ir::Function const& function )
 {
   std::optional<ir::Value> const defined = ir::resultOf( instruction );
@@ -30,6 +32,10 @@ bool hoistable( ir::Instruction const& instruction, ir::Function const& function
   if ( type == ir::Type::BLOCK || type == ir::Type::POINTER )
   {
     return false;
+  }
+  if ( auto const* const call = std::get_if<ir::Call>( &instruction.operation ) )
+  {
+    return isArithmetic( *call ) && call->with.empty();
   }
   return std::holds_alternative<ir::Binary>( instruction.operation ) ||
          std::holds_alternative<ir::Unary>( instruction.operation ) ||
@@ -70,6 +76,15 @@ bool sameComputation( ir::Instruction const& a, ir::Instruction const& b )
     auto const* const cb = std::get_if<ir::Convert>( &b.operation );
     return cb != nullptr && ca->type == cb->type && same( ca->operand, cb->operand );
   }
+  if ( auto const* const call = std::get_if<ir::Call>( &a.operation ) )
+  {
+    auto const* const other = std::get_if<ir::Call>( &b.operation );
+    return other != nullptr && call->name == other->name && call->arguments.size() == other->arguments.size() &&
+           std::ranges::equal( call->arguments,
+                               other->arguments,
+                               [&same]( ir::Argument const& x, ir::Argument const& y )
+                               { return x.name == y.name && x.type == y.type && same( x.value, y.value ); } );
+  }
   return false;
 }
 
@@ -82,16 +97,16 @@ struct Hoisted
   std::string byte;
 };
 
-void hoistIn( ir::Function& function, std::set<std::string> const& volatiles )
+void hoistIn( ir::Function& function, std::set<std::string> const& volatiles, Effects const& effects )
 {
-  std::set<std::string> const own = ownBytesOf( function );
+  std::set<std::string> own = ownBytesOf( function );
   std::uint32_t kept = 0;
   std::vector<Hoisted> hoisted;
   for ( Loop const& loop : loopsOf( function ) )
   {
     // A byte that changes behind the program's back is written at every turn
     // as far as a loop can say — see docs/decisions/0151-volatile.md.
-    Written written = writtenIn( function, loop );
+    Written written = writtenIn( function, loop, &effects );
     written.objects.insert( volatiles.begin(), volatiles.end() );
     for ( std::uint32_t index = loop.header; index <= loop.last; ++index )
     {
@@ -106,6 +121,34 @@ void hoistIn( ir::Function& function, std::set<std::string> const& volatiles )
         {
           ++at;
           continue;
+        }
+
+        // A byte widened is that byte read as two, `#0` above: its readers
+        // read the byte itself, and nothing goes out — so that what is
+        // computed from it may, and what reads it knows its high byte is zero.
+        if ( auto const* const convert = std::get_if<ir::Convert>( &instruction.operation ) )
+        {
+          auto const* const object = std::get_if<ir::Object>( &convert->operand );
+          if ( object != nullptr && ir::sizeOf( object->type ) == 1 && !ir::isSigned( object->type ) &&
+               ir::sizeOf( convert->type ) == 2 && !ir::isSigned( convert->type ) )
+          {
+            ir::Value const widened = convert->result;
+            ir::Operand const byte = *object;
+            instructions.erase( instructions.begin() + static_cast<std::ptrdiff_t>( at ) );
+            for ( std::uint32_t inside = loop.header; inside <= loop.last; ++inside )
+            {
+              ir::eachOperand( function.blocks[inside],
+                               [&widened, &byte]( ir::Operand& operand )
+                               {
+                                 if ( auto const* const read = std::get_if<ir::Value>( &operand );
+                                      read != nullptr && read->index == widened.index )
+                                 {
+                                   operand = byte;
+                                 }
+                               } );
+            }
+            continue;
+          }
         }
 
         // Out it goes: computed where the loop is entered, kept in a byte of
@@ -128,6 +171,9 @@ void hoistIn( ir::Function& function, std::set<std::string> const& volatiles )
         {
           byte = "__h" + std::to_string( kept++ );
           function.locals.push_back( ir::Local{ .name = byte, .type = type, .bytes = 0 } );
+          // A byte of the Proc's own like any other, so what is computed
+          // from it is invariant across a store through a pointer too.
+          own.insert( byte );
           std::vector<ir::Instruction>& entry = function.blocks[loop.entry].instructions;
           diag::SourceLocation const where = moved.at;
           hoisted.push_back( Hoisted{ .entry = loop.entry, .computed = moved, .byte = byte } );
@@ -146,14 +192,7 @@ void hoistIn( ir::Function& function, std::set<std::string> const& volatiles )
         };
         for ( std::uint32_t inside = loop.header; inside <= loop.last; ++inside )
         {
-          for ( ir::Instruction& reader : function.blocks[inside].instructions )
-          {
-            ir::eachOperand( reader, reread );
-          }
-          if ( function.blocks[inside].terminator.kind == ir::TerminatorKind::BRANCH )
-          {
-            reread( function.blocks[inside].terminator.condition );
-          }
+          ir::eachOperand( function.blocks[inside], reread );
         }
       }
     }
@@ -162,13 +201,13 @@ void hoistIn( ir::Function& function, std::set<std::string> const& volatiles )
 
 } // namespace
 
-void hoistInvariants( ir::Unit& unit )
+void hoistInvariants( ir::Unit& unit, Effects const& effects )
 {
   for ( ir::Definition& definition : unit.definitions )
   {
     if ( auto* const function = std::get_if<ir::Function>( &definition ) )
     {
-      hoistIn( *function, unit.volatiles );
+      hoistIn( *function, unit.volatiles, effects );
     }
   }
 }

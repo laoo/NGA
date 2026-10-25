@@ -1,0 +1,11 @@
+# What a VSIX does not carry: the sources the bundles in dist/ are made of,
+# the packages they already hold, and what checks them.
+src/**
+test/**
+node_modules/**
+tsconfig.json
+dprint.json
+eslint.config.mjs
+package-lock.json
+**/*.map
+dist/MapPage.cjs

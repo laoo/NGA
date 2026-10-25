@@ -36,23 +36,6 @@ bool isDigitLike( char c )
   return isIdentifierContinue( c ) && c != '_';
 }
 
-int valueOfDigit( char c )
-{
-  if ( isDigit( c ) )
-  {
-    return c - '0';
-  }
-  if ( c >= 'A' && c <= 'F' )
-  {
-    return c - 'A' + 10;
-  }
-  if ( c >= 'a' && c <= 'f' )
-  {
-    return c - 'a' + 10;
-  }
-  return -1;
-}
-
 std::string_view nameOfBase( char prefix )
 {
   switch ( prefix )
@@ -168,10 +151,10 @@ Token Lexer::lexLineEnd( std::uint32_t begin, bool startsLine )
 Token Lexer::lexComment( std::uint32_t begin, bool startsLine )
 {
   ++mPos;
-  bool reportedNonAscii = false;
+  bool reportedInvalid = false;
   while ( !atEnd() && peek() != '\n' && peek() != '\r' )
   {
-    consumeTextCharacter( reportedNonAscii );
+    consumeTextCharacter( reportedInvalid );
   }
   return make( TokenKind::COMMENT, begin, startsLine );
 }
@@ -279,7 +262,7 @@ Token Lexer::lexNumber( std::uint32_t begin, bool startsLine )
       return make( TokenKind::UNKNOWN, begin, startsLine );
     }
 
-    int const value = valueOfDigit( c );
+    int const value = hexDigitValue( c );
     if ( ( value < 0 || value >= base ) && !std::exchange( reportedDigit, true ) )
     {
       report( diagnostic( diag::DiagnosticId::INVALID_DIGIT )
@@ -303,6 +286,18 @@ Token Lexer::lexNumber( std::uint32_t begin, bool startsLine )
   {
     // Already diagnosed. Marked as rejected so that a grammar stays quiet about
     // it and nothing downstream ever asks a malformed literal for its value.
+    return make( TokenKind::UNKNOWN, begin, startsLine );
+  }
+
+  // `017` is 15 to anyone who learned C and 17 to anyone who did not, and
+  // neither reading may be chosen silently: the decimal spelling has no
+  // leading zero, and `0` alone is the only decimal that starts with one.
+  if ( prefix == '\0' && digits > 1 && mText[begin] == '0' )
+  {
+    report( diagnostic( diag::DiagnosticId::LEADING_ZERO )
+                .arg( "literal", std::string{ mText.substr( begin, mPos - begin ) } ),
+            begin,
+            mPos - begin );
     return make( TokenKind::UNKNOWN, begin, startsLine );
   }
 
@@ -372,11 +367,18 @@ Token Lexer::lexQuoted( std::uint32_t begin, bool startsLine )
         break;
       }
 
+      // What is escaped is one character, however many bytes it takes: a
+      // multi-byte one is quoted whole and stepped over whole, or the step
+      // would land inside it and read the rest as broken UTF-8.
+      auto const length = std::max<std::uint32_t>( utf8LengthAt( mText, static_cast<std::uint32_t>( mPos + 1 ) ), 1 );
       if ( escape != '\\' && escape != '"' && escape != '\'' && escape != 'n' && escape != 't' && escape != '0' )
       {
-        report( diagnostic( diag::DiagnosticId::UNKNOWN_ESCAPE ).arg( "escape", std::string{ escape } ), mPos, 2 );
+        report( diagnostic( diag::DiagnosticId::UNKNOWN_ESCAPE )
+                    .arg( "escape", std::string{ mText.substr( mPos + 1, length ) } ),
+                mPos,
+                1 + length );
       }
-      mPos += 2;
+      mPos += 1 + length;
       ++characters;
       continue;
     }
@@ -410,6 +412,16 @@ Token Lexer::lexQuoted( std::uint32_t begin, bool startsLine )
     }
   }
 
+  // An unclosed character literal is marked rejected, as a malformed number
+  // is, so that the grammar stays quiet about it: `'''` is an empty literal
+  // and an unclosed one, and the second must not also be a token after the
+  // end of the statement. An unclosed string stays a string, since the
+  // directives that take a quoted path or payload would otherwise say they
+  // found none.
+  if ( !isString && !closed )
+  {
+    return make( TokenKind::UNKNOWN, begin, startsLine );
+  }
   return make( isString ? TokenKind::STRING : TokenKind::CHARACTER, begin, startsLine );
 }
 
@@ -504,10 +516,12 @@ Token Lexer::lexUnexpected( std::uint32_t begin, bool startsLine )
   // one stray non-ASCII character produces one finding rather than four.
   std::uint32_t const length = std::max<std::uint32_t>( utf8LengthAt( mText, mPos ), 1 );
   mPos += length;
-  report( diagnostic( diag::DiagnosticId::UNEXPECTED_CHARACTER )
-              .arg( "character", std::string{ mText.substr( begin, length ) } ),
-          begin,
-          length );
+  // Quoted here rather than by the template, since single backticks cannot
+  // quote a backtick: doubled ones with a space inside can, and read the same
+  // in a terminal and on a page.
+  std::string_view const character = mText.substr( begin, length );
+  std::string const quoted = character == "`" ? std::string{ "`` ` ``" } : "`" + std::string{ character } + "`";
+  report( diagnostic( diag::DiagnosticId::UNEXPECTED_CHARACTER ).arg( "character", quoted ), begin, length );
   return make( TokenKind::UNKNOWN, begin, startsLine );
 }
 

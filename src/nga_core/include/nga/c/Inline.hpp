@@ -31,14 +31,22 @@ namespace nga::c
 /// own, and callees before their callers, which terminates because recursion
 /// is already refused
 /// (docs/decisions/0082-a-call-writes-the-callees-bytes.md).
-/// `forConstants` is the third trigger, and it is the Intent's first reader:
-/// under `speed`, a call is wrapped because an argument of it is a constant,
-/// so that 0175's propagation and the fold of a constant divisor reach the
-/// body. It is worth 239 580 cycles on `prime` for two bytes and takes `puff`
-/// out of its View, which is why it is asked for and not assumed — see
+///
+/// A call of a callee whose body is estimated to cost no more bytes than the
+/// call itself is wrapped wherever it stands, under every Intent, for the
+/// reason a call with one site is: the copy replaces what it stands for. A
+/// body of one block is spliced into the call's own block, so that a
+/// parameter the body only reads is the argument's value and the call's
+/// readers read what the body would have returned — see
+/// docs/decisions/0299-a-body-no-larger-than-its-call-is-wrapped.md.
+///
+/// `forSpeed` is the Intent `speed`, which two triggers read. A body may cost
+/// a fixed number of bytes more than its call and still be wrapped; and a call
+/// is wrapped because an argument of it is a constant, so that 0175's
+/// propagation and the fold of a constant divisor reach the body. That one is
+/// worth 239 580 cycles on `prime` for two bytes and takes `puff` out of its
+/// View, which is why it is asked for and not assumed — see
 /// docs/decisions/0177-intent.md.
-void wrapCalls( std::span<std::optional<ir::Unit>> units,
-                std::span<diag::DiagnosticSink* const> sinks,
-                bool forConstants );
+void wrapCalls( std::span<std::optional<ir::Unit>> units, std::span<diag::DiagnosticSink* const> sinks, bool forSpeed );
 
 } // namespace nga::c

@@ -20,6 +20,10 @@ enum class Severity : std::uint8_t
   NOTE,
 };
 
+/// `error`, `warning` or `note`: the word a finding is printed with and the
+/// catalogue lists, in both of the forms the tool writes.
+std::string_view severityName( Severity severity );
+
 // The single source of truth for the diagnostic catalog: identifier, number,
 // default severity and message template all declared once, in one row.
 //
@@ -30,7 +34,7 @@ enum class Severity : std::uint8_t
 // Message templates take named arguments as {name}, optionally with a rendering
 // hint: {name:hex} prints $1A2B and {name:n} groups digits as 41,208.
 #define NGA_DIAGNOSTIC_CATALOG( X )                                                                                    \
-  X( UNEXPECTED_CHARACTER, 0001, ERROR, "unexpected character `{character}`" )                                         \
+  X( UNEXPECTED_CHARACTER, 0001, ERROR, "unexpected character {character}" )                                           \
   X( UNTERMINATED_STRING, 0002, ERROR, "unterminated string literal" )                                                 \
   X( LINE_END_IN_STRING, 0003, ERROR, "string literal is not closed before the end of the line" )                      \
   X( UNTERMINATED_CHARACTER, 0004, ERROR, "unterminated character literal" )                                           \
@@ -45,6 +49,7 @@ enum class Severity : std::uint8_t
   X( NUMERIC_LOCAL_LABEL, 0014, ERROR, "numeric local labels do not exist; use `@`, `@+`, `@-`, or a name" )           \
   X( NUMBER_TOO_LARGE, 0016, ERROR, "this number is too large to be represented" )                                     \
   X( CONTROL_CHARACTER, 0015, ERROR, "control character {code:hex} in source" )                                        \
+  X( LEADING_ZERO, 0017, ERROR, "a leading zero does not make `{literal}` octal; write it in decimal, `$` or `%`" )    \
   X( EXPECTED_EXPRESSION, 0100, ERROR, "expected an expression" )                                                      \
   X( UNCLOSED_PARENTHESIS, 0101, ERROR, "expected `)` to close this parenthesis" )                                     \
   X( SHIFT_IN_PREFIX_POSITION, 0102, ERROR, "`<<` is a shift; the low byte of an operand is `<`" )                     \
@@ -53,6 +58,7 @@ enum class Severity : std::uint8_t
   X( STATEMENT_EXPECTED, 0110, ERROR, "`{token}` cannot begin a statement" )                                           \
   X( TRAILING_TOKENS, 0111, ERROR, "unexpected `{token}` after the end of the statement" )                             \
   X( INDENT_EXPECTED, 0112, ERROR, "`{name}` at column one defines a label; indent it to write an instruction" )       \
+  X( LABEL_WITH_COLON, 0199, ERROR, "a label is a name at column one, and is written without `:`" )                    \
   X( LABEL_NAMED_LIKE_MNEMONIC, 0113, WARNING, "`{name}` at column one defines a label named like an instruction" )    \
   X( DIRECTION_IN_DEFINITION, 0114, ERROR, "a direction marks a reference, not a definition" )                         \
   X( LOCAL_LABEL_OUTSIDE_PROC, 0115, ERROR, "a local label has no scope outside a `.proc`" )                           \
@@ -65,18 +71,26 @@ enum class Severity : std::uint8_t
   X( DECLARE_UNKNOWN_TYPE,                                                                                             \
      0119,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{name}` is not a type or a place; a declared byte is `u8`, `i8`, `u16`, `i16`, `bool` or `u8[N]`, or lies in "  \
-     "`a`, `x`, `y` or `m`, a letter a byte from the low one" )                                                        \
+     "`{name}` is not a type or a place; a declared byte is `u8`, `i8`, `u16`, `i16`, `bool` or `u8[N]`, or a place "  \
+     "is a letter a byte from the low one: `a`, `x` or `y`, and `m` for memory beside one of them" )                   \
   X( DECLARE_SECOND_RESULT, 0130, ERROR, "this `.proc` already declares its result, and a proc has one" )              \
   X( DECLARE_TWICE_ARGUMENT, 0139, ERROR, "this byte is already an argument, and a byte is one argument or none" )     \
   X( DECLARE_REGISTER_TAKES_NO_TEMPORARY,                                                                              \
      0189,                                                                                                             \
      ERROR,                                                                                                            \
-     "this `.declare` keeps every byte in a register, and a `.ztemp` or `.temp` stands below it" )                     \
+     "this `.declare` reserves no byte, and a `.ztemp` or `.temp` stands below it" )                                   \
   X( DECLARE_REGISTER_TWICE, 0190, ERROR, "`{register}` already carries an argument of this proc" )                    \
   X( DECLARE_PLACE_REPEATS, 0191, ERROR, "`{place}` names one register for two bytes" )                                \
+  X( DECLARE_ARGUMENT_ELSEWHERE,                                                                                       \
+     0200,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is another proc's byte, and an argument is a byte of this one or a register" )                          \
   X( UNKNOWN_DIRECTIVE, 0120, ERROR, "unknown directive `.{name}`" )                                                   \
-  X( AMBIGUOUS_END_DIRECTIVE, 0121, ERROR, "`.end` does not say what it closes; write `.ends` or `.endp`" )            \
+  X( AMBIGUOUS_END_DIRECTIVE,                                                                                          \
+     0121,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`.end` does not say what it closes; write the block's own closer: `.ends`, `.endp`, `.endm`, `.endif`, "         \
+     "`.endmatch`, `.endns` or `.endch`" )                                                                             \
   X( EXPECTED_NAME, 0122, ERROR, "expected a name after `{after}`" )                                                   \
   X( UNKNOWN_SECTION_ATTRIBUTE, 0123, ERROR, "`{name}` is not a section attribute" )                                   \
   X( SECTION_NOT_CLOSED, 0124, ERROR, "this `.section` is never closed" )                                              \
@@ -85,12 +99,15 @@ enum class Severity : std::uint8_t
   X( UNMATCHED_PROC_END, 0127, ERROR, "`{directive}` without an open `.proc`" )                                        \
   X( SECTION_INSIDE_SECTION, 0128, ERROR, "a `.section` cannot open inside another; close the first one" )             \
   X( PROC_INSIDE_PROC, 0129, ERROR, "a `.proc` cannot open inside another" )                                           \
-  X( DUPLICATE_SECTION_ATTRIBUTE, 0131, ERROR, "`{name}` gives a placement this `.section` already has" )              \
+  X( DUPLICATE_SECTION_ATTRIBUTE, 0131, ERROR, "`{name}` gives a placement this `{directive}` already has" )           \
   X( DUPLICATE_PLACEMENT_QUALIFIER, 0132, ERROR, "`{name}` is already given for this placement" )                      \
-  X( REPEATED_SECTION_ATTRIBUTE, 0133, ERROR, "`{name}` is already given for this `.section`" )                        \
-  X( EXPECTED_BINDING, 0134, ERROR, "a slot is `pointer` or `vector`, and this is {name}" )                            \
-  X( EXPECTED_PLACEMENT, 0135, ERROR, "a slot's placement is `zeropage` or `absolute`, and this is {name}" )           \
-  X( TEMPORARY_NEEDS_NAME, 0136, ERROR, "`.ztemp` and `.temp` declare a variable and need its name at column one" )    \
+  X( REPEATED_SECTION_ATTRIBUTE, 0133, ERROR, "`{name}` is already given for this `{directive}`" )                     \
+  X( EXPECTED_BINDING, 0134, ERROR, "a slot is `pointer` or `vector`, and this is `{name}`" )                          \
+  X( EXPECTED_PLACEMENT, 0135, ERROR, "a slot's placement is `zeropage` or `absolute`, and this is `{name}`" )         \
+  X( TEMPORARY_NEEDS_NAME,                                                                                             \
+     0136,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`.ztemp` and `.temp` declare a variable, and need at column one a plain name for it, not a local one" )          \
   X( PROC_INSIDE_SECTION, 0137, ERROR, "a `.proc` is a section of its own and cannot open inside a `.section`" )       \
   X( OUTSIDE_SECTION,                                                                                                  \
      0138,                                                                                                             \
@@ -104,6 +121,7 @@ enum class Severity : std::uint8_t
      WARNING,                                                                                                          \
      "a `.proc` holds code, which nothing writes unless a statement says so, and `readonly` changes nothing" )         \
   X( FOREIGN_EXCLUDES, 0194, ERROR, "`foreign` does not go with `{other}`" )                                           \
+  X( MOVABLE_GONE, 0198, ERROR, "`movable` is gone: a section has one address in every phase it is in" )               \
   X( FOREIGN_NEEDS_ROOT,                                                                                               \
      0195,                                                                                                             \
      ERROR,                                                                                                            \
@@ -128,7 +146,7 @@ enum class Severity : std::uint8_t
   X( PAYLOAD_NOT_WHOLE_BYTES,                                                                                          \
      0186,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `.{encoding}` payload takes {group} characters to the byte, and this one has {count}" )                        \
+     "a `.{encoding}` payload takes {group} characters to {bytes}, and this one has {count}" )                         \
   X( PAYLOAD_NAMES_CHARSET, 0187, ERROR, "a payload is bytes and not text, so it names no character set" )             \
   X( CHARSET_NOT_CLOSED, 0150, ERROR, "this `.charset` is never closed" )                                              \
   X( UNMATCHED_CHARSET_END, 0151, ERROR, "`{directive}` without an open `.charset`" )                                  \
@@ -183,11 +201,16 @@ enum class Severity : std::uint8_t
   X( OFF_UNKNOWN_CODE, 0143, ERROR, "`{code}` names no diagnostic" )                                                   \
   X( OFF_SILENCED_NOTHING, 0144, WARNING, "`.off {code}` silenced nothing: no such warning stood on the line below" )  \
   X( EXPECTED_INDEX_REGISTER, 0142, ERROR, "expected `x` or `y` after `,`, found `{token}`" )                          \
+  X( EXPORT_FROM_OUTSIDE_SCOPE,                                                                                        \
+     0145,                                                                                                             \
+     ERROR,                                                                                                            \
+     "an export names a symbol of the scope it stands in; to export `{name}`, write `.export {member}` inside "        \
+     "`{scope}`" )                                                                                                     \
   X( UNKNOWN_MODULE, 1101, ERROR, "project refers to `{module}`, which names no module and no group" )                 \
   X( MODULE_NAME_COLLISION,                                                                                            \
      1102,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{module}` would name more than one file; naming modules is a Project file's business" )                         \
+     "`{module}` already names a module; each module is declared once, and `as` gives another one a name of its own" ) \
   X( NOT_A_PROJECT, 1103, ERROR, "`{path}` is not a project file, and a run is given nothing else" )                   \
   X( MODULE_NAMED_BY_PROJECT,                                                                                          \
      1104,                                                                                                             \
@@ -199,9 +222,12 @@ enum class Severity : std::uint8_t
   X( UNKNOWN_CONTAINER, 1108, ERROR, "`{name}` names no container; the tool writes {known}" )                          \
   X( CONTAINER_ALREADY_SET, 1109, ERROR, "the container is set more than once" )                                       \
   X( PREVIOUS_CONTAINER, 1140, NOTE, "the container was already set here" )                                            \
-  X( CONTAINER_NOT_TAKEN, 1141, ERROR, "this machine does not take a `{name}`; it takes {taken}" )                     \
+  X( CONTAINER_NOT_TAKEN, 1141, ERROR, "this machine does not take the container `{name}`; it takes {taken}" )         \
   X( CONTAINERS_DECLARED_HERE, 1142, NOTE, "the machine says what it takes here" )                                     \
-  X( CONTAINER_TAKES_NO_FORMAT, 1216, ERROR, "a `{name}` is one thing and takes no format; only `car` names a board" ) \
+  X( CONTAINER_TAKES_NO_FORMAT,                                                                                        \
+     1216,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the container `{name}` takes no board; only `car`, `lnx` and `lyx` name one" )                                   \
   X( EXPECTED_CARTRIDGE_ENTRY, 1230, ERROR, "a cartridge's entry is a field and a value, and `{token}` is neither" )   \
   X( CARTRIDGE_FIELD_UNKNOWN,                                                                                          \
      1231,                                                                                                             \
@@ -210,8 +236,8 @@ enum class Severity : std::uint8_t
   X( CARTRIDGE_FIELD_VALUE,                                                                                            \
      1232,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{field}` takes {field} of the kind its header field is: `name` and `manufacturer` a quoted string, "            \
-     "`rotation` a word" )                                                                                             \
+     "`{field}` takes a value of the kind its header field is: `name` and `manufacturer` a quoted string, `rotation` " \
+     "a word" )                                                                                                        \
   X( CARTRIDGE_FIELD_TOO_LONG,                                                                                         \
      1233,                                                                                                             \
      ERROR,                                                                                                            \
@@ -225,22 +251,26 @@ enum class Severity : std::uint8_t
   X( CARTRIDGE_BLOCK_WITHOUT_HEADER,                                                                                   \
      1236,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `cartridge` block says what a header shows, and a `{name}` carries no header to show it in" )                  \
+     "a `cartridge` block says what a header shows, and the container `{name}` carries no header to show it in" )      \
   X( CARTRIDGE_WITHOUT_FORMAT,                                                                                         \
      1217,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `.car` is an image of one board and this says none; write `container car \"8k\"`, and the boards are "         \
-     "{known}" )                                                                                                       \
+     "a `.{name}` is an image of one board and this says none; write `container {name} \"{example}\"`, and the "       \
+     "boards are {known}" )                                                                                            \
   X( UNKNOWN_CARTRIDGE, 1218, ERROR, "`{name}` names no cartridge board; the boards are {known}" )                     \
-  X( CARTRIDGE_FIXED_PART, 1219, ERROR, "a `{name}` cartridge is ROM at {range} and this machine has {found}" )        \
+  X( CARTRIDGE_FIXED_PART, 1219, ERROR, "the board `{name}` is ROM at {range} and this machine has {found}" )          \
   X( CARTRIDGE_WINDOW,                                                                                                 \
      1220,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `{name}` cartridge switches banks into {range} and this machine declares no window of that one range" )        \
+     "the board `{name}` switches banks into {range} and this machine declares no window of that one range" )          \
   X( CARTRIDGE_UNITS,                                                                                                  \
      1221,                                                                                                             \
      ERROR,                                                                                                            \
-     "a `{name}` cartridge has {units:n} banks of storage and window `{window}` shows a set of {found:n}" )            \
+     "the board `{name}` has {units:n} banks of storage and window `{window}` shows a set of {found:n}" )              \
+  X( CARTRIDGE_STORAGE_WITHOUT_BANKS,                                                                                  \
+     1229,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the board `{name}` has no banks for storage to stand in, and this machine declares storage" )                    \
   X( UNKNOWN_INTENT, 1143, ERROR, "`{name}` is not what a program is optimised for; the words are {known}" )           \
   X( INTENT_ALREADY_SET, 1144, ERROR, "what the program is optimised for is set more than once" )                      \
   X( PREVIOUS_INTENT, 1145, NOTE, "it was already set here" )                                                          \
@@ -250,6 +280,14 @@ enum class Severity : std::uint8_t
      "`{name}` is not something to do with an edge's descriptors; `held` is the one word there is" )                   \
   X( FRAMES_ALREADY_SET, 1240, ERROR, "`frames` is said once, and was said already" )                                  \
   X( PREVIOUS_FRAMES, 1241, NOTE, "the earlier one is here" )                                                          \
+  X( FRAMES_WITHOUT_STORAGE,                                                                                           \
+     1243,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`frames held` asks an edge to hold its descriptors, and with no storage an edge has none" )                      \
+  X( BASE_GONE,                                                                                                        \
+     1242,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`base` is gone: no window has one, and what a window shows outside a `.with` is undefined" )                     \
   X( UNKNOWN_CPU, 1146, ERROR, "`{name}` names no processor; the words are {known}" )                                  \
   X( CPU_ALREADY_SET, 1149, ERROR, "the processor is set more than once" )                                             \
   X( PREVIOUS_CPU, 1152, NOTE, "the processor was already set here" )                                                  \
@@ -259,18 +297,59 @@ enum class Severity : std::uint8_t
   X( EXPECTED_BLOCK_BODY, 1113, ERROR, "expected `{{` to open the body of `{name}`" )                                  \
   X( EXPECTED_MODULE_ENTRY, 1114, ERROR, "a module is a quoted path, optionally followed by `as` and a name" )         \
   X( EXPECTED_ALIAS, 1115, ERROR, "expected a name after `as`" )                                                       \
-  X( PATH_NAMES_CHARSET, 1116, ERROR, "a path is not translated, so it names no character set" )                       \
+  X( PATH_NAMES_CHARSET,                                                                                               \
+     1116,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a quoted string of a Project file is not translated, so it names no character set" )                             \
   X( EXPECTED_SEVERITY, 1117, ERROR, "expected `deny`, `allow` or `off`, found `{token}`" )                            \
   X( UNKNOWN_DIAGNOSTIC_CODE, 1118, ERROR, "`{code}` names no diagnostic" )                                            \
   X( UNKNOWN_FACT_SET, 1215, ERROR, "`{name}` names no set of facts; the sets are {sets}" )                            \
+  X( OVERLAY_UNREADABLE, 1246, ERROR, "cannot read `{file}`, which `--overlay` gives for `{path}`" )                   \
+  X( OVERLAY_WITH_OUTPUT,                                                                                              \
+     1247,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`-o` is refused beside `--overlay`: a binary built from text on no disk answers to no saved source" )            \
   X( SEVERITY_ALREADY_SET, 1119, ERROR, "the severity of `{code}` is set more than once" )                             \
   X( PREVIOUS_SEVERITY, 1120, NOTE, "`{code}` was already set here" )                                                  \
   X( INCLUDE_CYCLE, 1121, ERROR, "this include reaches a file that is already being read" )                            \
   X( CANNOT_READ_FILE, 1122, ERROR, "cannot read `{path}`" )                                                           \
   X( PROJECT_HAS_NO_MODULES, 1123, ERROR, "this project declares no modules" )                                         \
   X( EXPECTED_PHASE_NAME, 1125, ERROR, "`phase` is followed by the phase's name, found `{token}`" )                    \
-  X( EXPECTED_PHASE_ENTRY, 1126, ERROR, "expected `needs`, `then` or `entry`, found `{token}`" )                       \
+  X( EXPECTED_PHASE_ENTRY, 1126, ERROR, "expected `needs`, `then`, `without`, `entry` or `final`, found `{token}`" )   \
   X( EXPECTED_NAME_IN_LIST, 1127, ERROR, "expected a name after `{after}`" )                                           \
+  X( EXPECTED_QUOTED, 1248, ERROR, "`{after}` is followed by {what} in quotes, found `{token}`" )                      \
+  X( COMPRESS_NOT_XEX,                                                                                                 \
+     1249,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the container `{name}` is not compressed while it loads; only a `.xex`'s loader runs code between what it "      \
+     "writes" )                                                                                                        \
+  X( EXPECTED_EXCEPT_ENTRY, 1251, ERROR, "an `except` entry names a module or a group, found `{token}`" )              \
+  X( CHOOSE_TOO_FEW,                                                                                                   \
+     1252,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`choose` names {count:n} documents, and there is nothing to choose between fewer than two" )                     \
+  X( CHOOSE_TWICE, 1253, ERROR, "`choose` is written more than once" )                                                 \
+  X( PREVIOUS_CHOOSE, 1254, NOTE, "the first `choose` is here" )                                                       \
+  X( CHOICE_DECLARES,                                                                                                  \
+     1255,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{document}` is a choice and declares {what}; a choice declares only registers in `target` and `constants`" )    \
+  X( CHOICE_NAME_MISSING,                                                                                              \
+     1256,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is declared by `{document}` and not by `{other}`; every choice declares the same names" )               \
+  X( CHOOSE_NEEDS_XEX,                                                                                                 \
+     1257,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`choose` changes a `.xex` without storage while it loads, and this program {what}" )                             \
+  X( CHOICE_REGISTER_IN_POOL,                                                                                          \
+     1258,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` stands at {address:hex} under `{document}`, where the first choice lets a section stand" )              \
+  X( COMPRESS_UNKNOWN_FORMAT,                                                                                          \
+     1250,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is no format a `.xex` is compressed in; the formats are {known}" )                                      \
   X( EXPECTED_RESIDENT_ENTRY, 1128, ERROR, "a resident entry names a module or a group, found `{token}`" )             \
   X( EXPECTED_COMMA, 1129, ERROR, "expected `,` between `{previous}` and `{next}`" )                                   \
   X( UNKNOWN_PHASE, 1130, ERROR, "project refers to phase `{phase}`, which is not declared" )                          \
@@ -283,7 +362,7 @@ enum class Severity : std::uint8_t
   X( EXPECTED_TARGET_ENTRY,                                                                                            \
      1135,                                                                                                             \
      ERROR,                                                                                                            \
-     "expected `region`, `register`, `units`, `window` or `containers`, found `{token}`" )                             \
+     "expected `region`, `register`, `holder`, `units`, `window`, `containers` or `cpu`, found `{token}`" )            \
   X( EXPECTED_VALUE, 1136, ERROR, "expected a value after `{after}`" )                                                 \
   X( VALUE_NAMES_SOMETHING, 1137, ERROR, "a value here is written out, and `{name}` names nothing" )                   \
   X( VALUE_HAS_NO_NUMBER, 1138, ERROR, "this does not come to a number" )                                              \
@@ -293,7 +372,7 @@ enum class Severity : std::uint8_t
   X( EXPECTED_REGION_PROPERTY,                                                                                         \
      1155,                                                                                                             \
      ERROR,                                                                                                            \
-     "a region's range is followed by `ram`, `register` or `reserved`, not by `{token}`" )                             \
+     "a region's range is followed by `ram`, `rom`, `register` or `reserved`, not by `{token}`" )                      \
   X( UNKNOWN_REGION_PROPERTY,                                                                                          \
      1156,                                                                                                             \
      ERROR,                                                                                                            \
@@ -304,9 +383,12 @@ enum class Severity : std::uint8_t
      "a region runs from a lower address to a higher one inside the address space, and this one does not" )            \
   X( REGION_ALREADY_NAMED, 1158, ERROR, "a region named `{name}` is already declared" )                                \
   X( PREVIOUS_REGION, 1159, NOTE, "`{name}` was declared here" )                                                       \
-  X( REGISTER_NOT_AN_ADDRESS, 1160, ERROR, "a register is an address, and {value:hex} is not one" )                    \
+  X( REGISTER_NOT_AN_ADDRESS,                                                                                          \
+     1160,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a register lies inside the address space, and its last byte would be at {value:hex}" )                           \
   X( REGISTER_WIDTH, 1161, ERROR, "a register is one or two bytes, and {width} is neither" )                           \
-  X( REGION_DECLARED_HERE, 1163, NOTE, "the region `{region}` is declared here" )                                      \
+  X( REGION_DECLARED_HERE, 1163, NOTE, "the {kind} `{region}` is declared here" )                                      \
   X( EXPECTED_STORAGE_ENTRY, 1164, ERROR, "expected `units` or `size`, found `{token}`" )                              \
   X( STORAGE_SIZE_MISSING, 1165, ERROR, "storage has units by count and no `size`, and a unit holds something" )       \
   X( STORAGE_SIZE_TWICE, 1166, ERROR, "the size of a unit is set more than once" )                                     \
@@ -316,7 +398,7 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "the units are declared more than once; `units` names a set of the target or counts them" )                       \
   X( PREVIOUS_STORAGE_UNITS, 1169, NOTE, "they were declared here" )                                                   \
-  X( TOO_MANY_UNITS, 1170, ERROR, "{count} units, and a unit is named in a byte" )                                     \
+  X( TOO_MANY_UNITS, 1170, ERROR, "{count} units, and a unit is named in two bytes" )                                  \
   X( UNIT_SIZE_NOT_A_SIZE,                                                                                             \
      1171,                                                                                                             \
      ERROR,                                                                                                            \
@@ -338,12 +420,18 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "a window's range runs from a lower address to a higher one inside the address space, and this one does not" )    \
   X( WINDOW_STATE_REPEATED, 1183, ERROR, "`{state}` is listed more than once among what `{window}` shows" )            \
-  X( WINDOW_BASE_UNKNOWN,                                                                                              \
-     1184,                                                                                                             \
-     ERROR,                                                                                                            \
-     "`{base}` is not a named state of window `{window}`; a base is a named state, never a unit set" )                 \
   X( STORAGE_UNITS_UNKNOWN, 1185, ERROR, "`{name}` is not a unit set of the target" )                                  \
   X( STORAGE_UNITS_NOT_SHOWN, 1186, ERROR, "no window shows `{name}`, so what one of its units holds is unknown" )     \
+  X( LINEAR_NOT_A_RANGE,                                                                                               \
+     1245,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a unit set's linear range runs from a lower address to a higher one, and this one does not" )                    \
+  X( UNITS_PAST_LINEAR,                                                                                                \
+     1244,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is {count:n} banks of {size:n} bytes from {begin:hex}, which reach past the end of its linear range "   \
+     "at "                                                                                                             \
+     "{last:hex}" )                                                                                                    \
   X( WINDOW_SIZES_DIFFER,                                                                                              \
      1187,                                                                                                             \
      ERROR,                                                                                                            \
@@ -360,20 +448,17 @@ enum class Severity : std::uint8_t
      "window `{window}` shows no unit set, so a pane in it is pinned to a named state: write `= STATE`" )              \
   X( PANE_FAMILY_PINNED, 1195, ERROR, "a family takes consecutive banks, and `{pane}` is pinned to one state" )        \
   X( EXPECTED_PANE_ENTRY, 1196, ERROR, "expected a pane's name, found `{token}`" )                                     \
-  X( EXPECTED_BASE_FORM, 1197, ERROR, "`base` is written `base WINDOW = STATE`, found `{token}`" )                     \
-  X( BASE_WINDOW_UNKNOWN, 1198, ERROR, "`{name}` is not a window of the target" )                                      \
-  X( BASE_STATE_UNKNOWN, 1199, ERROR, "`{state}` is not a named state of window `{window}`" )                          \
-  X( BASE_TWICE, 1200, ERROR, "phase `{phase}` gives window `{window}` its base more than once" )                      \
-  X( BASES_DISAGREE,                                                                                                   \
-     1201,                                                                                                             \
-     ERROR,                                                                                                            \
-     "the groups phase `{phase}` needs give window `{window}` different bases, `{state}` and `{other}`" )              \
-  X( BASE_GIVEN_HERE, 1202, NOTE, "`{state}` is given here" )                                                          \
-  X( GENERATOR_UNKNOWN, 1203, ERROR, "`{name}` is no generator; `binary` reads a file" )                               \
+  X( FINAL_PHASE_LEADS_ON, 1197, ERROR, "phase `{phase}` is final, and `then` leads out of it" )                       \
+  X( LOAD_NOT_XEX, 1198, ERROR, "`load` describes how a `.xex` loads, and this project's container is `{container}`" ) \
+  X( EXPECTED_LOAD_ENTRY, 1199, ERROR, "expected `needs` or `init`, found `{token}`" )                                 \
+  X( GENERATOR_UNKNOWN, 1203, ERROR, "`{name}` is no generator; the generators are `binary` and `script`" )            \
   X( GENERATOR_ARGUMENT_UNKNOWN, 1204, ERROR, "`{name}` is no argument of this generator" )                            \
   X( GENERATOR_ARGUMENT_TWICE, 1205, ERROR, "this argument is given more than once" )                                  \
   X( GENERATOR_ARGUMENT_KIND, 1206, ERROR, "`{name}` takes {wanted}, and this is {given}" )                            \
-  X( GENERATOR_NEEDS_FILE, 1207, ERROR, "`{generator}` names the file it works from first, as a quoted path" )         \
+  X( GENERATOR_NEEDS_FILE,                                                                                             \
+     1207,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{generator}` is given the file it works from as a quoted path with no name before it" )                         \
   X( GENERATOR_DESCRIPTION, 1208, ERROR, "what `{generator}` produced cannot be emitted: {where}" )                    \
   X( EXPECTED_CALL_END, 1209, ERROR, "a generator's arguments are closed by `)`, found `{token}`" )                    \
   X( SCRIPT_FAILED, 1210, ERROR, "`{path}` failed: {message}" )                                                        \
@@ -382,12 +467,12 @@ enum class Severity : std::uint8_t
   X( SCRIPT_REPORTED_WARNING, 1213, WARNING, "{module}: {message}" )                                                   \
   X( SCRIPT_REPORTED_AT, 1214, NOTE, "the generator said so at {where}" )                                              \
   X( EXPECTED_GROUP_NAME, 1178, ERROR, "`group` is followed by the group's name, found `{token}`" )                    \
-  X( DUPLICATE_SYMBOL, 2201, ERROR, "symbol `{symbol}` is defined more than once in phase `{phase}`" )                 \
   X( PREVIOUS_DEFINITION, 2202, NOTE, "previous definition of `{symbol}` is here" )                                    \
   X( SYMBOL_REDEFINED, 2203, ERROR, "`{symbol}` is already defined in this module" )                                   \
   X( EXPORT_OF_UNDEFINED_SYMBOL, 2204, ERROR, "`{symbol}` is exported but not defined in this module" )                \
   X( DUPLICATE_EXPORT, 2205, ERROR, "`{symbol}` is exported by more than one module" )                                 \
   X( UNKNOWN_SYMBOL, 2206, ERROR, "`{symbol}` is not defined" )                                                        \
+  X( ACCUMULATOR_OPERAND, 2208, ERROR, "`{mnemonic}` on the accumulator is written `{mnemonic}`, without `a`" )        \
   X( CONSTANT_CYCLE, 2207, ERROR, "`{symbol}` is defined in terms of itself" )                                         \
   X( EXPECTED_INTEGER, 2220, ERROR, "expected an integer here, and this is {type}" )                                   \
   X( ADDRESSES_NOT_ADDABLE, 2221, ERROR, "two addresses cannot be added; `a - b` is the distance between them" )       \
@@ -398,7 +483,7 @@ enum class Severity : std::uint8_t
      "these addresses are not in one section, so this is a property of the layout rather than of the program" )        \
   X( NOT_A_SECTION, 2224, ERROR, "only a label reaches the attributes of its section, and this is {type}" )            \
   X( DATA_ITEM_TYPE, 2225, ERROR, "`.{directive}` takes {allowed}, and this is {type}" )                               \
-  X( OPERAND_TYPE, 2226, ERROR, "an operand is an address or a number, and this is {type}" )                           \
+  X( OPERAND_TYPE, 2226, ERROR, "an operand is an address, a number or a pane, and this is {type}" )                   \
   X( NO_SUCH_ATTRIBUTE, 2227, ERROR, "`{name}` is not an attribute of a section" )                                     \
   X( SELECT_ARMS_DIFFER,                                                                                               \
      2228,                                                                                                             \
@@ -412,7 +497,7 @@ enum class Severity : std::uint8_t
   X( NOT_A_CHARSET, 2230, ERROR, "`{symbol}` is not a character set" )                                                 \
   X( CHARACTER_NOT_IN_CHARSET, 2231, ERROR, "`{charset}` does not map `{character}`" )                                 \
   X( CHARSET_CYCLE, 2232, ERROR, "character set `{charset}` is derived from itself" )                                  \
-  X( DUPLICATE_CHARSET_ENTRY, 2233, ERROR, "`{character}` is already mapped by this character set" )                   \
+  X( DUPLICATE_CHARSET_ENTRY, 2233, ERROR, "`{character}` is already mapped earlier in this `.charset` block" )        \
   X( CHARSET_RUN_PAST_BYTE, 2234, ERROR, "a character set maps to bytes, and this run covers {start} to {end}" )       \
   X( CHARSET_VALUE_NOT_DECLARED,                                                                                       \
      2235,                                                                                                             \
@@ -462,6 +547,16 @@ enum class Severity : std::uint8_t
      2247,                                                                                                             \
      WARNING,                                                                                                          \
      "`{module}.{section}` is never loaded by a transition, so nothing transforms it" )                                \
+  X( TRANSFORM_WITHOUT_LOADER,                                                                                         \
+     2249,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{module}.{section}` is named in `transform`, and without storage only a `.xex` decodes anything, while it "     \
+     "loads" )                                                                                                         \
+  X( TRANSFORM_IN_PANE,                                                                                                \
+     2292,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{module}.{section}` stands in `{pane}` and is named in `transform`, and what stands in a pane or a unit "       \
+     "set is written as it is, with no decoder to run on it" )                                                         \
   X( NO_SUCH_LOCAL_LABEL, 2210, ERROR, "no definition of `@{name}` matches this reference" )                           \
   X( AMBIGUOUS_LOCAL_LABEL,                                                                                            \
      2211,                                                                                                             \
@@ -482,7 +577,7 @@ enum class Severity : std::uint8_t
      2305,                                                                                                             \
      ERROR,                                                                                                            \
      "a macro's argument is an expression: no `#`, no `,x` or `,y`, and no parenthesis that indirects" )               \
-  X( MACRO_ARITY, 2306, ERROR, "`{name}` takes {expected} arguments and was given {given}" )                           \
+  X( MACRO_ARITY, 2306, ERROR, "`{name}` takes {expected} {arguments} and was given {given}" )                         \
   X( MACRO_NOT_A_VALUE, 2308, ERROR, "`{symbol}` is a macro and stands where a value is expected" )                    \
   X( DRIVER_NOT_A_MACRO,                                                                                               \
      2309,                                                                                                             \
@@ -491,16 +586,20 @@ enum class Severity : std::uint8_t
   X( NAMESPACE_RESERVED, 2310, ERROR, "`nga` is the tool's namespace, and no module defines it" )                      \
   X( NO_SUCH_NAMESPACE, 2311, ERROR, "`{space}` is not a namespace" )                                                  \
   X( NO_SUCH_TOOL_NAME, 2312, ERROR, "`nga.{name}` names nothing the tool defines" )                                   \
-  X( ROLE_WITHOUT_DRIVER, 2313, ERROR, "`nga.{name}` is used, and no module declares a driver" )                       \
+  X( ROLE_WITHOUT_DRIVER,                                                                                              \
+     2313,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`nga.{name}` is used, and the program has no driver: no module declares one, or the one declared was "           \
+     "refused" )                                                                                                       \
+  X( DRIVER_WITHOUT_STREAM,                                                                                            \
+     2441,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`nga.{name}` is used, and the driver switches ROMs and has no stream to {name}" )                                \
   X( TOOL_NAME_COLLISION, 2314, ERROR, "`{symbol}` is a name the tool defines, and a module may not define it" )       \
   X( TOOL_NAME_DEFINED_HERE, 2315, NOTE, "the tool defines `{symbol}` here" )                                          \
   X( NAMESPACE_NOT_A_VALUE, 2316, ERROR, "`{name}` is a namespace and stands where a value is expected" )              \
   X( NAMESPACE_NAME_COLLISION, 2317, ERROR, "`{symbol}` is also a namespace, and one name cannot be both" )            \
   X( NAME_IS_AN_ATTRIBUTE, 2319, ERROR, "`{name}` is an attribute of a section, and a name in a proc cannot take it" ) \
-  X( EXPORT_FROM_INSIDE_PROC,                                                                                          \
-     2320,                                                                                                             \
-     ERROR,                                                                                                            \
-     "`{symbol}` is inside proc `{proc}`, and nothing outside the proc can reach it" )                                 \
   X( CONDITION_NOT_DECLARED,                                                                                           \
      2321,                                                                                                             \
      ERROR,                                                                                                            \
@@ -526,7 +625,7 @@ enum class Severity : std::uint8_t
   X( NO_CASE_FITS, 2328, ERROR, "`{name}` was given {count} elements, and no `.case` of `.match {name}` fits that" )   \
   X( MATCH_HERE, 2329, NOTE, "the `.match` is here" )                                                                  \
   X( CASE_NEVER_FITS, 2330, WARNING, "a `.case` above this one fits everything this one does, so it is never taken" )  \
-  X( MACRO_ARITY_AT_LEAST, 2331, ERROR, "`{name}` takes at least {expected} arguments and was given {given}" )         \
+  X( MACRO_ARITY_AT_LEAST, 2331, ERROR, "`{name}` takes at least {expected} {arguments} and was given {given}" )       \
   X( LOCAL_LABEL_ACROSS_BRANCHES,                                                                                      \
      2215,                                                                                                             \
      ERROR,                                                                                                            \
@@ -560,7 +659,10 @@ enum class Severity : std::uint8_t
      3013,                                                                                                             \
      ERROR,                                                                                                            \
      "`.own` and `.root` on one statement: an address is followed by this section or by the hardware, not both" )      \
-  X( ROOT_TAKES_NO_NAME, 3014, ERROR, "`.root` hands the address to the hardware, and names nobody" )                  \
+  X( ROOT_NAMES_ONE_HOLDER,                                                                                            \
+     3014,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`.root` hands the address to the one holder that takes it, and this names {count}" )                             \
   X( WITH_FROM_OWN_WINDOW,                                                                                             \
      3015,                                                                                                             \
      ERROR,                                                                                                            \
@@ -571,25 +673,58 @@ enum class Severity : std::uint8_t
      3017,                                                                                                             \
      ERROR,                                                                                                            \
      "`{symbol}` runs under pane `{pane}`, which must be shown where it is called, and here it is not" )               \
-  X( WITH_BASES_DIFFER,                                                                                                \
-     3010,                                                                                                             \
-     ERROR,                                                                                                            \
-     "the phases this code is in give window `{window}` different bases, `{state}` in `{phase}` and `{other}` in "     \
-     "`{otherPhase}`, so `.with` cannot show one base again; split the module" )                                       \
   X( STATE_NOT_SHOWN,                                                                                                  \
      3011,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{symbol}` is in state `{state}` of window `{window}`, which phase `{phase}` does not show here" )               \
+     "`{symbol}` is in state `{state}` of window `{window}`, and nothing shows that state here" )                      \
+  X( LINEAR_NOT_IN_PANE,                                                                                               \
+     2444,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is in no pane, and only a section a pane holds has a linear address" )                               \
+  X( LINEAR_PANE_PINNED,                                                                                               \
+     2445,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is in pane `{pane}`, pinned to a named state, and only a bank of a unit set has a linear address" )  \
+  X( LINEAR_UNITS_NOT_LINEAR,                                                                                          \
+     2446,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is in pane `{pane}`, and `{units}`, whose banks it stands in, declares no linear range" )            \
+  X( LINEAR_FAMILY,                                                                                                    \
+     2447,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is in the family `{pane}`, whose every member holds it: its address in the first is "                \
+     "`linearFamilyAddress`" )                                                                                         \
+  X( LINEAR_NOT_FAMILY,                                                                                                \
+     2448,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is in `{pane}`, which is no family: its address is `linearSectionAddress`" )                         \
+  X( LINEAR_NOT_FOR_CPU,                                                                                               \
+     2449,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a linear address is the medium's and not the CPU's: take its bytes with `<`, `>` and `>>`" )                     \
   X( CROSS_VIEW_REFERENCE,                                                                                             \
      2412,                                                                                                             \
      ERROR,                                                                                                            \
      "`{symbol}` is in pane `{pane}`, and this code does not run with that pane shown: put the statement "             \
      "under a `.with`, or the code in a Proc declared `under` it" )                                                    \
-  X( PANE_UNKNOWN, 2418, ERROR, "`{name}` is not a pane the Project declares" )                                        \
-  X( PANE_SECTION_MOVABLE,                                                                                             \
-     2419,                                                                                                             \
+  X( PANE_UNKNOWN, 2418, ERROR, "`{name}` is neither a pane, a region nor a unit set the Project declares" )           \
+  X( IN_UNITS_NOT_LINEAR,                                                                                              \
+     2450,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` is in pane `{pane}`, and a pane's section stands in one bank at one address; it cannot be movable" ) \
+     "`{name}` declares no linear range, and a section stands in a unit set only at a linear address" )                \
+  X( IN_UNITS_AND_MORE, 2451, ERROR, "`{name}` is a unit set, and a section in one names no other place with `in`" )   \
+  X( IN_UNITS_NOT_DATA, 2452, ERROR, "`{section}` is {what}, and a unit set holds only what the medium reads" )        \
+  X( IN_UNITS_NO_RUNTIME,                                                                                              \
+     2453,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` stands in `{units}`, where its address is linear, and it has no runtime one" )                       \
+  X( DIVISION_BY_ZERO, 2454, ERROR, "this divides by zero" )                                                           \
+  X( VALUE_PAST_64_BITS, 2455, ERROR, "this comes to a number past what 64 bits hold" )                                \
+  X( IN_PANE_AND_MORE, 2443, ERROR, "`{name}` is a pane, and a section in a pane names no other place with `in`" )     \
+  X( IN_REGION_NOT_MEMORY,                                                                                             \
+     2442,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is a region of registers or reserved memory, and a section stands only in one of RAM or ROM" )          \
   X( PANE_ZERO_PAGE, 2420, ERROR, "`{section}` is in pane `{pane}`, and a window covers no zero page" )                \
   X( PANE_NOT_A_NUMBER,                                                                                                \
      2421,                                                                                                             \
@@ -598,11 +733,6 @@ enum class Severity : std::uint8_t
      "data item or a role's argument" )                                                                                \
   X( PANE_MEMBER_OUT_OF_RANGE, 2422, ERROR, "`{name}` has {count} members, and {index} is not one of them" )           \
   X( PANE_NOT_AN_ADDRESS, 2423, ERROR, "a pane is a state of a window and not an address, and this operand is one" )   \
-  X( VIEWS_SHARE_WINDOW,                                                                                               \
-     2413,                                                                                                             \
-     NOTE,                                                                                                             \
-     "`{fromView}` and `{toView}` share window {windowStart:hex}-{windowEnd:hex} and "                                 \
-     "are never visible together" )                                                                                    \
   X( CROSS_RESIDENCY_REFERENCE,                                                                                        \
      2414,                                                                                                             \
      ERROR,                                                                                                            \
@@ -611,7 +741,25 @@ enum class Severity : std::uint8_t
      2415,                                                                                                             \
      ERROR,                                                                                                            \
      "reference to `{slot}`, which has no implementation in phase `{phase}` while `{section}` is" )                    \
-  X( PROC_ENTERED_INSIDE, 2416, ERROR, "`{symbol}` is inside proc `{proc}`, which is reached only through its name" )  \
+  X( ALT_NEEDS_INSTRUCTION, 2437, ERROR, "`.alt` applies to the instruction on the line below, and this is not one" )  \
+  X( ALT_REACHES_MEMORY,                                                                                               \
+     2438,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{mnemonic}` reaches memory through its operand, and only an instruction that reaches none has alternatives" )   \
+  X( ALT_NO_SUCH_FORM,                                                                                                 \
+     2439,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{alternative}` has no form that takes the operand `{mnemonic}` is written with, at its length" )                \
+  X( ALT_OPCODE_NOT_DECLARED,                                                                                          \
+     2440,                                                                                                             \
+     ERROR,                                                                                                            \
+     "this writes {value:hex} into the opcode of `{mnemonic}`, which is neither it nor any alternative its `.alt` "    \
+     "declares" )                                                                                                      \
+  X( PROC_ENTERED_INSIDE,                                                                                              \
+     2416,                                                                                                             \
+     ERROR,                                                                                                            \
+     "this reaches inside proc `{proc}` where only a read may: a proc is entered at its start, and written only in "   \
+     "the operand of an instruction that does not jump, or in an opcode its `.alt` gives alternatives for" )           \
   X( BRANCH_ACROSS_SECTIONS,                                                                                           \
      2417,                                                                                                             \
      ERROR,                                                                                                            \
@@ -626,7 +774,6 @@ enum class Severity : std::uint8_t
   X( THEN_NOT_A_PROC, 2260, ERROR, "`{name}` is not a proc of this module, and `then` names one" )                     \
   X( THEN_ALREADY_FOLLOWED, 2261, ERROR, "`{name}` already follows `{previous}`, and can follow only one proc" )       \
   X( THEN_PLACED, 2262, ERROR, "`{name}` follows `{previous}`, and cannot also be pinned or aligned" )                 \
-  X( THEN_MOVABILITY, 2263, ERROR, "`{name}` follows `{previous}`, so both are movable or neither is" )                \
   X( THEN_CYCLE, 2264, ERROR, "`{name}` follows itself through `then`" )                                               \
   X( THEN_PANE, 2265, ERROR, "`{name}` follows `{previous}`, so both are in one pane or neither is" )                  \
   X( TRANSFORM_LABEL_NOT_HERE,                                                                                         \
@@ -664,16 +811,54 @@ enum class Severity : std::uint8_t
   X( UNKNOWN_DRIVER_ROLE,                                                                                              \
      2284,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{role}` is not a role of the driver; the roles are `open`, `read`, `stream`, `show` and `showAt`" )             \
+     "`{role}` is not a role of the driver; the roles are `open`, `read`, `unit`, `offset`, `init`, `finalize`, "      \
+     "`stream`, `show`, `showAt`, `seek`, `span`, `rom`, `select`, `mask` and `unmask`" )                              \
   X( DRIVER_ROLE_MISSING, 2285, ERROR, "the driver declares no `{role}`, and the routine calls it" )                   \
-  X( DRIVER_LABEL_NOT_HERE, 2286, ERROR, "`{label}` is not defined in this module, and a role is one of its labels" )  \
+  X( DRIVER_CELL_NOT_A_LABEL,                                                                                          \
+     2427,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{label}` is a {kind}, and `{role}` names the label of a reservation the stream stands in" )                     \
+  X( DRIVER_CELL_BYTES, 2428, ERROR, "`{role}` names {got}, and the stream's {role} is {want}" )                       \
+  X( DRIVER_PLACE_UNKNOWN,                                                                                             \
+     2429,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{place}` is not where `showAt` takes a state: `x` is one byte in `X`, and `xy` two, the high one in `Y`" )      \
+  X( DRIVER_PLACE_TOO_NARROW,                                                                                          \
+     2430,                                                                                                             \
+     ERROR,                                                                                                            \
+     "window `{window}` has {count:n} states, and the driver's `showAt` for it takes one byte; with `xy` it takes "    \
+     "two" )                                                                                                           \
+  X( WITH_PLACE,                                                                                                       \
+     2431,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the driver's `showAt` for window `{window}` takes the state in `{want}`, and this gives it in `{given}`" )       \
+  X( DRIVER_ROMS_TOO_MANY,                                                                                             \
+     2433,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the driver declares {count:n} ROMs, and the set `select` is handed is a byte" )                                  \
+  X( WITHOUT_NOT_A_ROM,                                                                                                \
+     2434,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{module}` is not a ROM the driver switches out, and a phase does without only what one is" )                    \
+  X( WITHOUT_SHOWN_ANYWAY,                                                                                             \
+     2435,                                                                                                             \
+     ERROR,                                                                                                            \
+     "phase `{phase}` is without `{module}`, and `{needed}`, which it needs, shows it" )                               \
+  X( XEX_ENTRY_WITHOUT,                                                                                                \
+     2436,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the entry phase of a .xex is loaded by a DOS with every ROM in, and it is without `{module}`" )                  \
+  X( DRIVER_LABEL_NOT_HERE,                                                                                            \
+     2286,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{label}` is not defined in this module, and a role names a macro or a label of the driver's own module" )       \
   X( DRIVER_NOT_RESIDENT, 2289, ERROR, "the driver is present in some phases only, and every Transition calls it" )    \
   X( DECODER_NOT_RESIDENT,                                                                                             \
      2290,                                                                                                             \
      ERROR,                                                                                                            \
      "this decoder's module is present in some phases only, and any Transition may call it" )                          \
   X( DRIVER_ROLE_REPEATED, 2291, ERROR, "`{role}` is declared more than once" )                                        \
-  X( DRIVER_ROLE_NAMES, 2293, ERROR, "`{role}` takes {count} names, and {given} are given" )                           \
+  X( DRIVER_ROLE_NAMES, 2293, ERROR, "`{role}` takes {count} {names}, and is given {given}" )                          \
   X( DRIVER_WINDOW_UNKNOWN, 2294, ERROR, "`{window}` is not a window of the target" )                                  \
   X( DRIVER_WINDOW_ROLE_MISSING,                                                                                       \
      2295,                                                                                                             \
@@ -697,10 +882,17 @@ enum class Severity : std::uint8_t
   X( REGION_NAME_COLLISION,                                                                                            \
      2272,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{symbol}` names a region, a unit set or a window of the target, and a module cannot define it" )                \
+     "`{symbol}` names a {kind} the project declares, and a module cannot define it" )                                 \
   X( TEMPORARY_HOLDS_BYTES, 2271, ERROR, "a temporary section holds reservations only, and this is not one" )          \
   X( DECLARED_TYPE_BYTES, 2266, ERROR, "`{type}` is a {want}-byte type, and this reserves {got}" )                     \
-  X( DECLARED_PLACE_BYTES, 2334, ERROR, "`{place}` keeps {want} of its bytes here, and this reserves {got}" )          \
+  X( DECLARED_RESULT_ELSEWHERE,                                                                                        \
+     2456,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` {what}; a result declared elsewhere names the reservation another proc returns in" )                    \
+  X( DECLARED_PLACE_BYTES,                                                                                             \
+     2334,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{place}` keeps {want} in memory, and the `.ztemp` or `.temp` below reserves {got}" )                            \
   X( RESERVE_IN_PROC,                                                                                                  \
      2270,                                                                                                             \
      ERROR,                                                                                                            \
@@ -716,9 +908,14 @@ enum class Severity : std::uint8_t
   X( ADDRESS_OUT_OF_RANGE, 5106, ERROR, "{value:hex} is not an address" )                                              \
   X( SECTION_OVERLAP, 5201, ERROR, "`{section}` overlaps `{other}` at {address:hex}" )                                 \
   X( NO_ROOM, 5202, ERROR, "there is no room for `{section}`, which needs {size:n} bytes" )                            \
-  X( PIN_NOT_AN_ADDRESS, 5203, ERROR, "a section cannot be pinned at {address:hex}" )                                  \
+  X( PIN_NOT_AN_ADDRESS, 5203, ERROR, "a pin is a declared address, and `{text}` is {what}" )                          \
   X( ZERO_PAGE_DOES_NOT_FIT, 5204, ERROR, "`{section}` is zero page and does not fit below $100" )                     \
   X( NO_LAYOUT, 5206, ERROR, "no layout satisfies every constraint at once" )                                          \
+  X( LAYOUT_NOT_FOUND,                                                                                                 \
+     5219,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the search found no layout within its budget, and no sum shows that none exists" )                               \
+  X( LEAST_ROOM, 5220, NOTE, "phase `{phase}` has the least room left in {pool}: {free:n} of {available:n} bytes" )    \
   X( CANNOT_BE_KEPT_APART,                                                                                             \
      5207,                                                                                                             \
      ERROR,                                                                                                            \
@@ -733,12 +930,37 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{section}` is loaded from storage, and cannot live where the stream reads through, at {address:hex}" )          \
   X( NO_STORAGE, 5222, ERROR, "there is no storage for `{section}`, which needs {size:n} bytes" )                      \
+  X( LOAD_FORM_SAVES_NOTHING,                                                                                          \
+     5258,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{section}` is written as it is: as `{format}` it comes to {form:n} bytes, and it is {size:n}" )                 \
+  X( LOAD_FORM_NO_MARGIN,                                                                                              \
+     5259,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{section}` is written as it is: decoding it in place needs {margin:n} bytes past its end, and {address:hex} "   \
+     "is not memory the loader may write" )                                                                            \
+  X( COLD_START_RUNS_IT,                                                                                               \
+     5261,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is named in `transform`, and the cold start runs it before anything is decoded" )                    \
+  X( LOAD_HIDDEN_AS_IT_IS,                                                                                             \
+     5263,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{section}` hides under a ROM and is moved there as it is: as `{format}` it comes to {form:n} bytes, and "       \
+     "{room:n} are free while the program loads" )                                                                     \
+  X( LOAD_NO_STAGING,                                                                                                  \
+     5262,                                                                                                             \
+     ERROR,                                                                                                            \
+     "there is no memory free while the program loads to put what hides under a ROM before it is moved there" )        \
+  X( LOAD_NO_ROOM,                                                                                                     \
+     5260,                                                                                                             \
+     ERROR,                                                                                                            \
+     "there is no room while the program loads for `{section}`, which runs while it loads and needs {size:n} "         \
+     "bytes" )                                                                                                         \
   X( ROOT_EVICTED,                                                                                                     \
      5224,                                                                                                             \
      WARNING,                                                                                                          \
-     "`{section}` is `root` and holds no bytes to restore, and is evicted in phase `{gap}` between `{before}` and "    \
-     "`{after}`, which both need it" )                                                                                 \
-  X( NO_BANKS, 5223, NOTE, "the target has no storage; a `storage` block is where its units are named" )               \
+     "`{section}` is `root` and holds no bytes to restore, and is evicted in phase `{gap}` {between}" )                \
   X( PANE_NO_BANK,                                                                                                     \
      5225,                                                                                                             \
      ERROR,                                                                                                            \
@@ -748,25 +970,42 @@ enum class Severity : std::uint8_t
      5226,                                                                                                             \
      ERROR,                                                                                                            \
      "`{section}` is pinned at {address:hex}, outside the window of pane `{pane}`" )                                   \
-  X( PIN_UNDER_WITH,                                                                                                   \
-     5228,                                                                                                             \
+  X( PIN_IN_WINDOW,                                                                                                    \
+     5235,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` is pinned at {address:hex}, inside window `{window}`, which code reached under a `.with` on it "     \
-     "would not see" )                                                                                                 \
+     "`{section}` is pinned at {address:hex}, inside window `{window}`, where only a pane or storage stands" )         \
+  X( IN_UNITS_PIN_OUTSIDE,                                                                                             \
+     5269,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` is pinned at {address:hex}, and the banks of `{units}` lie from {begin:hex} to {last:hex}" )         \
+  X( IN_UNITS_FULL,                                                                                                    \
+     5270,                                                                                                             \
+     ERROR,                                                                                                            \
+     "in phase `{phase}` the sections in `{units}` come to {size:n} bytes, and its banks hold {holds:n}" )             \
+  X( IN_UNITS_NOT_FILLED,                                                                                              \
+     5271,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` has bytes in `{units}`, and no Container fills that set while the program loads, so it "             \
+     "holds only sections that reserve" )                                                                              \
+  X( PANE_NOT_FILLED,                                                                                                  \
+     5272,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` has bytes and is in pane `{pane}`, whose banks are units of `{units}`, and no Container fills that " \
+     "set while the program loads" )                                                                                   \
   X( PANE_STATE_PAYLOAD,                                                                                               \
      5227,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` has bytes and is in pane `{pane}`, which is pinned to a named state: no Container fills "            \
-     "one, so a pane pinned to a state holds only sections that reserve" )                                             \
+     "`{section}` has bytes and is in pane `{pane}`, which is pinned to a named state: only a `.xex` fills one, "      \
+     "and only in the window its driver's stream reads through" )                                                      \
   X( LAYOUT_OVERLAP,                                                                                                   \
      5240,                                                                                                             \
      ERROR,                                                                                                            \
      "the layout has `{section}` and `{other}` sharing {address:hex}, and phase `{phase}` holds both" )                \
   X( LAYOUT_PIN_MOVED, 5241, ERROR, "the layout puts `{section}` at {address:hex}, and it is pinned at {pinned:hex}" ) \
-  X( LAYOUT_UNDER_WITH,                                                                                                \
-     5252,                                                                                                             \
+  X( LAYOUT_IN_WINDOW,                                                                                                 \
+     5256,                                                                                                             \
      ERROR,                                                                                                            \
-     "the layout puts `{section}` at {address:hex}, inside window `{window}`, which it runs under a `.with` on" )      \
+     "the layout puts `{section}` at {address:hex}, inside window `{window}`, and it is in no pane" )                  \
   X( LAYOUT_NOT_ZERO_PAGE,                                                                                             \
      5242,                                                                                                             \
      ERROR,                                                                                                            \
@@ -783,14 +1022,14 @@ enum class Severity : std::uint8_t
   X( IMAGE_SPANS_A_UNIT,                                                                                               \
      5255,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` comes to {size:n} bytes and the driver is promised that nothing crosses a unit, which holds "        \
-     "{available:n}: no single unit can hold it" )                                                                     \
+     "`{section}` comes to {size:n} bytes, and nothing in this storage may run from one unit into the next, the "      \
+     "widest of which holds {available:n}" )                                                                           \
   X( LAYOUT_PAST_MEMORY,                                                                                               \
      5246,                                                                                                             \
      ERROR,                                                                                                            \
      "the layout puts `{section}` at {address:hex}, and it reaches past the end of memory" )                           \
-  X( BAD_ALIGNMENT, 5212, ERROR, "a section cannot be aligned to {alignment}" )                                        \
-  X( BAD_BOUNDARY, 5213, ERROR, "a section cannot be kept within a boundary of {boundary}" )                           \
+  X( BAD_ALIGNMENT, 5212, ERROR, "an alignment is a declared power of two from 1 to 65,536, and `{text}` is {what}" )  \
+  X( BAD_BOUNDARY, 5213, ERROR, "a boundary is a declared count of bytes from 1 to 65,536, and `{text}` is {what}" )   \
   X( SECTION_EXCEEDS_BOUNDARY,                                                                                         \
      5214,                                                                                                             \
      ERROR,                                                                                                            \
@@ -805,6 +1044,27 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{section}` is pinned at {address:hex}, in the register region `{region}`, where nothing can be placed" )        \
   X( PIN_IN_RESERVED, 5218, WARNING, "`{section}` is pinned at {address:hex}, in the reserved region `{region}`" )     \
+  X( LOAD_CODE_IN_PHASE,                                                                                               \
+     5265,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{section}` runs while the file loads, and `{module}` is needed by phase `{phase}` too: what the load runs is "  \
+     "done with before any phase" )                                                                                    \
+  X( LOAD_INIT_UNKNOWN, 5268, ERROR, "`init {name}` names {what}: it names a label of a module the load needs" )       \
+  X( CHOOSE_NO_ROOM,                                                                                                   \
+     5273,                                                                                                             \
+     ERROR,                                                                                                            \
+     "nothing the file leaves alone while it loads holds the {size:n} bytes that change it for a choice" )             \
+  X( PIN_HELD_WHILE_LOADING,                                                                                           \
+     5266,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{section}` is pinned at {address:hex}, which `{holder}` holds while the file loads, and its bytes are written " \
+     "then" )                                                                                                          \
+  X( LAYOUT_HELD_WHILE_LOADING,                                                                                        \
+     5267,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the layout puts `{section}` at {address:hex}, which `{holder}` holds while the file loads, and its bytes are "   \
+     "written then" )                                                                                                  \
+  X( PIN_OUTSIDE_REGION, 5264, ERROR, "`{section}` is pinned at {address:hex}, outside the region its `in` names" )    \
   X( LAYOUT_NOT_ALIGNED,                                                                                               \
      5247,                                                                                                             \
      ERROR,                                                                                                            \
@@ -813,11 +1073,6 @@ enum class Severity : std::uint8_t
      5248,                                                                                                             \
      ERROR,                                                                                                            \
      "the layout puts `{section}` at {address:hex}..{last:hex}, across a boundary of {boundary:n}" )                   \
-  X( LAYOUT_MOVED_UNDER_REFERENCE,                                                                                     \
-     5249,                                                                                                             \
-     ERROR,                                                                                                            \
-     "the layout puts `{section}` at {address:hex} in phase `{phase}` and at {other:hex} in phase `{otherPhase}`, "    \
-     "and a reference holds it to one address across both" )                                                           \
   X( ASSERTION_FAILED, 5210, ERROR, "this assertion does not hold" )                                                   \
   X( ASSERTION_NOT_DECIDABLE, 5211, ERROR, "this assertion cannot be decided" )                                        \
   X( PHASE_DOES_NOT_FIT,                                                                                               \
@@ -829,7 +1084,12 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "phase `{phase}` needs {required:n} bytes of zero page, and {available:n} are available" )                        \
   X( LARGEST_CONTRIBUTOR, 5633, NOTE, "`{section}` accounts for {size:n} bytes" )                                      \
-  X( VALUE_DOES_NOT_FIT, 6101, ERROR, "{value} does not fit in the {width:n} bytes written here" )                     \
+  X( KEPT_CONTRIBUTOR,                                                                                                 \
+     5634,                                                                                                             \
+     NOTE,                                                                                                             \
+     "`{section}` accounts for {size:n} bytes, kept here because phase `{needer}` needs it and with no storage "       \
+     "nothing could bring it back" )                                                                                   \
+  X( VALUE_DOES_NOT_FIT, 6101, ERROR, "{value} does not fit in {room} written here" )                                  \
   X( BRANCH_OUT_OF_RANGE,                                                                                              \
      6102,                                                                                                             \
      ERROR,                                                                                                            \
@@ -847,10 +1107,6 @@ enum class Severity : std::uint8_t
      6205,                                                                                                             \
      ERROR,                                                                                                            \
      "the .xex fills a unit by writing into the window the stream reads through, and this driver names none" )         \
-  X( XEX_UNIT_NOT_WINDOW,                                                                                              \
-     6206,                                                                                                             \
-     ERROR,                                                                                                            \
-     "a unit holds {unit:n} bytes and window `{name}` {window:n}, and the .xex fills a unit through the window" )      \
   X( XEX_WINDOW_NOT_ONE_RANGE,                                                                                         \
      6214,                                                                                                             \
      ERROR,                                                                                                            \
@@ -858,8 +1114,8 @@ enum class Severity : std::uint8_t
   X( CONTAINER_CANNOT_INIT,                                                                                            \
      6207,                                                                                                             \
      ERROR,                                                                                                            \
-     "the driver declares `init`, and a `{container}` has nowhere to call it: the `.xex` is the one Container that "   \
-     "reaches the driver before the entry" )                                                                           \
+     "the driver declares `init`, and the container `{container}` has nowhere to call it: the `.xex` is the one "      \
+     "Container that reaches the driver before the entry" )                                                            \
   X( XEX_INIT_NOT_PLACED,                                                                                              \
      6208,                                                                                                             \
      ERROR,                                                                                                            \
@@ -867,8 +1123,8 @@ enum class Severity : std::uint8_t
   X( ATR_STORAGE_IS_A_UNIT_SET,                                                                                        \
      6221,                                                                                                             \
      ERROR,                                                                                                            \
-     "an .atr reads storage a sector at a time and shows no Window, and this storage is the unit set                   \
-     `{name}`" )                                                                                                       \
+     "an .atr reads storage a sector at a time and shows no Window, and this storage is the unit set "                 \
+     "`{name}`" )                                                                                                      \
   X( ATR_UNIT_IS_NOT_SECTORS,                                                                                          \
      6222,                                                                                                             \
      ERROR,                                                                                                            \
@@ -895,9 +1151,12 @@ enum class Severity : std::uint8_t
   X( CAR_SECTION_OUTSIDE_ROM,                                                                                          \
      6232,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` holds bytes at {address:hex}, and a `{name}` cartridge is ROM at {range} and nothing else, so "      \
+     "`{section}` holds bytes at {address:hex}, and the board `{name}` is ROM at {range} and nothing else, so "        \
      "nothing would ever put them there" )                                                                             \
-  X( CAR_WITHOUT_HEADER, 6233, ERROR, "a cartridge is started through the six bytes at its top, and none were made" )  \
+  X( CAR_WITHOUT_HEADER,                                                                                               \
+     6233,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a cartridge is started through the six bytes at its top, and the tool could not complete them" )                 \
   X( D64_STORAGE_GEOMETRY,                                                                                             \
      1238,                                                                                                             \
      ERROR,                                                                                                            \
@@ -948,6 +1207,29 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{section}` waits in storage, and a `prg` is one block a PET is handed by hand: it has no loader, and nothing "  \
      "would ever put those bytes where they belong" )                                                                  \
+  X( NOTHING_TO_CARRY, 6243, ERROR, "the program has no bytes, and a `{container}` of none would load nothing" )       \
+  X( CONTAINER_NOT_WRITTEN,                                                                                            \
+     6244,                                                                                                             \
+     ERROR,                                                                                                            \
+     "the tool wrote no `{container}` and found nothing wrong with the program: the fault is the tool's" )             \
+  X( CHOICES_DIFFER,                                                                                                   \
+     6245,                                                                                                             \
+     ERROR,                                                                                                            \
+     "under `{document}`, `{section}` {what}, and a choice may differ from the first in bytes alone" )                 \
+  X( CHOICE_IN_LOAD_CODE,                                                                                              \
+     6246,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{document}` changes the byte of `{section}` at offset {offset:n}, which runs while the file loads, before "     \
+     "anything is chosen" )                                                                                            \
+  X( CHOICE_NOT_REACHED,                                                                                               \
+     6247,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{document}` changes the byte of `{section}` at offset {offset:n}, and the load never holds it as it is where "  \
+     "it could change it" )                                                                                            \
+  X( CHOICE_NEVER_MADE,                                                                                                \
+     6248,                                                                                                             \
+     WARNING,                                                                                                          \
+     "nothing the file runs while it loads names `ngaChoice`, so it always loads as `{document}`" )                    \
   X( ATR_WITHOUT_BOOT_RECORD, 6226, ERROR, "an .atr is booted by its first sectors, and none were made" )              \
   X( ATR_BOOT_RECORD_TOO_LARGE,                                                                                        \
      6227,                                                                                                             \
@@ -982,7 +1264,7 @@ enum class Severity : std::uint8_t
      4606,                                                                                                             \
      ERROR,                                                                                                            \
      "the address of `{section}` is taken and nothing says who follows it: `.own` if this section does, `.own NAME` "  \
-     "if another does, `.root` if the hardware does" )                                                                 \
+     "if another does, `.root HOLDER` if the hardware does" )                                                          \
   X( OWN_JUMP_FOLLOWS_NOTHING,                                                                                         \
      4607,                                                                                                             \
      ERROR,                                                                                                            \
@@ -997,6 +1279,20 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{section}` is handed to `{follower}`, which is present in phase `{phase}` where `{section}` is not: a jump "    \
      "from there would land in nothing" )                                                                              \
+  X( RUNS_OFF_THE_END,                                                                                                 \
+     4612,                                                                                                             \
+     WARNING,                                                                                                          \
+     "control runs off the end of `{section}` into whatever is placed after it: end it with a jump or a return, or "   \
+     "chain a proc to it with `then`" )                                                                                \
+  X( FINAL_PHASE_RETURNS,                                                                                              \
+     4613,                                                                                                             \
+     ERROR,                                                                                                            \
+     "phase `{phase}` is final, and `{entry}`, where it is entered, may return: nothing is kept there for a return "   \
+     "to land on" )                                                                                                    \
+  X( HOLDER_UNKNOWN,                                                                                                   \
+     4614,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is no holder: a `target` declares the hardware that holds a section with `holder`" )                    \
   X( TEMPORARY_UNDER_RECURSION,                                                                                        \
      4602,                                                                                                             \
      ERROR,                                                                                                            \
@@ -1010,7 +1306,8 @@ enum class Severity : std::uint8_t
   X( PIN_IN_ROM,                                                                                                       \
      5233,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{section}` is pinned at {address:hex} in `{region}`, which is ROM, and something writes it" )                   \
+     "`{section}` is pinned at {address:hex} in `{region}`, which is ROM, and it is not read-only: it is written, "    \
+     "holds no bytes, or has its address taken without `readonly`" )                                                   \
   X( READONLY_WITHOUT_BYTES,                                                                                           \
      5232,                                                                                                             \
      WARNING,                                                                                                          \
@@ -1066,7 +1363,7 @@ enum class Severity : std::uint8_t
   X( C_NOT_ASSIGNABLE, 7203, ERROR, "`{name}` is a function, and a function cannot be assigned" )                      \
   X( C_REDEFINITION, 7204, ERROR, "`{name}` is already defined in this file" )                                         \
   X( C_PREVIOUS_DEFINITION, 7205, NOTE, "the previous definition of `{name}` is here" )                                \
-  X( C_CONSTANT_OUT_OF_RANGE, 7206, ERROR, "{value} does not fit in a `{type}`" )                                      \
+  X( C_CONSTANT_OUT_OF_RANGE, 7206, ERROR, "{value} is outside the range of `{type}`" )                                \
   X( C_MIXED_SIGNEDNESS, 7207, ERROR, "`{left}` and `{right}` differ in signedness, and only a cast mixes them" )      \
   X( C_NARROWING_ASSIGNMENT, 7208, ERROR, "a `{from}` does not fit in the `{to}` it is assigned to without a cast" )   \
   X( C_BOOL_MIXED,                                                                                                     \
@@ -1076,17 +1373,13 @@ enum class Severity : std::uint8_t
   X( C_COMPARISON_ALWAYS,                                                                                              \
      7210,                                                                                                             \
      WARNING,                                                                                                          \
-     "{value} is outside what a `{type}` holds, so this comparison is always {outcome}" )                              \
-  X( C_SHIFT_OUT_OF_RANGE, 7211, ERROR, "a `{type}` shifted by {count}: the count is from 0 to {largest}" )            \
+     "{value} is outside the range of `{type}`, so this comparison is always {outcome}" )                              \
+  X( C_SHIFT_OUT_OF_RANGE, 7211, ERROR, "a value of `{type}` shifted by {count}: the count is from 0 to {largest}" )   \
   X( C_CONDITION_NOT_BOOL, 7212, ERROR, "a condition is a `bool`, and this is {what}" )                                \
-  X( C_OUTSIDE_LOOP, 7213, ERROR, "`{keyword}` stands in no loop" )                                                    \
+  X( C_OUTSIDE_LOOP, 7213, ERROR, "`{keyword}` stands in no {around}" )                                                \
   X( C_NOT_A_TYPE, 7214, ERROR, "`{name}` is not a type" )                                                             \
-  X( C_NOT_AN_ENUMERATION, 7215, ERROR, "`{name}` is not an `enum struct`" )                                           \
   X( C_NO_SUCH_ENUMERATOR, 7216, ERROR, "`{type}` has no enumerator `{name}`" )                                        \
-  X( C_ENUMERATION_COMPUTED,                                                                                           \
-     7217,                                                                                                             \
-     ERROR,                                                                                                            \
-     "`{type}` is an `enum struct`, whose values are compared and never computed" )                                    \
+  X( C_ENUMERATION_COMPUTED, 7217, ERROR, "`{type}` is an enumeration, whose values are compared and never computed" ) \
   X( C_TYPES_DIFFER, 7218, ERROR, "{left} and {right} are different types" )                                           \
   X( C_SWITCH_NOT_ENUMERATION,                                                                                         \
      7219,                                                                                                             \
@@ -1095,11 +1388,11 @@ enum class Severity : std::uint8_t
   X( C_CASE_NOT_ENUMERATOR, 7220, ERROR, "`{label}` is not an enumerator of `{type}`" )                                \
   X( C_LABEL_REPEATED, 7221, ERROR, "`{label}` is a label of this `switch` already" )                                  \
   X( C_ENUMERATORS_UNHANDLED, 7222, WARNING, "no case names {names} of `{type}`, and the `switch` has no `default`" )  \
-  X( C_TOO_MANY_ENUMERATORS, 7223, ERROR, "`{name}` has {count} enumerators, and an `enum struct` holds 256 at most" ) \
+  X( C_TOO_MANY_ENUMERATORS, 7223, ERROR, "`{name}` has {count} enumerators, and an enumeration holds 256 at most" )   \
   X( C_ARGUMENT_COUNT,                                                                                                 \
      7224,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{name}` takes an argument for each of its {count} parameters, and this call gives {given}" )                    \
+     "`{name}` takes as many arguments as it has parameters, {count}, and this call gives {given}" )                   \
   X( C_NOTHING_RETURNED_READ, 7225, ERROR, "`{name}` returns nothing, and this reads what it returns" )                \
   X( C_RETURN_WITHOUT_VALUE, 7226, ERROR, "`{name}` returns {type}, and this `return` gives no value" )                \
   X( C_RETURN_WITH_VALUE, 7227, ERROR, "`{name}` returns nothing, and this `return` gives a value" )                   \
@@ -1110,13 +1403,13 @@ enum class Severity : std::uint8_t
   X( C_CONST_WITHOUT_VALUE, 7232, ERROR, "`{name}` is `const`, and is given no value where it is declared" )           \
   X( C_CONSTANT_CYCLE, 7233, ERROR, "a constant is defined through itself, {cycle}" )                                  \
   X( C_CONST_ASSIGNED, 7234, ERROR, "`{name}` is `const`, and is not assigned" )                                       \
-  X( C_READ_IN_OWN_INITIALISER, 7235, ERROR, "`{name}` is read in the value it is given, before it holds one" )        \
-  X( C_INDEX_OUTSIDE, 7236, ERROR, "{index} is outside `{name}`, whose {count} elements are indexed from 0" )          \
+  X( C_READ_IN_OWN_INITIALISER, 7235, ERROR, "`{name}` is read in its own {what}, before it has one" )                 \
+  X( C_INDEX_OUTSIDE, 7236, ERROR, "{index} is outside `{name}`, whose elements are indexed from 0 to {last}" )        \
   X( C_INDEX_NOT_U8, 7237, ERROR, "an index is {allowed}, and this is {what}" )                                        \
   X( C_ARRAY_ASSIGNED, 7238, ERROR, "`{name}` is an array, and is not assigned but for its elements" )                 \
   X( C_NOT_AN_ARRAY, 7239, ERROR, "`{name}` is neither an array nor a pointer, and nothing else is indexed" )          \
   X( C_DIVISION_BY_ZERO, 7240, ERROR, "this divides by zero" )                                                         \
-  X( C_LIST_TOO_LONG, 7241, ERROR, "`{name}` has {count} elements, and is given {given}" )                             \
+  X( C_LIST_TOO_LONG, 7241, ERROR, "`{name}` is given {given} values, more than the {count} it holds" )                \
   X( C_LIST_MISMATCH, 7242, ERROR, "`{name}` is {what}, and is given {given}" )                                        \
   X( C_ARRAY_SIZE, 7243, ERROR, "the size of `{name}` is a constant from 1 to {largest}" )                             \
   X( C_MIXED_DECLARATORS, 7244, ERROR, "`{name}` is {what}, and a declaration declares pointers or none" )             \
@@ -1134,14 +1427,13 @@ enum class Severity : std::uint8_t
   X( C_LIST_SHAPE, 7256, ERROR, "{what} is given {given}" )                                                            \
   X( C_AGGREGATE_OPERATOR, 7257, ERROR, "{what} is a `struct` or a `union`, which no operator takes" )                 \
   X( C_UNKNOWN_ATTRIBUTE, 7258, ERROR, "`{name}` is no attribute of the subset" )                                      \
-  X( C_ATTRIBUTE_MISPLACED, 7259, ERROR, "`[[{attribute}]]` applies to {applies}, and `{name}` is none" )              \
+  X( C_ATTRIBUTE_MISPLACED, 7259, ERROR, "`[[{attribute}]]` applies to {applies}, and {what} is none" )                \
   X( C_NOT_STRIPABLE, 7260, ERROR, "`{name}` is an array of {what}, which lies in no stripes" )                        \
   X( C_STRIPED_TOO_LONG, 7261, ERROR, "`{name}` has {count} elements, and a striped array holds 256 at most" )         \
   X( C_STRIPED_ELEMENT, 7262, ERROR, "`{name}` lies in stripes, and has no address of its own" )                       \
   X( C_NO_SHAPE, 7263, ERROR, "`{name}` is a Label of the assembler with no shape in C: {reason}" )                    \
-  X( C_NOT_READ, 7264, ERROR, "`{name}` is {reason} of the assembler, which C does not read" )                         \
+  X( C_NOT_READ, 7264, ERROR, "`{name}` is {reason}, which C does not read" )                                          \
   X( C_RESERVED_REGION, 7265, ERROR, "`{name}` is a `reserved` Region, which C does not reach" )                       \
-  X( C_COUNT_UNKNOWN, 7266, ERROR, "`{name}` holds a string, so the compiler does not know how many elements it has" ) \
   X( C_DEFINED_HERE, 7267, NOTE, "`{name}` is defined here" )                                                          \
   X( C_BYTES_HANDED_OVER,                                                                                              \
      7268,                                                                                                             \
@@ -1172,8 +1464,8 @@ enum class Severity : std::uint8_t
   X( C_CALL_ACROSS_BLOCK_WINDOW,                                                                                       \
      7281,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{name}` is in pane `{pane}` of window `{window}`, which this block shows in another state: the exit of the "    \
-     "call's `.with` would put back what the function's own code shows, not the block's" )                             \
+     "`{name}` is in pane `{pane}` of window `{window}`, which this block shows in another state: the call's "         \
+     "`.with` would leave that pane shown, not the block's" )                                                          \
   X( C_WITH_NESTED_WINDOW,                                                                                             \
      7282,                                                                                                             \
      ERROR,                                                                                                            \
@@ -1221,7 +1513,7 @@ enum class Severity : std::uint8_t
   X( C_SLOT_TYPE,                                                                                                      \
      7295,                                                                                                             \
      ERROR,                                                                                                            \
-     "`{name}` is a slot, and its binding is its type's: a `void(void)` binds a vector and a `T* const` a pointer, "   \
+     "`{name}` is a slot, and its binding is its type's: a function binds a vector and a `T* const` a pointer, "       \
      "and {what}" )                                                                                                    \
   X( C_IMPLEMENTS_TYPE,                                                                                                \
      7296,                                                                                                             \
@@ -1247,7 +1539,7 @@ enum class Severity : std::uint8_t
      ERROR,                                                                                                            \
      "`{name}` is written `auto` and given {what}, which takes its type from where it is used and so"                  \
      " has none to give" )                                                                                             \
-  X( C_INLINE_REFUSED, 7302, ERROR, "`{name}` is written `inline` and {what}, so the call stays a call" )              \
+  X( C_INLINE_REFUSED, 7302, ERROR, "`{name}` is written `inline` and cannot be wrapped into its caller: it {what}" )  \
   X( C_INLINE_WITHOUT_BODY, 7303, ERROR, "`inline` is written on {what}, which has no body to wrap into a caller" )    \
   X( C_STEP_REACHED_AGAIN,                                                                                             \
      7304,                                                                                                             \
@@ -1267,7 +1559,25 @@ enum class Severity : std::uint8_t
      7308,                                                                                                             \
      ERROR,                                                                                                            \
      "`{name}` is read here before anything writes it, and a `static` local holds what was there; give it a value "    \
-     "where it is declared" )
+     "where it is declared" )                                                                                          \
+  X( C_QUALIFIED_DEFINITION,                                                                                           \
+     7309,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is a name in a Namespace, and C defines none there; `::` reads what the assembler exports" )            \
+  X( C_ASSIGNMENT_NOT_VALUE,                                                                                           \
+     7310,                                                                                                             \
+     ERROR,                                                                                                            \
+     "a plain assignment is a statement and not a value: write two assignments; a compound one, such as `+=`, is a "   \
+     "value" )                                                                                                         \
+  X( C_PLACEMENT_ON_DATA,                                                                                              \
+     7311,                                                                                                             \
+     ERROR,                                                                                                            \
+     "`{name}` is `const` and given constants, so it is read-only data, which lies off the zero page whatever is "     \
+     "asked" )                                                                                                         \
+  X( C_PLACEMENT_ON_CONSTANT,                                                                                          \
+     7312,                                                                                                             \
+     WARNING,                                                                                                          \
+     "`{name}` is `const` and given a constant, so it takes no byte, and `[[placement]]` has nothing to place" )
 
 // A compiler-class tool outgrows 255 diagnostics, and renumbering the catalog
 // later is not an option.

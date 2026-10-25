@@ -1,5 +1,7 @@
 #include "nga/model/MemoryMap.hpp"
 
+#include "nga/model/Evaluate.hpp"
+#include "nga/model/Place.hpp"
 #include "nga/model/Prune.hpp"
 #include "nga/model/Transition.hpp"
 
@@ -7,6 +9,7 @@
 
 #include <algorithm>
 #include <string_view>
+#include <utility>
 
 namespace nga::model
 {
@@ -34,13 +37,17 @@ std::string kindOf( MapEntry const& entry )
     kind = "section";
     break;
   }
-  if ( entry.movable )
-  {
-    kind += " movable";
-  }
   if ( entry.root )
   {
     kind += " root";
+  }
+  if ( entry.kept )
+  {
+    kind += " kept";
+  }
+  if ( entry.hidden )
+  {
+    kind += " hidden";
   }
   return kind;
 }
@@ -105,6 +112,58 @@ std::string phasesOf( MemoryMap const& map, MapEntry const& entry )
   return first == last ? first : first + ".." + last;
 }
 
+/// A dropped Section's own text: its extent, less the extent of every other
+/// Section of its Module that lies inside it, as pieces in the order they
+/// stand.
+std::vector<SymbolSite> textOf( diag::SourceManager const& sources, Module const& module, SectionIndex index )
+{
+  diag::SourceSpan const whole = module.sections()[index.value].extent();
+  if ( !whole.begin.isValid() )
+  {
+    return {};
+  }
+  std::uint32_t const begin = whole.begin.rawOffset();
+  std::uint32_t const end = begin + whole.length;
+
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> inside;
+  for ( std::uint32_t other = 0; other < module.sections().size(); ++other )
+  {
+    diag::SourceSpan const span = module.sections()[other].extent();
+    if ( other == index.value || !span.begin.isValid() )
+    {
+      continue;
+    }
+    std::uint32_t const from = span.begin.rawOffset();
+    if ( from >= begin && from + span.length <= end && span.length < whole.length )
+    {
+      inside.emplace_back( from, from + span.length );
+    }
+  }
+  std::ranges::sort( inside );
+
+  std::vector<SymbolSite> pieces;
+  auto const piece = [&]( std::uint32_t from, std::uint32_t to )
+  {
+    if ( to <= from )
+    {
+      return;
+    }
+    diag::SourceSpan const span{ .begin = diag::SourceLocation::fromRawOffset( from ), .length = to - from };
+    if ( std::optional<SymbolSite> const site = siteOf( sources, span ); site.has_value() )
+    {
+      pieces.push_back( *site );
+    }
+  };
+  std::uint32_t at = begin;
+  for ( auto const& [from, to] : inside )
+  {
+    piece( at, from );
+    at = std::max( at, to );
+  }
+  piece( at, end );
+  return pieces;
+}
+
 bool overlaps( MapEntry const& a, MapEntry const& b )
 {
   bool const addresses = a.begin < b.end && b.begin < a.end;
@@ -148,18 +207,19 @@ MemoryMap memoryMapOf( Patched const& build )
       }
     }
   }
-  auto const cellNamed = [&cellNames]( SectionRef where ) -> std::optional<std::string_view>
+  auto const nameOf = [&cellNames, modules]( SectionRef where ) -> std::string
   {
     auto const found = std::ranges::find_if( cellNames, [where]( auto const& one ) { return one.first == where; } );
-    return found == cellNames.end() ? std::nullopt : std::optional{ found->second };
+    return found != cellNames.end() ? std::string{ found->second }
+                                    : modules[where.module.value].displayNameOf( where.section );
   };
 
   map.pools = target.pools;
   map.bankSize = target.bankSize();
   map.unitWord = target.storageUnits.has_value() ? "bank" : "unit";
-  for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
+  for ( Phase const& phase : graph.phases )
   {
-    map.phases.push_back( MapPhase{ .name = graph.phases[phase].name.value_or( "phase" + std::to_string( phase ) ) } );
+    map.phases.push_back( MapPhase{ .name = phase.displayName() } );
   }
   map.banks.resize( target.unitCount );
 
@@ -170,38 +230,92 @@ MemoryMap memoryMapOf( Patched const& build )
     {
       SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
       Section const& section = one.sections()[index];
-      if ( !build.reachable().includes( where ) || !layout.isPlaced( where ) || !sizes.isKnown( where ) ||
-           sizes.sizeOfSection( where ) == 0 )
+      if ( !build.reachable().includes( where ) )
+      {
+        map.pruned.push_back( MapPruned{ .name = nameOf( where ),
+                                         .module = std::string{ one.name() },
+                                         .kind = kindOfSection( section ),
+                                         .text = textOf( build.sources(), one, where.section ) } );
+        continue;
+      }
+      if ( !layout.isPlaced( where ) || !sizes.isKnown( where ) || sizes.sizeOfSection( where ) == 0 )
       {
         continue;
       }
       std::uint32_t const size = sizes.sizeOfSection( where );
+      Residency const residency = heldAcrossOf( build, where );
+      bool const kept = residency != one.residency();
+      InitialisedExtent const initialised = sizes.initialisedExtentOf( where );
+
+      // Evaluated again from the declaration, as VerifyLayout does, rather
+      // than taken from the solver's Claims: what the text asked for.
+      auto const declared = [&]( syntax::Expression const* node ) -> std::optional<std::uint32_t>
+      {
+        if ( node == nullptr )
+        {
+          return std::nullopt;
+        }
+        std::optional<std::int64_t> const value =
+            declaredValueOf( build.sources(), build.symbols(), &build.charsets(), where.module, *node );
+        if ( !value.has_value() || *value < 0 || *value > std::int64_t{ 0xFFFFFFFF } )
+        {
+          return std::nullopt;
+        }
+        return static_cast<std::uint32_t>( *value );
+      };
+      std::optional<std::uint32_t> const alignment = declared( section.alignment() );
+      std::optional<std::uint32_t> const boundary = declared( section.boundary() );
+      std::string const then =
+          section.next().has_value() ? nameOf( SectionRef{ .module = where.module, .section = *section.next() } ) : "";
+      // `in` named Regions where it bound ranges, and then every name it
+      // wrote was a Region's — see Panes.cpp.
+      std::vector<std::string> regions;
+      if ( !section.regions().empty() && section.paneName().has_value() )
+      {
+        regions.emplace_back( build.sources().textOf( section.paneName()->span() ) );
+        for ( syntax::Token const& also : section.alsoIn() )
+        {
+          regions.emplace_back( build.sources().textOf( also.span() ) );
+        }
+      }
+
       auto const entryAt = [&]( std::optional<PhaseIndex> first, std::optional<PhaseIndex> last, std::uint32_t at )
       {
         MapEntry entry{ .where = where,
-                        .name = cellNamed( where )
-                                    .transform( []( std::string_view name ) { return std::string{ name }; } )
-                                    .value_or( one.displayNameOf( where.section, build.sources() ) ),
+                        .name = nameOf( where ),
                         .module = std::string{ one.name() },
                         .firstPhase = first,
                         .lastPhase = last,
                         .begin = at,
                         .end = at + size,
+                        .initialisedBegin = at + initialised.begin,
+                        .initialisedEnd = at + ( initialised.size() == 0 ? initialised.begin : initialised.end ),
+                        .pinned = section.pinnedAddress() != nullptr,
+                        .alignment = alignment,
+                        .boundary = boundary,
+                        .then = then,
+                        .regions = regions,
                         .placement = section.placement(),
                         .kind = kindOfSection( section ),
                         .root = section.isRoot(),
-                        .movable = section.isMovable(),
+                        .kept = kept,
+                        .hidden = build.storage().isHiddenAtLoad( where ),
                         .waits = {},
                         .liveFirst = std::nullopt,
                         .liveLast = std::nullopt,
                         .transform = {},
                         .shares = {},
                         .pane = {},
-                        .paneState = 0 };
+                        .paneState = 0,
+                        .units = {} };
         if ( section.pane().has_value() )
         {
           entry.pane = target.panes[section.pane()->value].name;
           entry.paneState = layout.stateOfPane( *section.pane() ).value_or( 0 );
+        }
+        if ( std::optional<UnitSetIndex> const set = section.unitSet(); set.has_value() )
+        {
+          entry.units = target.unitSets[set->value].name;
         }
         if ( storage.hasPayload( where ) && storage.isPlaced( where, 0 ) )
         {
@@ -220,17 +334,16 @@ MemoryMap memoryMapOf( Patched const& build )
         map.entries.push_back( std::move( entry ) );
       };
 
-      // Runs of consecutive Phases at one address: a Section that is not
-      // Movable is one run per gap in its Residency, a Movable one splits
-      // where it moved.
-      Residency const& residency = one.residency();
+      // Runs of consecutive Phases: one per gap in the Phases a Section is
+      // held across. Held and not only needed, so that what a Phase is said
+      // to take is what its memory holds.
       std::optional<PhaseIndex> first;
       std::uint32_t at = 0;
       for ( std::uint32_t phase = 0; phase < graph.phases.size(); ++phase )
       {
         PhaseIndex const here{ phase };
-        bool const present = residency.phaseCount() > phase && residency.includes( here );
-        std::uint32_t const address = present ? layout.addressIn( where, here ) : 0;
+        bool const present = residency.includes( here );
+        std::uint32_t const address = present ? layout.addressOf( where ) : 0;
         if ( first.has_value() && ( !present || address != at ) )
         {
           entryAt( first, PhaseIndex{ phase - 1 }, at );
@@ -310,11 +423,14 @@ MemoryMap memoryMapOf( Patched const& build )
       rom.emplace_back( entry.begin, entry.end );
       continue;
     }
-    if ( !entry.firstPhase.has_value() || !entry.lastPhase.has_value() )
+    // A unit set's Section is in the medium and in no pool of the CPU's, and
+    // a Pane's in its Window, which no pool holds either — and which every
+    // Pane of it shares, each in a Bank of its own.
+    if ( !entry.firstPhase.has_value() || !entry.lastPhase.has_value() || !entry.units.empty() || !entry.pane.empty() )
     {
       continue;
     }
-    bool const zeroPage = entry.placement == PlacementClass::ZEROPAGE;
+    bool const zeroPage = entry.placement == syntax::PlacementClass::ZEROPAGE;
     for ( std::uint32_t phase = firstOf( entry ); phase <= lastOf( entry ); ++phase )
     {
       if ( entry.kind == SectionKind::TEMPORARY )
@@ -346,8 +462,7 @@ MemoryMap memoryMapOf( Patched const& build )
     map.phases[phase].zeroPageUsed += covered( std::move( temporaries[phase].zeroPage ) );
     map.phases[phase].generalUsed += covered( std::move( temporaries[phase].general ) );
   }
-  // A Movable Section is not read-only and so is in no ROM pool, but the union
-  // is what the number means whatever the entries turn out to be.
+  // The union, since a Section held in several Phases is an entry per run.
   map.romUsed = covered( std::move( rom ) );
 
   // Storage: every Frame, and what every Bank came to.
@@ -455,6 +570,10 @@ std::string renderMapText( MemoryMap const& map )
       if ( !entry->pane.empty() )
       {
         line += fmt::format( "  in pane {} (state {})", entry->pane, entry->paneState );
+      }
+      if ( !entry->units.empty() )
+      {
+        line += fmt::format( "  in {}, linear", entry->units );
       }
       if ( !entry->shares.empty() )
       {

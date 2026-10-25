@@ -1,6 +1,7 @@
 #include "nga/model/Section.hpp"
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <utility>
 #include <variant>
@@ -8,30 +9,30 @@
 namespace nga::model
 {
 
-std::string spellingOf( DeclaredType const& type )
+std::optional<SectionAttribute> sectionAttributeNamed( std::string_view text )
 {
-  switch ( type.kind )
-  {
-  case DeclaredType::Kind::I8:
-    return "i8";
-  case DeclaredType::Kind::U16:
-    return "u16";
-  case DeclaredType::Kind::I16:
-    return "i16";
-  case DeclaredType::Kind::BOOL:
-    return "bool";
-  case DeclaredType::Kind::BYTES:
-    return "u8[" + std::to_string( type.count ) + "]";
-  case DeclaredType::Kind::U8:
-    break;
-  }
-  return "u8";
+  static constexpr std::array<std::pair<std::string_view, SectionAttribute>, 7> NAMES{ {
+      { "runtimeSectionAddress", SectionAttribute::RUNTIME_SECTION_ADDRESS },
+      { "runtimeSectionSize", SectionAttribute::RUNTIME_SECTION_SIZE },
+      { "resident", SectionAttribute::RESIDENT },
+      { "linearSectionAddress", SectionAttribute::LINEAR_SECTION_ADDRESS },
+      { "linearFamilyAddress", SectionAttribute::LINEAR_FAMILY_ADDRESS },
+      { "storagePayloadAddress", SectionAttribute::STORAGE_PAYLOAD_ADDRESS },
+      { "storagePayloadSize", SectionAttribute::STORAGE_PAYLOAD_SIZE },
+  } };
+  auto const found = std::ranges::find( NAMES, text, &std::pair<std::string_view, SectionAttribute>::first );
+  return found == NAMES.end() ? std::nullopt : std::optional{ found->second };
 }
 
-void Section::markTaking( ChunkIndex chunk, Taking taking, std::vector<syntax::Token> followers )
+void Section::markTaking( ChunkIndex chunk, syntax::Taking taking, std::vector<syntax::Token> followers )
 {
   mChunks[chunk.value].taking = taking;
   mChunks[chunk.value].followers = std::move( followers );
+}
+
+void Section::markAlternatives( ChunkIndex chunk, std::vector<syntax::Token> alternatives )
+{
+  mChunks[chunk.value].alternatives = std::move( alternatives );
 }
 
 ChunkIndex Section::appendChunk( ChunkContent content, diag::SourceSpan span, std::vector<syntax::ExpressionPtr> items )

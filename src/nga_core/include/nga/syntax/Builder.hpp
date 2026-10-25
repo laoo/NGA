@@ -1,12 +1,9 @@
 #pragma once
 
 #include "nga/diag/SourceLocation.hpp"
-#include "nga/model/Binding.hpp"
-#include "nga/model/Charset.hpp"
-#include "nga/model/Chunk.hpp"
-#include "nga/model/PlacementClass.hpp"
 #include "nga/syntax/Expression.hpp"
 #include "nga/syntax/Operand.hpp"
+#include "nga/syntax/Statement.hpp"
 #include "nga/syntax/Token.hpp"
 
 #include <optional>
@@ -22,7 +19,7 @@ namespace nga::syntax
 /// same rule as every other operand — see docs/spec/syntax.md.
 struct SectionAttributes
 {
-  model::PlacementClass placement = model::PlacementClass::ABSOLUTE;
+  PlacementClass placement = PlacementClass::ABSOLUTE;
 
   /// Null unless the placement was written `... at EXPRESSION`.
   ExpressionPtr pinnedAddress;
@@ -36,8 +33,11 @@ struct SectionAttributes
   ExpressionPtr boundary;
 
   /// Written `, in NAME`: the Pane the Section is in, which the Project
-  /// declares — see docs/decisions/0054-panes.md.
+  /// declares — see docs/decisions/0054-panes.md — or a Region it stands in;
+  /// and each further `, in NAME`, which names another Region it may stand in
+  /// instead — see docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.
   std::optional<Token> pane;
+  std::vector<Token> alsoIn{};
 
   /// Written `, under NAME`, on a Proc: the Proc is in `fixed`, runs while
   /// the Pane is shown, and shows it again after every `.with` on the Pane's
@@ -48,10 +48,6 @@ struct SectionAttributes
   /// Proc named, a function type whose members it joins — see
   /// docs/decisions/0065-handlers.md.
   std::optional<Token> as;
-
-  /// Written `, movable`: the Section may stand at a different address in
-  /// each Phase. See the glossary.
-  bool movable = false;
 
   /// Written `, root`: the hardware reaches the Section with no Reference
   /// from any Chunk, so Prune keeps it. See the glossary.
@@ -152,13 +148,16 @@ public:
   /// Label at its start. The name arrives here and not through `defineLabel`,
   /// because it names the new Section's start and not the next Chunk of the
   /// current one.
-  virtual void
-  reserveTemporary( Token name, ExpressionPtr size, model::PlacementClass placement, diag::SourceSpan span ) = 0;
+  virtual void reserveTemporary( Token name, ExpressionPtr size, PlacementClass placement, diag::SourceSpan span ) = 0;
 
   /// `.transition NAME`: enters the Phase named, and never returns. Whether the
   /// name is a Phase is the Project's to say, at the end of Assemble — see
   /// docs/decisions/0019-transition-mechanism.md.
   virtual void transition( Token phase, diag::SourceSpan span, bool fast ) = 0;
+
+  /// `.release NAME`: the Holder named holds nothing from here — see
+  /// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  virtual void release( Token holder, diag::SourceSpan span ) = 0;
 
   /// `.dispatch TARGET [, TARGET]...`: control goes to one of the positions
   /// named, chosen by the value in `A`. Written over several lines it is one
@@ -218,8 +217,7 @@ public:
 
   /// `.slot NAME, binding [, placement]`: a Symbol with one live definition
   /// per Phase, reached through a Cell. See docs/decisions/0031-slots.md.
-  virtual void
-  declareSlot( Token name, model::Binding binding, model::PlacementClass placement, diag::SourceSpan span ) = 0;
+  virtual void declareSlot( Token name, Binding binding, PlacementClass placement, diag::SourceSpan span ) = 0;
 
   /// `.implements SLOT, SYMBOL`: this Module's SYMBOL fills SLOT wherever the
   /// Module is present.
@@ -230,8 +228,8 @@ public:
   /// than statements: the grammar reads it to its closer before anything else
   /// can happen, so there is no open construct for an implementation to track.
   virtual void declareCharset( Token name,
-                               std::optional<model::CharsetBase> base,
-                               std::vector<model::CharsetEntry> entries,
+                               std::optional<CharsetBase> base,
+                               std::vector<CharsetEntry> entries,
                                diag::SourceSpan span ) = 0;
 
   /// A condition checked after Place. Its expression is the one that cannot be
@@ -251,10 +249,10 @@ public:
   virtual void declareDriverRole( Token role, std::vector<Token> names, diag::SourceSpan span ) = 0;
 
   /// `.with NAME`, `.with NAME, x` or `.with NAME = STATE`: the statement
-  /// that follows runs with what NAME names shown, and the Window's base
-  /// shown again after it. Held until that statement arrives; whether NAME
+  /// that follows runs with what NAME names shown, and the Window is left
+  /// showing it, unless the code runs under a Pane of it. Held until that statement arrives; whether NAME
   /// is a Pane, a family or a Window is not a question the text settles.
-  virtual void with( model::WithForm form, ExpressionPtr what, std::optional<Token> state, diag::SourceSpan span ) = 0;
+  virtual void with( WithForm form, ExpressionPtr what, std::optional<Token> state, diag::SourceSpan span ) = 0;
 
   /// Nothing the pending `.with` lines could apply to followed, which has
   /// been reported: they are dropped.
@@ -264,11 +262,21 @@ public:
   /// the line below takes — this Section alone, or the hardware — see
   /// docs/decisions/0060-own.md and docs/decisions/0061-root-at-the-taking.md.
   /// Held until that statement arrives.
-  virtual void taking( model::Taking kind, std::vector<Token> followers, diag::SourceSpan span ) = 0;
+  virtual void taking( Taking kind, std::vector<Token> followers, diag::SourceSpan span ) = 0;
 
   /// Nothing the pending `.own` or `.root` could apply to followed, which
   /// has been reported: it is dropped.
   virtual void dropTaking() = 0;
+
+  /// `.alt MNEMONIC [, MNEMONIC]...`: the opcodes the instruction on the line
+  /// below may be given at run time instead of its own — see
+  /// docs/decisions/0237-an-instruction-declares-the-opcodes-it-may-be-given.md.
+  /// Held until that statement arrives; several lines join.
+  virtual void alternatives( std::vector<Token> mnemonics, diag::SourceSpan span ) = 0;
+
+  /// Nothing the pending `.alt` could apply to followed, which has been
+  /// reported: it is dropped.
+  virtual void dropAlternatives() = 0;
 
   /// `.declare arg` or `.declare ret`: what the `.ztemp` on the line below
   /// is to the Proc that holds it — one of its arguments, in the order the
@@ -278,10 +286,13 @@ public:
   /// are, `place`, a register's letter or `m` for each from the low one, and
   /// where no byte is `m` there is no `.ztemp` to wait for — see
   /// docs/decisions/0145-an-argument-in-a-register.md.
-  virtual void declare( model::Declaring what,
-                        std::optional<model::DeclaredType> type,
-                        std::string place,
-                        diag::SourceSpan span ) = 0;
+  virtual void
+  declare( Declaring what, std::optional<DeclaredType> type, std::string place, diag::SourceSpan span ) = 0;
+
+  /// `.declare ret PROC.NAME`: the result is the one another Proc declares,
+  /// read where that Proc leaves it, and no byte of this one — see
+  /// docs/decisions/0278-a-result-may-be-another-procs-result.md.
+  virtual void declareResultElsewhere( std::string name, diag::SourceSpan nameSpan, diag::SourceSpan span ) = 0;
 
   /// No `.ztemp` followed the pending `.declare`, which has been reported:
   /// it is dropped.

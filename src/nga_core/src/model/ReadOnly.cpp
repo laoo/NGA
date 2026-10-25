@@ -1,9 +1,10 @@
 #include "nga/model/ReadOnly.hpp"
 
 #include "nga/model/Evaluate.hpp"
-#include "nga/model/PlacementClass.hpp"
 #include "nga/model/Prune.hpp"
 #include "nga/model/References.hpp"
+#include "nga/model/TypeCheck.hpp"
+#include "nga/syntax/Statement.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -68,6 +69,10 @@ public:
       return;
     }
     add( target );
+    if ( std::holds_alternative<LabelPosition>( mSymbols->at( target ).value ) )
+    {
+      labels.push_back( target );
+    }
   }
 
   void localReference( LabelPosition target ) override
@@ -76,6 +81,9 @@ public:
   }
 
   std::vector<SectionRef> reached;
+
+  /// The Labels named directly, which a taking may name a byte of code by.
+  std::vector<SymbolRef> labels;
 
 private:
   void add( SymbolRef target )
@@ -151,6 +159,23 @@ ReadOnly readOnlySections( Pruned const& build, diag::DiagnosticSink& sink )
         for ( syntax::ExpressionPtr const& item : section.itemsOf( chunk ) )
         {
           walkReferences( symbols, sources, module, *item, named );
+          // The address of a byte of code taken to store through is a write
+          // the tool sees here and nowhere else — see
+          // docs/decisions/0238-the-address-of-a-byte-the-program-may-write-is-data.md.
+          if ( kind == ReferenceKind::ESCAPE && chunk.taking == syntax::Taking::ESCAPE )
+          {
+            for ( SymbolRef const label : named.labels )
+            {
+              if ( namesSettableByte( build, module, label, *item ) )
+              {
+                auto const& position = std::get<LabelPosition>( symbols.at( label ).value );
+                note( SectionRef{ .module = label.module, .section = position.section },
+                      ReferenceKind::WRITE,
+                      chunk.span );
+              }
+            }
+          }
+          named.labels.clear();
         }
         for ( SectionRef const target : named.reached )
         {
@@ -177,7 +202,13 @@ ReadOnly readOnlySections( Pruned const& build, diag::DiagnosticSink& sink )
     }
   }
 
-  ReadOnly result{ modules };
+  // Each Section's answer first: nothing where it may be written, and
+  // whether it stands in ROM where it is read-only.
+  std::vector<std::vector<std::optional<bool>>> inRomOf( modules.size() );
+  for ( std::uint32_t index = 0; index < modules.size(); ++index )
+  {
+    inRomOf[index].resize( symbols.moduleAt( ModuleIndex{ index } ).sections().size() );
+  }
   for ( std::uint32_t index = 0; index < modules.size(); ++index )
   {
     ModuleIndex const module{ index };
@@ -195,7 +226,7 @@ ReadOnly readOnlySections( Pruned const& build, diag::DiagnosticSink& sink )
         diag::SourceSpan const& write = *found.writtenAt;
         sink.add( diag::diagnostic( diag::DiagnosticId::READONLY_WRITTEN )
                       .at( write.begin, write.length )
-                      .arg( "section", one.displayNameOf( where.section, sources ) )
+                      .arg( "section", one.displayNameOf( where.section ) )
                       .note( diag::diagnostic( diag::DiagnosticId::READONLY_DECLARED_HERE )
                                  .at( section.span().begin, section.span().length ) ) );
         continue;
@@ -208,11 +239,11 @@ ReadOnly readOnlySections( Pruned const& build, diag::DiagnosticSink& sink )
       {
         sink.add( diag::diagnostic( diag::DiagnosticId::READONLY_WITHOUT_BYTES )
                       .at( section.span().begin, section.span().length )
-                      .arg( "section", one.displayNameOf( where.section, sources ) ) );
+                      .arg( "section", one.displayNameOf( where.section ) ) );
         continue;
       }
-      if ( found.writtenAt.has_value() || !hasBytes || section.isTemporary() || section.isMovable() ||
-           section.placement() == PlacementClass::ZEROPAGE )
+      if ( found.writtenAt.has_value() || !hasBytes || section.isTemporary() ||
+           section.placement() == syntax::PlacementClass::ZEROPAGE )
       {
         continue;
       }
@@ -237,7 +268,54 @@ ReadOnly readOnlySections( Pruned const& build, diag::DiagnosticSink& sink )
         inRom = address.has_value() && *address >= 0 &&
                 inPool( build.target().pools.readOnly, static_cast<std::uint32_t>( *address ) );
       }
-      result.mark( where, inRom );
+      inRomOf[index][at] = inRom;
+    }
+  }
+
+  // A `then` chain stands in one place, each Proc where the one before it
+  // ends, so its links stand in ROM together or not at all: one that may be
+  // written, or one in RAM, keeps every other out of ROM too. A pin decides
+  // for itself, as above, and a chain split by one is the author's.
+  for ( bool changed = true; changed; )
+  {
+    changed = false;
+    for ( std::uint32_t index = 0; index < modules.size(); ++index )
+    {
+      Module const& one = symbols.moduleAt( ModuleIndex{ index } );
+      for ( std::uint32_t at = 0; at < one.sections().size(); ++at )
+      {
+        std::optional<SectionIndex> const next = one.sectionAt( SectionIndex{ at } ).next();
+        if ( !next.has_value() )
+        {
+          continue;
+        }
+        std::optional<bool>& before = inRomOf[index][at];
+        std::optional<bool>& after = inRomOf[index][next->value];
+        if ( before == std::optional{ true } && after == std::optional{ true } )
+        {
+          continue;
+        }
+        for ( auto const [link, section] : { std::pair{ &before, at }, std::pair{ &after, next->value } } )
+        {
+          if ( *link == std::optional{ true } && one.sectionAt( SectionIndex{ section } ).pinnedAddress() == nullptr )
+          {
+            *link = false;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  ReadOnly result{ modules };
+  for ( std::uint32_t index = 0; index < modules.size(); ++index )
+  {
+    for ( std::uint32_t at = 0; at < inRomOf[index].size(); ++at )
+    {
+      if ( inRomOf[index][at].has_value() )
+      {
+        result.mark( SectionRef{ .module = ModuleIndex{ index }, .section = SectionIndex{ at } }, *inRomOf[index][at] );
+      }
     }
   }
   return result;

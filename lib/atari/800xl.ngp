@@ -1,8 +1,9 @@
-; An Atari 800XL with a double-density disk drive: sixty-four kilobytes and no
-; banking, so storage is the diskette's own sectors, which nothing maps into
-; memory. There is no unit set and no Window for that reason, and the driver
-; shows nothing. The Container is the `.atr`, a bootable diskette whose first
-; three sectors the tool writes itself.
+; An Atari 800XL: sixty-four kilobytes and no banking, so there is no unit set
+; and no Window. It declares no storage. A program that loads anything during a
+; run includes `atari/disk.ngp` beside this, which makes the diskette's sectors
+; its storage. Without it, every Section with bytes is written when the program
+; loads and stays for as long as a Phase still to come needs it — see
+; docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
 target {
   cpu "6502"
 
@@ -10,14 +11,6 @@ target {
   ; is refused here rather than at the writer.
   containers atr, xex
 }
-
-; The diskette's sectors, from the fourth: the boot record has the first three
-; and the load image whatever is left after the storage a program uses. A unit
-; is 256 sectors, which is the one size the `.atr` takes, and three of them
-; reach past the 180 KB a double-density diskette holds. It is a ceiling and
-; not a reservation: what the image costs is what the program's Payloads came
-; to.
-storage { units 3 size 65536 }
 
 target {
   region ram    $0000 .. $06FF  ram
@@ -27,15 +20,34 @@ target {
   region        $D800 .. $FFFF  ram
   region stack  $0100 .. $01FF  reserved
   region io     $D000 .. $D7FF  register
+  ; The RAM the OS ROM covers, named so that a Section may say `in underOsLow`
+  ; and stand there: only in a Phase without `osrom`, or hidden under it where
+  ; nothing needs it — see docs/decisions/0243-a-section-may-name-the-region-it-stands-in.md.
+  region underOsLow   $C000 .. $CFFF  ram
+  region underOsHigh  $D800 .. $FFFF  ram
 
   ; A Project that wants more of the hardware by name declares it, as it
   ; declares the memory its DOS holds.
   register PORTB  $D301
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`: what it holds stays where it is for that long. See
+  ; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  holder dlist                          ; ANTIC's display list: SDLSTL, or DLISTL
+  holder dli                            ; the display list interrupt: VDSLST
+  holder vbi                            ; the immediate vertical blank: VVBLKI
+  holder vbd                            ; the deferred vertical blank: VVBLKD
+  holder nmi                            ; $FFFA, where the OS ROM is switched out
+  holder irq                            ; $FFFE, where the OS ROM is switched out
+  holder chbase                         ; the character set: CHBAS, or CHBASE
+  holder pmbase                         ; the player-missile memory: PMBASE
+  holder dosini                         ; DOSINI: called once a boot returns, and on every reset
 }
 
-; The OS, the driver for a diskette and the decoders the tool ships, listed as
-; a file of the Project's own would be. Every Transition calls the driver and
-; the decoders, so they are resident, and the OS is resident because the driver
-; calls into it; a decoder nothing uses is dropped.
-modules { "atari/os.asm"  "atari/charsets.asm"  "atari/disk.asm"  "stream/zx0.asm" }
-resident { os, charsets, disk, zx0 }
+; The OS and the character sets, listed as a file of the Project's own would be.
+modules {
+  "atari/osram.asm"  "atari/osrom.asm"  "atari/mathpack.asm"
+  "atari/charsets.asm"
+}
+resident { osram, osrom, mathpack, charsets }

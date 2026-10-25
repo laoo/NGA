@@ -36,6 +36,12 @@ struct Format
 {
   std::string_view name;
   std::vector<std::uint8_t> ( *encode )( std::span<std::uint8_t const> );
+
+  /// How far past the end of what a stored form decodes to the form has to end
+  /// for its decoder to turn it back in place, reading forward while the output
+  /// overtakes it; nothing where the form does not read to its end. See
+  /// docs/decisions/0235-a-xex-decodes-in-place-while-it-loads.md.
+  std::optional<std::uint32_t> ( *margin )( std::span<std::uint8_t const> );
 };
 
 [[nodiscard]] std::span<Format const> formats();
@@ -45,14 +51,22 @@ struct Format
 
 /// The end of Assemble for a Project with Transitions: the dispatcher, a
 /// Module of its own assembled from source once every decoder and the driver
-/// are known — the driver's roles as `ngaOpen`, `ngaRead`, `ngaMap` and
-/// `ngaRestore`, and a compare and a `jmp` per number, in the order the
+/// are known — the driver's roles as `ngaOpen`, `ngaRead` and `ngaMap`, and
+/// a compare and a `jmp` per number, in the order the
 /// Project's `decoders` list — resident, outside the Window, and named in
 /// every Phase's needs.
 void addTransformDispatcher( diag::SourceManager& sources,
                              Project& project,
                              std::vector<Module>& modules,
                              diag::DiagnosticSink& sink );
+
+/// The end of Assemble for a `.xex` without storage that has a Pane's Section
+/// with bytes: the glue the Container fills the Pane's Bank through, which a
+/// program with storage has in its dispatcher.
+void addUnitsGlue( diag::SourceManager& sources,
+                   Project& project,
+                   std::vector<Module>& modules,
+                   diag::DiagnosticSink& sink );
 
 /// The end of Assemble for a driver that declares `init`: `ngaInit`, a Module
 /// of its own holding that one macro, so that a Container has an address to
@@ -64,6 +78,16 @@ void addDriverInit( diag::SourceManager& sources,
                     Project& project,
                     std::vector<Module>& modules,
                     diag::DiagnosticSink& sink );
+
+/// The stub a program that can return is started by, where the driver declares
+/// `finalize` and the Container is one whose program returns — a `.xex` to its
+/// DOS, a `.prg` to BASIC: `nga.run`, present in the entry Phase alone, and
+/// `nga.finish`, resident, since the Phase the program returns from may be any.
+/// See docs/decisions/0229-no-window-has-a-base.md.
+void addRunStub( diag::SourceManager& sources,
+                 Project& project,
+                 std::vector<Module>& modules,
+                 diag::DiagnosticSink& sink );
 
 /// The end of Assemble for the decoders and the requests: numbers every
 /// `.transform` the Modules declared — `copy` first and required where a

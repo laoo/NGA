@@ -23,11 +23,6 @@ struct Candidate
   std::uint32_t bytes = 1;
 };
 
-std::string baseOf( std::string const& name )
-{
-  return name.substr( 0, name.find( '+' ) );
-}
-
 std::uint32_t offsetIn( std::string const& name )
 {
   std::string::size_type const plus = name.find( '+' );
@@ -214,7 +209,7 @@ bool addressTaken( ir::Function const& function, std::string const& name )
                      [&]( ir::Operand const& value )
                      {
                        auto const* const constant = std::get_if<ir::Constant>( &value );
-                       if ( constant != nullptr && !constant->name.empty() && baseOf( constant->name ) == name )
+                       if ( constant != nullptr && !constant->name.empty() && ir::baseOf( constant->name ) == name )
                        {
                          taken = true;
                        }
@@ -274,10 +269,11 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
 
     // A bit per byte of each candidate, so that a pair is answered a byte at a
     // time and a program that writes one byte and reads the other is told.
-    auto const bitOf = [&candidates]( std::string const& spelled ) -> std::optional<std::uint32_t>
+    // As many as the candidates have bytes, which nothing bounds.
+    auto const bitOf = [&candidates]( std::string const& spelled ) -> std::optional<std::size_t>
     {
-      std::string const base = baseOf( spelled );
-      std::uint32_t bit = 0;
+      std::string const base = ir::baseOf( spelled );
+      std::size_t bit = 0;
       for ( Candidate const& one : candidates )
       {
         if ( one.name == base )
@@ -289,14 +285,17 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
       }
       return std::nullopt;
     };
-    std::uint32_t everyBit = 0;
+    std::size_t bits = 0;
     for ( Candidate const& one : candidates )
     {
-      everyBit = ( everyBit << one.bytes ) | ( ( 1U << one.bytes ) - 1U );
+      bits += one.bytes;
     }
+    using Bytes = std::vector<bool>;
+    Bytes const none( bits, false );
+    Bytes const every( bits, true );
 
     std::vector<bool> const reachable = reachableFrom( *function );
-    std::vector<std::uint32_t> writes( function->blocks.size(), 0 );
+    std::vector<Bytes> writes( function->blocks.size(), none );
     for ( std::size_t index = 0; index < function->blocks.size(); ++index )
     {
       for ( ir::Instruction const& instruction : function->blocks[index].instructions )
@@ -306,9 +305,9 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
             []( std::string const& ) {},
             [&]( std::string const& name )
             {
-              if ( std::optional<std::uint32_t> const bit = bitOf( name ) )
+              if ( std::optional<std::size_t> const bit = bitOf( name ) )
               {
-                writes[index] |= 1U << *bit;
+                writes[index][*bit] = true;
               }
             } );
       }
@@ -317,52 +316,49 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
     // Which bytes every path from the entry has written, block by block: the
     // intersection over the predecessors, to a fixed point. Unreachable blocks
     // stand at every byte written, so that code no call enters reports nothing.
-    std::vector<std::vector<std::uint32_t>> predecessors( function->blocks.size() );
-    for ( std::uint32_t index = 0; index < function->blocks.size(); ++index )
-    {
-      for ( std::uint32_t const next : ir::successorsOf( function->blocks[index].terminator ) )
-      {
-        if ( next < predecessors.size() )
-        {
-          predecessors[next].push_back( index );
-        }
-      }
-    }
-    std::vector<std::uint32_t> written( function->blocks.size(), everyBit );
-    std::vector<std::uint32_t> entering( function->blocks.size(), everyBit );
-    entering[0] = 0;
+    std::vector<std::vector<std::uint32_t>> const predecessors = ir::predecessorsOf( function->blocks );
+    std::vector<Bytes> written( function->blocks.size(), every );
+    std::vector<Bytes> entering( function->blocks.size(), every );
+    entering[0] = none;
     for ( bool changed = true; changed; )
     {
       changed = false;
       for ( std::size_t index = 0; index < function->blocks.size(); ++index )
       {
-        std::uint32_t before = index == 0 ? 0U : everyBit;
+        Bytes before = index == 0 ? none : every;
         if ( index != 0 )
         {
           for ( std::uint32_t const previous : predecessors[index] )
           {
-            before &= written[previous];
+            for ( std::size_t bit = 0; bit < bits; ++bit )
+            {
+              before[bit] = before[bit] && written[previous][bit];
+            }
           }
         }
-        std::uint32_t const after = before | writes[index];
+        Bytes after = before;
+        for ( std::size_t bit = 0; bit < bits; ++bit )
+        {
+          after[bit] = after[bit] || writes[index][bit];
+        }
         if ( before != entering[index] || after != written[index] )
         {
-          entering[index] = before;
-          written[index] = after;
+          entering[index] = std::move( before );
+          written[index] = std::move( after );
           changed = true;
         }
       }
     }
 
     std::set<std::string> reported;
-    auto const say = [&]( std::string const& name, diag::SourceLocation where, std::uint32_t held )
+    auto const say = [&]( std::string const& name, diag::SourceLocation where, Bytes const& held )
     {
-      std::optional<std::uint32_t> const bit = bitOf( name );
-      if ( !bit.has_value() || ( held & ( 1U << *bit ) ) != 0 )
+      std::optional<std::size_t> const bit = bitOf( name );
+      if ( !bit.has_value() || held[*bit] )
       {
         return;
       }
-      std::string const base = baseOf( name );
+      std::string const base = ir::baseOf( name );
       if ( !reported.insert( base ).second )
       {
         return;
@@ -380,7 +376,7 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
       {
         continue;
       }
-      std::uint32_t held = entering[index];
+      Bytes held = entering[index];
       for ( ir::Instruction const& instruction : function->blocks[index].instructions )
       {
         visitBytes(
@@ -388,9 +384,9 @@ void checkStaticsAreAssigned( ir::Unit const& unit, diag::DiagnosticSink& sink )
             [&]( std::string const& name ) { say( name, instruction.at, held ); },
             [&]( std::string const& name )
             {
-              if ( std::optional<std::uint32_t> const bit = bitOf( name ) )
+              if ( std::optional<std::size_t> const bit = bitOf( name ) )
               {
-                held |= 1U << *bit;
+                held[*bit] = true;
               }
             } );
       }

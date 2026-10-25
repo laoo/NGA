@@ -31,6 +31,8 @@
 
 #include "nga/model/Zx0.hpp"
 
+#include "nga/model/InPlace.hpp"
+
 #include <algorithm>
 #include <cstddef>
 
@@ -378,6 +380,128 @@ std::vector<std::uint8_t> encodeZx0( std::span<std::uint8_t const> from )
   out.bit( true );
   out.gamma( 256, true );
   return std::move( out ).take();
+}
+
+namespace
+{
+
+/// The stream read forward from a form, decoded as far as what it writes, and
+/// counted against what it reads by `InPlace`.
+class InPlaceReader
+{
+public:
+  explicit InPlaceReader( std::span<std::uint8_t const> form ) : mStream( form ) {}
+
+  /// The decode, which leaves `failed` set where the form is not one.
+  void decode()
+  {
+    std::uint32_t lastOffset = 1;
+    byte();
+    byte();
+    while ( !mFailed )
+    {
+      std::uint32_t length = gamma( false );
+      for ( std::uint32_t i = 0; i < length && !mFailed; ++i )
+      {
+        byte();
+        mStream.wrote( 1 );
+      }
+      if ( !bit() )
+      {
+        length = gamma( false );
+        copy( lastOffset, length );
+        if ( !bit() )
+        {
+          continue;
+        }
+      }
+      while ( !mFailed )
+      {
+        lastOffset = gamma( true );
+        if ( lastOffset == 256 )
+        {
+          return;
+        }
+        lastOffset = ( lastOffset * 128 ) - ( byte() >> 1U );
+        mBacktrack = true;
+        length = gamma( false ) + 1;
+        copy( lastOffset, length );
+        if ( !bit() )
+        {
+          break;
+        }
+      }
+    }
+  }
+
+  [[nodiscard]] std::optional<std::uint32_t> margin() const
+  {
+    return mFailed ? std::nullopt : mStream.margin();
+  }
+
+private:
+  std::uint8_t byte()
+  {
+    if ( !mStream.more() )
+    {
+      mFailed = true;
+      return 0;
+    }
+    mLast = mStream.read();
+    return mLast;
+  }
+
+  bool bit()
+  {
+    if ( mBacktrack )
+    {
+      mBacktrack = false;
+      return ( mLast & 1U ) != 0;
+    }
+    mMask >>= 1U;
+    if ( mMask == 0 )
+    {
+      mMask = 128;
+      mBits = byte();
+    }
+    return ( mBits & mMask ) != 0;
+  }
+
+  std::uint32_t gamma( bool inverted )
+  {
+    std::uint32_t value = 1;
+    while ( !bit() && !mFailed )
+    {
+      value = ( value << 1U ) | ( bit() != inverted ? 1U : 0U );
+    }
+    return value;
+  }
+
+  void copy( std::uint32_t offset, std::uint32_t length )
+  {
+    if ( offset == 0 || offset > mStream.written() )
+    {
+      mFailed = true;
+      return;
+    }
+    mStream.wrote( length );
+  }
+
+  InPlace mStream;
+  std::uint8_t mLast = 0;
+  std::uint8_t mBits = 0;
+  std::uint32_t mMask = 0;
+  bool mBacktrack = false;
+  bool mFailed = false;
+};
+
+} // namespace
+
+std::optional<std::uint32_t> zx0InPlaceMargin( std::span<std::uint8_t const> form )
+{
+  InPlaceReader reader{ form };
+  reader.decode();
+  return reader.margin();
 }
 
 } // namespace nga::model

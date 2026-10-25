@@ -3,6 +3,7 @@
 #include "nga/diag/SourceLocation.hpp"
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace nga::c
@@ -160,6 +161,14 @@ enum class Keyword : std::uint8_t
 /// The keyword an identifier's spelling is, or NONE. C23's alternative
 /// spellings — `_Bool`, `_Alignas` and the rest — are the keyword they spell.
 Keyword keywordOf( std::string_view spelling );
+
+/// The name an identifier's text spells. A qualified one, `a::b`, is one
+/// token and the name `a.b` the assembler exports, whatever stands between
+/// its parts — see docs/decisions/0230-c-names-a-namespace-with-two-colons.md.
+std::string nameSpelled( std::string_view text );
+
+/// Whether an identifier's text is a qualified name, `a::b`.
+bool isQualified( std::string_view text );
 
 /// Position and length rather than text, as syntax::Token is: the text is
 /// recoverable from the SourceManager.

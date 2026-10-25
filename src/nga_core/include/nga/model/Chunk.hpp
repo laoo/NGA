@@ -1,9 +1,9 @@
 #pragma once
 
 #include "nga/diag/SourceLocation.hpp"
-#include "nga/model/Binding.hpp"
-#include "nga/model/Project.hpp"
+#include "nga/model/Indices.hpp"
 #include "nga/syntax/Operand.hpp"
+#include "nga/syntax/Statement.hpp"
 #include "nga/syntax/Token.hpp"
 
 #include <cstdint>
@@ -54,32 +54,10 @@ struct InstructionContent
   syntax::OperandShape shape = syntax::OperandShape::NONE;
 };
 
-/// A macro use: `NAME [expr, ...]`, its arguments the Chunk's items. Expand
-/// instantiates the macro's body for those arguments, and the instructions
-/// and data that come of it are the Chunk's **inner** Chunks,
-/// kept by the Section beside the arena their expressions live in. One
-/// statement, one Chunk, with an inside nothing outside can name: a nested
-/// use inside the body is expanded in place, so the inside is flat. See
-/// docs/decisions/0043-macros.md.
-/// What a `.with` wrote, and which of the two Chunks it became: the one
-/// before the statement, showing what it names, or the one after, showing
-/// again what was shown where the statement stands — the Section's own
-/// Pane, or the Window's base. See docs/decisions/0055-with.md and
-/// 0063-with-shows-again-what-was-shown.md.
-enum class WithForm : std::uint8_t
-{
-  NONE,
-
-  /// `.with PANE`: the state the solver gave the Pane.
-  SHOW,
-
-  /// `.with FAMILY, x` or `.with WINDOW, x`: the state whose index is in X.
-  AT,
-
-  /// `.with WINDOW = STATE`: a named state of the Window.
-  STATE,
-};
-
+/// Which of the two Chunks a `.with` became: the one before the statement,
+/// showing what it names, or the one after, showing again the Pane a Proc
+/// runs under where it is one of that Window, and nothing anywhere else. See
+/// docs/decisions/0068-with-shows-again-what-was-shown.md.
 enum class WithSide : std::uint8_t
 {
   NONE,
@@ -87,6 +65,13 @@ enum class WithSide : std::uint8_t
   LEAVE,
 };
 
+/// A macro use: `NAME [expr, ...]`, its arguments the Chunk's items. Expand
+/// instantiates the macro's body for those arguments, and the instructions
+/// and data that come of it are the Chunk's **inner** Chunks,
+/// kept by the Section beside the arena their expressions live in. One
+/// statement, one Chunk, with an inside nothing outside can name: a nested
+/// use inside the body is expanded in place, so the inside is flat. See
+/// docs/decisions/0043-macros.md.
 struct MacroUseContent
 {
   /// The Namespaces before the name, where the use was qualified: `nga`,
@@ -99,7 +84,7 @@ struct MacroUseContent
   /// then the directive's token, the first item names the Pane, family or
   /// Window, and Expand chooses the driver's `show` or `showAt` for its
   /// Window and the argument the side needs.
-  WithForm form = WithForm::NONE;
+  syntax::WithForm form = syntax::WithForm::NONE;
   WithSide side = WithSide::NONE;
 
   /// The named state after `=`, for STATE; a state is no Symbol, so it is
@@ -160,6 +145,17 @@ struct TransitionCellContent
 {
 };
 
+/// Where a program without storage enters a Phase: a jump from every
+/// `.transition` into it lands here, and it does what a Frame would have said
+/// — the ROMs the Phase needs selected, the Slots' Cells written, the Phase's
+/// number put in the Cell — and jumps to the Phase's entry. Code, written by
+/// Patch as a Frame is, since what it writes is addresses only the Layout
+/// knows. See docs/decisions/0234-without-storage-bytes-stay-where-they-are-live.md.
+struct PhaseEntryContent
+{
+  PhaseIndex phase;
+};
+
 /// A Slot's Cell: what a Reference to the Slot reaches, rewritten by the
 /// routine on every edge, and holding the entry Phase's Implementation when
 /// the program starts. Names the Slot's Symbol by position, since a Symbol
@@ -168,7 +164,7 @@ struct SlotCellContent
 {
   ModuleIndex module;
   std::uint32_t symbol = 0;
-  Binding binding = Binding::POINTER;
+  syntax::Binding binding = syntax::Binding::POINTER;
 };
 
 /// `.dispatch TARGET [, TARGET]...`: control goes to one of the positions
@@ -185,6 +181,14 @@ struct DispatchContent
 {
 };
 
+/// `.release NAME`: the Holder named holds nothing from here. Emits nothing;
+/// the Trace reads it — see
+/// docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+struct ReleaseContent
+{
+  syntax::Token holder;
+};
+
 using ChunkContent = std::variant<InstructionContent,
                                   MacroUseContent,
                                   DataContent,
@@ -192,74 +196,9 @@ using ChunkContent = std::variant<InstructionContent,
                                   TransitionContent,
                                   TransitionCellContent,
                                   SlotCellContent,
-                                  DispatchContent>;
-
-/// Who follows an address a Chunk takes — see Chunk::taking.
-enum class Taking : std::uint8_t
-{
-  ESCAPE,
-  OWN,
-  ROOT,
-};
-
-/// What a `.declare` says the `.ztemp` below it is to the Proc holding it:
-/// one of its arguments, in the order the declarations stand in, or its
-/// result — see docs/decisions/0081-a-procs-signature-is-declared.md.
-enum class Declaring : std::uint8_t
-{
-  ARGUMENT,
-  RESULT,
-};
-
-/// The type a declared byte of a Proc holds, where one was written. The
-/// types of the C subset, and `u8[N]` for a run of bytes. Optional, because
-/// the shape of the reservation answers where nothing was written, and held
-/// to that shape where both are present.
-struct DeclaredType
-{
-  enum class Kind : std::uint8_t
-  {
-    U8,
-    I8,
-    U16,
-    I16,
-    BOOL,
-    BYTES,
-  };
-
-  Kind kind = Kind::U8;
-
-  /// How many elements `u8[N]` has; one for every other kind.
-  std::uint32_t count = 1;
-  diag::SourceSpan span{};
-
-  friend bool operator==( DeclaredType const& left, DeclaredType const& right )
-  {
-    return left.kind == right.kind && left.count == right.count;
-  }
-
-  /// How many bytes holding the type takes, which is what the reservation
-  /// under the declaration is held to.
-  [[nodiscard]] std::uint32_t bytes() const
-  {
-    switch ( kind )
-    {
-    case Kind::U16:
-    case Kind::I16:
-      return 2;
-    case Kind::BYTES:
-      return count;
-    case Kind::U8:
-    case Kind::I8:
-    case Kind::BOOL:
-      break;
-    }
-    return 1;
-  }
-};
-
-/// How a declared type is written, which is how a finding names it.
-[[nodiscard]] std::string spellingOf( DeclaredType const& type );
+                                  DispatchContent,
+                                  PhaseEntryContent,
+                                  ReleaseContent>;
 
 /// The bytes of exactly one emitting statement, as a description of them.
 ///
@@ -282,13 +221,18 @@ struct Chunk
   /// code and a use of a Temporary; or the hardware, under `.root`, which
   /// makes what is named a Root — see docs/decisions/0060-own.md and
   /// docs/decisions/0061-root-at-the-taking.md.
-  Taking taking = Taking::ESCAPE;
+  syntax::Taking taking = syntax::Taking::ESCAPE;
 
   /// Under `.own NAME [, NAME]...`: the Sections that follow the address,
   /// by the names written, resolved where they are read; empty for `.own`
   /// alone, which is this Section. The one thing a Chunk holds of its own,
   /// and empty for all but a handful.
   std::vector<syntax::Token> followers{};
+
+  /// Under `.alt`: the mnemonics this instruction's opcode may be replaced
+  /// with at run time, each in the instruction's own mode — see
+  /// docs/decisions/0237-an-instruction-declares-the-opcodes-it-may-be-given.md.
+  std::vector<syntax::Token> alternatives{};
 };
 
 } // namespace nga::model

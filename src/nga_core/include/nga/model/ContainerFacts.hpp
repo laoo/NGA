@@ -36,6 +36,10 @@ struct ByteRun
 
   /// The line the bytes were written from, empty where nothing wrote them.
   SymbolSite source;
+
+  /// The bytes themselves, for a run a statement wrote: what a listing shows
+  /// beside the statement. Empty for every other run.
+  std::vector<std::uint8_t> data{};
 };
 
 /// One segment of a DOS binary load file: a start address, an end address and
@@ -74,6 +78,6 @@ struct ContainerFacts
 ContainerFacts containerFactsOf( Patched const& build,
                                  MemoryMap const& map,
                                  std::span<std::uint8_t const> bytes,
-                                 std::string_view container );
+                                 Container container );
 
 } // namespace nga::model

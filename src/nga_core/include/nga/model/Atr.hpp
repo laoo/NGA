@@ -10,6 +10,9 @@
 namespace nga::model
 {
 
+/// The file's header, which the sectors follow.
+constexpr std::uint32_t ATR_HEADER_SIZE = 16;
+
 /// A double-density diskette, which is what the `.atr` this tool writes
 /// describes: **256-byte sectors**. The boot record is the exception the
 /// hardware makes — the OS boots with `DSCTLN` at 128, so the first three

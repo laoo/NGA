@@ -12,12 +12,19 @@
 ; calls `showAt` before a byte of the program's own code has run — see
 ; 0227 and xex.md.
 ;
-; A state of `cel8000` below the count of `sdram` is a **Bank**, and the block
-; the hardware wants is one more than it: block zero is what `RAMMAP = 0`
-; already means, so it cannot be addressed through the window at all, and the
-; model's unit *i* is block *i + 1* — as the Lynx's unit *i* is page *i + 1*.
-; Above them stands `main`, which is `RAMMAP = 0` and therefore the Atari's own
-; RAM at those addresses.
+; A state of `cel8000` is a **Bank**, and the block the hardware wants is one
+; more than it: block zero is what `RAMMAP = 0` means, the Atari's own RAM at
+; those addresses, which this board does not reach, so the model's unit *i* is
+; block *i + 1* — as the Lynx's unit *i* is page *i + 1* — and the 2047 Banks
+; are blocks one to 2047.
+;
+; **A state of `cel8000` is two bytes**, the low one in X and the high one in
+; Y, since the board's eleven bits of block are more than a byte counts:
+; `showAt` says so with `xy`, and every caller passes both, whatever the
+; variant's count. A unit is two bytes only where the variant has more than
+; 256 Banks, because that is the tool's rule for a unit, so the unit's cell is
+; as wide as `celUnitBytes` and what reads it says so under `.if` — see
+; docs/decisions/0228-a-driver-names-the-cells-its-stream-stands-in.md.
 ;
 ; The states of `cel4000` are the blitter's five BRAM blocks and `main`, and
 ; they are a table rather than arithmetic: bit 7 of the high byte is what takes
@@ -63,19 +70,29 @@ CELPALBANKR     = $19
 CELPALBANKG     = $1A
 CELPALBANKB     = $1B
 
-celPbiId        = $08                   ; what this device answers to on the parallel bus
+; What this device answers to. A **bit and not a number**: the kernel's own
+; scan walks $D1FF with `lda #$01` and `asl`, one bit a slot, so this is the
+; fourth of them — and a write here therefore deselects every other device on
+; the bus, which a program sharing it with one has to know.
+celPbiId        = $08
 celWindow       = $8000                 ; the window the stream reads through
 celWindowEnd    = celWindow + $4000     ; one past it: the high byte of the first address outside
 celUnitPages    = $40                   ; a unit, in pages: what an offset carries by
+celUnitBytes    = 1 + ( sdram > 256 )   ; how wide a unit's number is, which the variant decides
 
 .driver init    celInit
+.driver finalize celFinalize
+.driver rom     osrom                   ; bit 0 of the set: bit 0 of PORTB
+.driver select  celRoms
 .driver open    celOpen
 .driver read    celRead
+.driver unit    celUnit
+.driver offset  celPtr
 .driver stream  cel8000
 .driver show    cel4000 celShow4000
 .driver showAt  cel4000 celShowAt4000
 .driver show    cel8000 celShow8000
-.driver showAt  cel8000 celShowAt8000
+.driver showAt  cel8000 celShowAt8000 xy
 
 .transform copy celCopy
 
@@ -83,8 +100,26 @@ celUnitPages    = $40                   ; a unit, in pages: what an offset carri
         jsr celSelect
 .endm
 
+; Both windows back on the machine's own memory, which is what a DOS returned to
+; found there — see docs/decisions/0229-no-window-has-a-base.md.
+.macro celFinalize
+        lda #0
+        sta RAMMAP4000L
+        sta RAMMAP4000H
+        sta RAMMAP8000L
+        sta RAMMAP8000H
+.endm
+
 .macro celOpen
         jsr celOpenStream
+.endm
+
+; A = the set of ROMs the Phase entered needs, of which this board's machine
+; switches one: the OS, bit 0 of PORTB, set for the ROM. The floating-point pack
+; is not this driver's to switch, since the board maps the parallel bus's ROM
+; over it — see 0229.
+.macro celRoms
+        jsr celSelectRoms
 .endm
 
 .macro celRead
@@ -103,23 +138,46 @@ celUnitPages    = $40                   ; a unit, in pages: what an offset carri
 .endm
 
 .macro celShow8000 state
-        ldx #state
+        ldx #<state
+        ldy #>state
         jsr celMap8000
 .endm
 
+; X/Y = the state to show, the low byte in X.
 .macro celShowAt8000
         jsr celMap8000
 .endm
 
-; The device onto the bus: the register the hardware reads, and the OS's copy
-; of it kept in step, which is the order and the pair the device's own loader
-; uses. Written once by the Container and never again — nothing here puts
-; another device on the bus, and a program that does is responsible for
-; putting this one back.
+; The device onto the bus. Written once by the Container and never again —
+; nothing here puts another device on the bus, and a program that does is
+; responsible for putting this one back.
+;
+; **One write and not two.** The device's own loader writes the OS's shadow of
+; this register beside it, and that is unnecessary here: the shadow is what
+; lets a device's ROM, called *by the OS*, read back which device it is, and
+; this board has no such ROM — it maps one page at $DF00 and nothing at the
+; $D803 and $D80B the kernel's scan tests, so the scan never marks it and the
+; OS never calls into it. The scan also leaves every slot deselected when it
+; ends, which is why this has to be written at all.
 .proc celSelect
         lda #celPbiId
-        sta SHPDVS
         sta PDVREG
+        rts
+.endp
+
+; A = the set of ROMs: bit 0 the OS. The other bits of PORTB are left as they
+; are.
+.proc celSelectRoms
+        and #$01
+        bne @in
+        lda PORTB
+        and #$FE
+        sta PORTB
+        rts
+@in
+        lda PORTB
+        ora #$01
+        sta PORTB
         rts
 .endp
 
@@ -133,22 +191,17 @@ celUnitPages    = $40                   ; a unit, in pages: what an offset carri
         rts
 .endp
 
-; X = the state of `cel8000`: a Bank of `sdram`, or `main` above them. X is
-; given back, since the routine's glue reads the state from a cell and the
-; stream's `open` holds the unit in it.
+; X/Y = the state of `cel8000`, the low byte in X: a Bank of `sdram`. Both
+; are given back.
 .proc celMap8000
-        cpx #sdram
-        bcs @stock
-        inx                             ; the model's unit i is block i + 1
-        stx RAMMAP8000L
-        dex
-        lda #0
-        sta RAMMAP8000H
-        rts
-@stock
-        lda #0
-        sta RAMMAP8000H
+        txa                             ; the model's unit i is block i + 1
+        clc
+        adc #1
         sta RAMMAP8000L
+        tya
+        adc #0
+        and #$07                        ; eleven bits
+        sta RAMMAP8000H
         rts
 .endp
 
@@ -164,31 +217,41 @@ celBlockHigh
 
 ; The stream: where the next byte is, and which unit is in. A plain zero-page
 ; Section rather than Temporaries, because the value has to survive between one
-; call and the next while nothing here is running.
+; call and the next while nothing here is running. They are also the cells the
+; routine writes a position into before it opens the stream, `celPtr` the
+; offset and `celUnit` the unit, which `open` turns into a pointer where they
+; lie.
 .section zeropage
 celPtr          .res 2
-celUnit         .res 1
+celUnit         .res celUnitBytes
 .ends
 
-; A = the unit, X/Y = the offset in it: the stream stands there. An offset past
-; the unit's end carries into the units after, since the routine counts on in a
-; Frame without knowing where a unit ends: a unit is $4000 bytes, so the
-; offset's top two bits are units.
+; The stream to the position in celUnit and celPtr. An offset past the unit's
+; end carries into the units after, since the routine counts on in a Frame
+; without knowing where a unit ends: a unit is $4000 bytes, so the offset's
+; top two bits are units. The low byte is already where the pointer wants it.
 .proc celOpenStream
-        sta celUnit
-        stx celPtr
-        tya
+        lda celPtr+1
 @carry
         cmp #celUnitPages
         bcc @within
         sbc #celUnitPages
         inc celUnit
+.if celUnitBytes > 1
+        bne @carry
+        inc celUnit+1
+.endif
         jmp @carry
 @within
         clc
         adc #>celWindow
         sta celPtr+1
         ldx celUnit
+.if celUnitBytes > 1
+        ldy celUnit+1
+.else
+        ldy #0
+.endif
         jsr celMap8000
         rts
 .endp
@@ -213,6 +276,14 @@ celUnit         .res 1
 ; The window's end: the next unit in, and the pointer back at its start.
 .proc celNextUnit
         inc celUnit
+.if celUnitBytes > 1
+        bne @counted
+        inc celUnit+1
+@counted
+        ldy celUnit+1
+.else
+        ldy #0
+.endif
         ldx celUnit
         jsr celMap8000
         lda #0

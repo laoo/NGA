@@ -57,6 +57,16 @@ private:
     return peek().keyword == wanted;
   }
 
+  /// Whether the token is `int` or `char`, which C has and the subset spells
+  /// `i16` and `u8` — see docs/decisions/0076-arithmetic-in-the-subset.md.
+  [[nodiscard]] static bool isSpelledOtherwise( Token const& token )
+  {
+    return token.keyword == Keyword::INT || token.keyword == Keyword::CHAR;
+  }
+
+  /// Reports `found`, `int` or `char`, as the subset's spelling of it.
+  void spelledOtherwise( Token const& found );
+
   /// Whether the token is `const` or `volatile`.
   [[nodiscard]] static bool isQualifier( Token const& token )
   {
@@ -85,6 +95,11 @@ private:
   /// Reports that `expected` was wanted where the current token stands, unless
   /// the lexer rejected that token, which has said all there is to say.
   void fail( std::string_view expected );
+
+  /// Reports a name a definition gives that is qualified: C defines no name
+  /// in a Namespace, and `a::b` only reads what the assembler exports — see
+  /// docs/decisions/0230-c-names-a-namespace-with-two-colons.md.
+  void unqualified( Token const& name );
 
   /// Reports that `what` nest deeper than `limit` at `where`.
   void refuseDepth( Token const& where, std::string_view what, std::uint32_t limit );
@@ -120,14 +135,19 @@ private:
   ExpressionPtr parseSizeof();
 
   /// The lists of attributes at the next token, `[[...]]` after `[[...]]`, or
-  /// none; nothing where one fails, which has been reported and skipped.
-  std::optional<std::vector<Attribute>> parseAttributes();
+  /// none; nothing where one fails, which has been reported and skipped as
+  /// far as `recover` skips from where they stand.
+  std::optional<std::vector<Attribute>> parseAttributes( bool atTopLevel );
   [[nodiscard]] bool atAttributes() const;
   std::optional<StructSpecifier> parseStructSpecifier();
 
   /// A value a list holds: an expression, or a list of its own in braces.
   ExpressionPtr parseListElement();
   std::optional<Declaration> parseDeclaration( std::optional<Token> storage );
+
+  /// A declaration of locals where a statement may begin one, `static` or
+  /// not.
+  std::optional<Declaration> parseLocalDeclaration();
   [[nodiscard]] bool functionAhead() const;
 
   /// With the cursor on `enum`.

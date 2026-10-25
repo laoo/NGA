@@ -12,19 +12,19 @@ board does the rest.
 
 ## The same program, another machine
 
-Chapter six's program, unchanged. `print.asm`, `shared.asm`, `intro.asm` and
-`level.asm` are the same files, the Phases are the same, the Pane is the same
-and so is the Trampoline that draws the map. Three lines of the Project differ:
+Chapter six's program, unchanged. `print.asm`, `intro.asm` and `level.asm` are
+the same files, the Phases are the same, the Pane is the same and so is the
+Trampoline that draws the map. Three lines of the Project differ:
 
 <!-- include 14-cartridges/cartridge/main.ngp -->
 ```ngp
 include "atari/xegs128.ngp"
 
-modules { "print.asm" "shared.asm" "intro.asm" "level.asm" }
+modules { "print.asm" "intro.asm" "level.asm" }
 
 panes in switched { level }
 
-resident { print, shared }
+resident { print }
 
 phase intro { needs intro  then level  entry introStart }
 phase level { needs level             entry levelStart }
@@ -86,13 +86,31 @@ target {
 
   ; What the driver writes. Any address of $D500-$D5FF is the same register.
   register CARTSEL $D5FF
+
+  ; The hardware that holds a Section while a program has handed it one, by
+  ; `.root NAME` before the taking of its address, until it hands another or
+  ; `.release NAME`: what it holds stays where it is for that long. See
+  ; docs/decisions/0247-the-hardware-holds-a-section-for-as-long-as-it-is-given-it.md.
+  holder dlist                          ; ANTIC's display list: SDLSTL, or DLISTL
+  holder dli                            ; the display list interrupt: VDSLST
+  holder vbi                            ; the immediate vertical blank: VVBLKI
+  holder vbd                            ; the deferred vertical blank: VVBLKD
+  holder nmi                            ; $FFFA, where the OS ROM is switched out
+  holder irq                            ; $FFFE, where the OS ROM is switched out
+  holder chbase                         ; the character set: CHBAS, or CHBASE
+  holder pmbase                         ; the player-missile memory: PMBASE
+  holder dosini                         ; DOSINI: called once a boot returns, and on every reset
+  holder cartinit                       ; $BFFE: called in the middle of the cold start, and on every reset
 }
 
 ; The OS, the driver for this storage and the decoders the tool ships. Every
 ; Transition calls the driver and the decoders, so they are resident; a decoder
 ; nothing uses is dropped.
-modules { "atari/os.asm"  "atari/charsets.asm"  "atari/cart.asm"  "stream/zx0.asm" }
-resident { os, charsets, cart, zx0 }
+modules {
+  "atari/osram.asm"  "atari/osrom.asm"  "atari/mathpack.asm"
+  "atari/charsets.asm"  "atari/cart.asm"  "stream/zx0.asm"
+}
+resident { osram, osrom, mathpack, charsets, cart, zx0 }
 ```
 <!-- end -->
 
@@ -111,19 +129,14 @@ a time, and the only things that stand there are a Pane's Sections and storage.
 A range in no Region is in no pool, so the solver never allocates there — the
 same trick a diskette's variant uses to keep the boot record's page to itself.
 
-**The window has no `base`.** On a 130XE the Window has one: base RAM is under
-it, and it is memory the program uses, so a `.with` shows a Bank and puts the
-RAM back afterwards. Under a cartridge's window there is no memory, only the
-next bank. So nothing is put back:
-
-> A `.with` on a Window with no base switches the bank and **leaves it
-> switched**. What the window shows outside a `.with` is undefined, and the tool
-> refuses every way of reading it.
+**A `.with` switches the bank and leaves it switched**, as it does on the
+130XE. What the window shows outside a `.with` is undefined, and the tool
+refuses every way of reading it. On a cartridge that is plain from the hardware
+alone: under the window there is no memory, only the next bank.
 
 Which is how one thinks about banks anyway: not *what is in the window by
-default* but *the thing I want is in bank n*. It costs half of what a `.with`
-costs on the 130XE — two instructions and no exit — and it is what makes a Pane
-on a cartridge reachable at all.
+default* but *the thing I want is in bank n*. It costs two instructions and no
+exit, and it is what makes a Pane on a cartridge reachable at all.
 
 ## What it costs, and what it gives back
 
@@ -132,18 +145,18 @@ The map, in one Phase:
 <!-- map 14-cartridges/cartridge phase=level rows=level,print -->
 ```
 phase level (1)
-  zero page: 153 of 256 bytes
-  memory:    16051 of 32256 bytes
+  zero page: 143 of 256 bytes
+  memory:    15617 of 32256 bytes
   ...
-  $0088-$0089  level.drawMap.at             temporary          level  shares with ngaPtr
+  $0083-$0084  level.drawMap.at             temporary          level  shares with cartDst ngaDst ngaPtr
   ...
-  $008A-$008A  level.drawMap.left           temporary          level
+  $0085-$0085  level.drawMap.left           temporary          level  shares with cartSize ngaOffset ngaValue
   ...
-  $8000-$8171  level.levelMap               section            level  in pane level (state 14)
+  $8000-$8171  level.levelMap               section kept       intro..level  in pane level (state 14)
   ...
-  $A0B3-$A0CB  print.printLine              proc               intro..level
-  $A0DE-$A102  level.drawMap                proc               level
-  $A103-$A10D  level.levelStart             proc               level
+  $A0B0-$A0C8  print.printLine              proc               intro..level
+  $A0DB-$A0FF  level.drawMap                proc               level
+  $A100-$A10A  level.levelStart             proc               level
   ...
 ```
 <!-- end -->
@@ -271,6 +284,6 @@ needs a part of the ROM that no switch takes away. MegaCart, AtariMax, Williams
 and SIC! switch the whole of the cartridge's address space, so on those the
 resident code would have to be replicated in every bank or copied into RAM
 before any switch happened. Switchable XEGS, whose bit 7 reveals the RAM beneath
-the whole cartridge, is the one that would come first: it has a state to name,
-so its window would have a base, and everything in this chapter about leaving a
-bank switched would have to be read again.
+the whole cartridge, is the one that would come first: the RAM would be one more
+state of the window, as the machine's own memory is the fifth Bank of a
+130XE's.

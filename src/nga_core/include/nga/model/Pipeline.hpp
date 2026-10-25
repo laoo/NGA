@@ -3,11 +3,13 @@
 #include "nga/diag/DiagnosticSink.hpp"
 #include "nga/diag/SourceManager.hpp"
 #include "nga/model/Build.hpp"
+#include "nga/model/Facts.hpp"
 #include "nga/model/Project.hpp"
 
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace nga::model
@@ -45,10 +47,32 @@ struct Emitted
 /// `built` is called only when every Step ran without an error, with the
 /// finished build and the Container. The build lives no longer than the call,
 /// so whatever reads it — the memory map, the suite's machine — reads it there.
+///
+/// `merged` is called once Merge has run and before Expand, so on every build
+/// whatever its sources hold: no gate stands after Assemble, and a Module that
+/// did not assemble whole is still the part of it that did. Before Expand,
+/// because Expand empties the branches a condition excluded, and what a reader
+/// wants there — the names, and every place they are written — is written in
+/// those branches too.
 void build( diag::SourceManager& sources,
             Project& project,
             BuildOptions const& options,
             diag::DiagnosticSink& sink,
-            std::function<void( Patched const&, Emitted const& )> const& built );
+            std::function<void( Patched const&, Emitted const& )> const& built,
+            std::function<void( Merged const& )> const& merged = {} );
+
+/// `build`, reading off it on the way what `wanted` asks of `facts`, and the
+/// memory map besides where `map` is true; and the Container, which is empty
+/// where the build failed. The bytes are attributed through the Layout the map
+/// reports, so asking for them asks for the map too. The Symbols are read
+/// before Expand, where a build that fails on its sources still has them, and
+/// placed only where it does not fail — see docs/spec/facts.md.
+Emitted buildWithFacts( diag::SourceManager& sources,
+                        Project& project,
+                        BuildOptions const& options,
+                        diag::DiagnosticSink& sink,
+                        std::set<FactSet> const& wanted,
+                        bool map,
+                        Facts& facts );
 
 } // namespace nga::model

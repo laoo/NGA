@@ -33,8 +33,8 @@ void addSlotCells( Project& project, std::vector<Module>& modules, diag::Diagnos
 /// or nothing where no Module implementing the Slot is present.
 std::optional<SymbolRef> implementationIn( GlobalSymbols const& symbols, SymbolRef slot, PhaseIndex phase );
 
-/// Where an Implementation stands in a Phase — a Label's position, a
+/// Where an Implementation stands — a Label's position, a
 /// Section's start — or nothing when Place gave it none.
-std::optional<std::uint32_t> addressOfImplementation( Placed const& build, SymbolRef target, PhaseIndex phase );
+std::optional<std::uint32_t> addressOfImplementation( Placed const& build, SymbolRef target );
 
 } // namespace nga::model

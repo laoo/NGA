@@ -28,9 +28,9 @@ Section is the file, byte for byte.
 ```
 phase level (1)
   zero page: 145 of 256 bytes
-  memory:    16661 of 56576 bytes
+  memory:    16239 of 40192 bytes
   ...
-  $4000-$4171  maps.levelMap                section            level  in pane level (state 4)
+  $4000-$4171  maps.levelMap                section kept       intro..level  in pane level (state 4)
   ...
 ```
 <!-- end -->
@@ -163,7 +163,7 @@ and returns the description of a Module. Two fields:
 
 A section is one to one with `.section`. `name` is the Label at its start,
 which is what names it; the rest are the attributes the directive takes —
-`placement`, `at`, `align`, `within`, `in`, `movable`, `root`, `temporary` —
+`placement`, `at`, `align`, `within`, `in`, `root`, `temporary` —
 and `items`, which is what it holds.
 
 | Item | Becomes |
@@ -198,9 +198,9 @@ What is there besides the language is a way to complain.
 <!-- diagnostics 08-generators/ragged -->
 ```
 error[NGA1212]: maps: maps/level1.map is 110 characters, which is no whole number of rows of 37
- --> main.ngp:4:3
+ --> main.ngp:5:3
   |
-4 |   script( "tools/rows.js", map = "maps/level1.map", width = 37, in = level ) as maps }
+5 |   script( "tools/rows.js", map = "maps/level1.map", width = 37, in = level ) as maps }
   |   ^^^^^^
 note: the generator said so at tools/rows.js:18:56
 ```

@@ -1,6 +1,7 @@
 #include "nga/model/Patch.hpp"
 
 #include "nga/model/Dispatch.hpp"
+#include "nga/model/Place.hpp"
 #include "nga/model/Prune.hpp"
 #include "nga/model/Transition.hpp"
 
@@ -54,8 +55,8 @@ class Patcher
 {
 public:
   Patcher( Placed const& build, Storage const* storage, diag::DiagnosticSink& sink )
-      : mBuild( &build ), mStorage( storage ), mSink( &sink ), mResolved( build.sizes(), build.layout() ),
-        mEntries( build, sink )
+      : mBuild( &build ), mStorage( storage ), mSink( &sink ),
+        mResolved( build.sizes(), build.layout(), build.target(), build.modules() ), mEntries( build, sink )
   {
   }
 
@@ -82,7 +83,7 @@ private:
   /// names one. Nothing when the set does not exist or does not map a
   /// character, both of which the type check has already reported.
   [[nodiscard]] std::optional<std::vector<std::uint8_t>>
-  bytesOf( ModuleIndex home, syntax::Expression const& item, syntax::Quoted const& quoted, std::string_view text );
+  bytesOf( ModuleIndex home, syntax::Expression const& item, syntax::Quoted const& quoted );
 
   /// Writes `width` little-endian bytes, reporting a value that does not fit.
   /// A negative value is accepted as its two's complement, which is what makes
@@ -123,7 +124,8 @@ void Patcher::write(
     report( diag::diagnostic( diag::DiagnosticId::VALUE_DOES_NOT_FIT )
                 .at( span.begin, span.length )
                 .arg( "value", value )
-                .arg( "width", static_cast<std::int64_t>( width ) ) );
+                .arg( "width", static_cast<std::int64_t>( width ) )
+                .arg( "room", width == 1 ? std::string{ "the byte" } : "the " + std::to_string( width ) + " bytes" ) );
     return;
   }
 
@@ -191,14 +193,11 @@ void Patcher::patchInstruction( SectionRef where,
       {
         if ( mBuild->symbols().moduleAt( reached.module ).sectionAt( reached.section ).saysForeign() )
         {
-          report(
-              diag::diagnostic( diag::DiagnosticId::FOREIGN_OPERAND )
-                  .at( chunk.span.begin, chunk.span.length )
-                  .arg( "address", *value )
-                  .arg(
-                      "section",
-                      mBuild->symbols().moduleAt( reached.module ).displayNameOf( reached.section, mBuild->sources() ) )
-                  .arg( "region", displayNameOf( target.regions[over->value] ) ) );
+          report( diag::diagnostic( diag::DiagnosticId::FOREIGN_OPERAND )
+                      .at( chunk.span.begin, chunk.span.length )
+                      .arg( "address", *value )
+                      .arg( "section", mBuild->symbols().moduleAt( reached.module ).displayNameOf( reached.section ) )
+                      .arg( "region", displayNameOf( target.regions[over->value] ) ) );
           break;
         }
       }
@@ -242,14 +241,21 @@ void Patcher::patchInstruction( SectionRef where,
   write( into, at + 1, sizeOf( *mode ) - 1, *value, items.front()->span );
 }
 
-std::optional<std::vector<std::uint8_t>> Patcher::bytesOf( ModuleIndex home,
-                                                           syntax::Expression const& item,
-                                                           syntax::Quoted const& quoted,
-                                                           std::string_view text )
+std::optional<std::vector<std::uint8_t>>
+Patcher::bytesOf( ModuleIndex home, syntax::Expression const& item, syntax::Quoted const& quoted )
 {
+  // One byte per character, as Size counted them. A character past ASCII
+  // with no set to map it is refused (NGA2237), and where that is allowed
+  // the low byte of its code point stands for it, never its UTF-8, which is
+  // longer than what was counted.
   if ( quoted.charset.empty() )
   {
-    return syntax::plainBytesOf( text );
+    std::vector<std::uint8_t> bytes;
+    for ( char32_t const point : syntax::codePointsOf( quoted.body ) )
+    {
+      bytes.push_back( static_cast<std::uint8_t>( point & 0xFFU ) );
+    }
+    return bytes;
   }
 
   // Through the character set the literal's own Module and Namespace see.
@@ -296,7 +302,7 @@ void Patcher::patchData( SectionRef where, Chunk const& chunk, std::uint32_t at,
     {
       std::string_view const text = mBuild->sources().textOf( item->token.span() );
       syntax::Quoted const quoted = syntax::quotedOf( text );
-      std::optional<std::vector<std::uint8_t>> const bytes = bytesOf( where.module, *item, quoted, text );
+      std::optional<std::vector<std::uint8_t>> const bytes = bytesOf( where.module, *item, quoted );
       if ( !bytes.has_value() )
       {
         // Every reason this can fail has already been reported, and one byte
@@ -434,6 +440,11 @@ void Patcher::patchChunk( SectionRef where, ChunkIndex index, std::vector<std::u
     writeCell( *mBuild, own );
     return;
   }
+  if ( auto const* const stub = std::get_if<PhaseEntryContent>( &chunk.content ); stub != nullptr )
+  {
+    writeEntryStub( *stub, *mBuild, mEntries.of( stub->phase ), own );
+    return;
+  }
   if ( auto const* const cell = std::get_if<SlotCellContent>( &chunk.content ); cell != nullptr )
   {
     writeSlotCell( *cell, *mBuild, own );
@@ -454,10 +465,6 @@ std::vector<std::uint8_t> Patcher::bytesOf( SectionRef where )
   std::vector<std::uint8_t> bytes( mBuild->sizes().sizeOfSection( where ), 0 );
   Section const& section = mBuild->symbols().moduleAt( where.module ).sectionAt( where.section );
 
-  // Addresses as this Module sees them: a Movable Section it refers to holds
-  // one across this Module's Residency, by the rule of 0030, so the bytes
-  // are right in every Phase the Module is in.
-  mResolved.viewFrom( mBuild->symbols().moduleAt( where.module ).residency() );
   for ( std::uint32_t index = 0; index < section.chunks().size(); ++index )
   {
     patchChunk( where, ChunkIndex{ index }, bytes );
@@ -506,11 +513,36 @@ Bytes patch( Placed const& build, Storage const& storage, diag::DiagnosticSink& 
       {
         continue;
       }
+      // What decodes or runs while a `.xex` loads has no address yet: the
+      // load Step gives it one once the stored forms are known, and patches
+      // it then.
+      // Until then it holds zeros of its size, as every Section holds bytes
+      // of its size, and keeps them where nothing is decoded.
+      if ( placedByTheLoad( build, where ) )
+      {
+        bytes.store(
+            where,
+            std::vector<std::uint8_t>( build.sizes().isKnown( where ) ? build.sizes().sizeOfSection( where ) : 0, 0 ) );
+        continue;
+      }
       bytes.store( where, patcher.bytesOf( where ) );
     }
   }
 
   return bytes;
+}
+
+void patchSections( Placed const& build,
+                    Storage const& storage,
+                    std::span<SectionRef const> which,
+                    Bytes& bytes,
+                    diag::DiagnosticSink& sink )
+{
+  Patcher patcher{ build, &storage, sink };
+  for ( SectionRef const where : which )
+  {
+    bytes.store( where, patcher.bytesOf( where ) );
+  }
 }
 
 void Patcher::storeFrames( Storage& storage )
@@ -529,6 +561,46 @@ void patchFrames( Placed const& build, Storage& storage, diag::DiagnosticSink& s
 {
   Patcher patcher{ build, &storage, sink };
   patcher.storeFrames( storage );
+}
+
+void patchColdFrame( Placed const& build, Storage const& storage, Bytes& bytes )
+{
+  std::optional<FrameIndex> const cold = storage.frameOf( std::nullopt, build.phases().entry );
+  std::optional<SymbolRef> const name = build.symbols().find( COLD_FRAME_NAME );
+  if ( !cold.has_value() || !name.has_value() || !storage.isFramePlaced( *cold ) )
+  {
+    return;
+  }
+  auto const* const label = std::get_if<LabelPosition>( &build.symbols().at( *name ).value );
+  if ( label == nullptr )
+  {
+    return;
+  }
+  SectionRef const where{ .module = name->module, .section = label->section };
+  if ( !build.sizes().isKnown( where ) )
+  {
+    return;
+  }
+  std::span<std::uint8_t const> const held = bytes.of( where );
+  std::vector<std::uint8_t> patched{ held.begin(), held.end() };
+  std::size_t const at = build.sizes().offsetOf( where, label->chunk );
+  std::uint32_t const unitBytes = build.project().target.unitBytes();
+  StorageAddress const waits = storage.frameAddressOf( *cold );
+  auto const put = [&patched]( std::size_t offset, std::uint32_t value )
+  {
+    if ( offset < patched.size() )
+    {
+      patched[offset] = static_cast<std::uint8_t>( value & 0xFFU );
+    }
+  };
+  put( at, waits.bank.value );
+  if ( unitBytes > 1 )
+  {
+    put( at + 1, waits.bank.value >> 8U );
+  }
+  put( at + unitBytes, waits.offset );
+  put( at + unitBytes + 1, waits.offset >> 8U );
+  bytes.store( where, std::move( patched ) );
 }
 
 } // namespace nga::model

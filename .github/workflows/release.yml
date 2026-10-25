@@ -44,14 +44,17 @@ jobs:
             dir: build/release
             cc: gcc-14
             cxx: g++-14
+            vscode: linux-x64
           - name: macos-arm64
             os: macos-latest
             preset: release
             dir: build/release
+            vscode: darwin-arm64
           - name: windows-x64
             os: windows-latest
             preset: windows
             dir: build/windows
+            vscode: win32-x64
 
     steps:
       # The whole history, because the binary's version is `git describe`'s
@@ -119,6 +122,31 @@ jobs:
           cp LICENSE THIRD_PARTY_LICENSES.md "$out/"
           cp -R lib "$out/lib"
           cp -R "${{ matrix.dir }}/_deps/ortools_archive-src/licenses" "$out/licenses"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      # The extension for Visual Studio Code, one per platform, carrying what
+      # the archive carries in `bin/`, where its language server looks for an
+      # `nga` first: the extension and the binary are then one thing of one
+      # tag, and the facts between them a contract nobody else is held to.
+      # Its version is the tag's, as the binary's is; a run from the Actions
+      # tab packages it as 0.0.0. Nothing publishes it to the Marketplace.
+      - name: Extension
+        shell: bash
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          cp -R "../../dist/nga-${{ matrix.name }}" bin
+          cp ../../LICENSE LICENSE
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+          fi
+          npx vsce package --no-dependencies --target "${{ matrix.vscode }}" \
+            --out "../../dist/nga-${{ matrix.name }}.vsix"
 
       - name: Archive
         shell: bash

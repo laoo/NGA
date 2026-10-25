@@ -2,8 +2,14 @@
 
 #include "nga/c/Ranges.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -78,40 +84,6 @@ void narrowIn( ir::Function& function )
   }
 }
 
-/// How many instructions of the function read a value.
-std::size_t readersOf( ir::Function& function, ir::Value value )
-{
-  std::size_t readers = 0;
-  for ( ir::Block& block : function.blocks )
-  {
-    for ( ir::Instruction& instruction : block.instructions )
-    {
-      ir::eachOperand( instruction,
-                       [&readers, value]( ir::Operand& operand )
-                       {
-                         auto const* const read = std::get_if<ir::Value>( &operand );
-                         readers += static_cast<std::size_t>( read != nullptr && read->index == value.index );
-                       } );
-    }
-  }
-  return readers;
-}
-
-/// The instruction of a block that defines a value, by its position, or
-/// nothing where the value is defined elsewhere.
-std::optional<std::size_t> definerIn( ir::Block const& block, ir::Value value )
-{
-  for ( std::size_t at = 0; at < block.instructions.size(); ++at )
-  {
-    std::optional<ir::Value> const defined = ir::resultOf( block.instructions[at] );
-    if ( defined.has_value() && defined->index == value.index )
-    {
-      return at;
-    }
-  }
-  return std::nullopt;
-}
-
 /// An address the loop of a block computes as an array's name plus an index
 /// that can only hold a byte: the array, the byte the index is, and every
 /// instruction that computed the address and is read by nothing else, to go.
@@ -134,7 +106,7 @@ std::optional<ByteIndexed> byteIndexedBy( ir::Function& function,
 {
   auto const* const add = std::get_if<ir::Binary>( &block.instructions[addAt].operation );
   if ( add == nullptr || add->op != ir::BinaryOperator::ADD || add->type != ir::Type::POINTER ||
-       readersOf( function, add->result ) != 1 )
+       ir::readersOf( function, add->result ) != 1 )
   {
     return std::nullopt;
   }
@@ -157,7 +129,7 @@ std::optional<ByteIndexed> byteIndexedBy( ir::Function& function,
   if ( elementBytes == 2 )
   {
     auto const* const doubled = std::get_if<ir::Value>( index );
-    std::optional<std::size_t> const at = doubled != nullptr ? definerIn( block, *doubled ) : std::nullopt;
+    std::optional<std::size_t> const at = doubled != nullptr ? ir::definerIn( block, *doubled ) : std::nullopt;
     if ( !at.has_value() )
     {
       return std::nullopt;
@@ -165,7 +137,7 @@ std::optional<ByteIndexed> byteIndexedBy( ir::Function& function,
     auto const* const shift = std::get_if<ir::Binary>( &block.instructions[*at].operation );
     auto const* const by = shift != nullptr ? std::get_if<ir::Constant>( &shift->right ) : nullptr;
     if ( shift == nullptr || shift->op != ir::BinaryOperator::SHIFT_LEFT || by == nullptr || by->value != 1 ||
-         readersOf( function, shift->result ) != 1 )
+         ir::readersOf( function, shift->result ) != 1 )
     {
       return std::nullopt;
     }
@@ -188,11 +160,11 @@ std::optional<ByteIndexed> byteIndexedBy( ir::Function& function,
   auto const* const value = std::get_if<ir::Value>( index );
   if ( value != nullptr )
   {
-    if ( std::optional<std::size_t> const at = definerIn( block, *value ); at.has_value() )
+    if ( std::optional<std::size_t> const at = ir::definerIn( block, *value ); at.has_value() )
     {
       auto const* const widened = std::get_if<ir::Convert>( &block.instructions[*at].operation );
       if ( widened != nullptr && ir::sizeOf( ir::typeOf( widened->operand, function ) ) == 1 &&
-           readersOf( function, *value ) == 1 )
+           ir::readersOf( function, *value ) == 1 )
       {
         found.index = widened->operand;
         found.spent.push_back( *at );
@@ -242,7 +214,7 @@ void narrowIndexesIn( ir::Function& function )
       {
         continue;
       }
-      std::optional<std::size_t> const addAt = definerIn( block, *address );
+      std::optional<std::size_t> const addAt = ir::definerIn( block, *address );
       std::optional<ByteIndexed> const found =
           addAt.has_value() ? byteIndexedBy( function, block, *addAt, elementBytes, ranges ) : std::nullopt;
       if ( !found.has_value() )
@@ -275,6 +247,224 @@ void narrowIndexesIn( ir::Function& function )
   }
 }
 
+/// A division of the runtime and the remainder beside it, which divides the
+/// same way and leaves the quotient in its own `dividend` — the bytes it was
+/// handed the dividend in, shifted out at the top as the quotient's bits come
+/// in at the bottom.
+struct Division
+{
+  std::string_view quotient;
+  std::string_view remainder;
+};
+
+constexpr std::array<Division, 2> DIVISIONS{ { { .quotient = "__udiv8", .remainder = "__umod8" },
+                                               { .quotient = "__udiv16", .remainder = "__umod16" } } };
+
+/// Which division a call is, and whether it asks for the quotient; no division
+/// where it is a call of anything else.
+struct Divides
+{
+  Division const* division = nullptr;
+  bool quotient = false;
+};
+
+Divides dividesBy( ir::Call const& call )
+{
+  if ( !call.result.has_value() || call.arguments.size() != 2 )
+  {
+    return {};
+  }
+  for ( Division const& division : DIVISIONS )
+  {
+    if ( call.name == division.quotient || call.name == division.remainder )
+    {
+      return Divides{ .division = &division, .quotient = call.name == division.quotient };
+    }
+  }
+  return {};
+}
+
+/// Whether two operands read the same: one value, one object, or one constant.
+bool sameOperand( ir::Operand const& left, ir::Operand const& right )
+{
+  if ( left.index() != right.index() )
+  {
+    return false;
+  }
+  if ( auto const* const value = std::get_if<ir::Value>( &left ) )
+  {
+    return value->index == std::get<ir::Value>( right ).index;
+  }
+  if ( auto const* const object = std::get_if<ir::Object>( &left ) )
+  {
+    return object->name == std::get<ir::Object>( right ).name && object->type == std::get<ir::Object>( right ).type;
+  }
+  auto const& number = std::get<ir::Constant>( left );
+  auto const& other = std::get<ir::Constant>( right );
+  return number.value == other.value && number.name == other.name;
+}
+
+/// The objects a call's arguments read, by the names their bytes are known by.
+std::vector<std::string> objectsReadBy( ir::Call const& call )
+{
+  std::vector<std::string> objects;
+  for ( ir::Argument const& argument : call.arguments )
+  {
+    if ( auto const* const object = std::get_if<ir::Object>( &argument.value ) )
+    {
+      objects.push_back( ir::baseOf( object->name ) );
+    }
+  }
+  return objects;
+}
+
+/// Whether the instruction may write an object the call read: a store to one
+/// of them, or anything that writes what it cannot name — through a pointer,
+/// a copy of bytes, a call, or the entry of a `[[with]]` block.
+bool mayWrite( ir::Instruction const& instruction, std::vector<std::string> const& objects )
+{
+  if ( objects.empty() )
+  {
+    return false;
+  }
+  auto const named = [&objects]( std::string const& name )
+  { return std::ranges::find( objects, ir::baseOf( name ) ) != objects.end(); };
+  if ( auto const* const store = std::get_if<ir::Store>( &instruction.operation ) )
+  {
+    return named( store->name );
+  }
+  if ( auto const* const element = std::get_if<ir::StoreElement>( &instruction.operation ) )
+  {
+    return named( element->name );
+  }
+  return std::holds_alternative<ir::Call>( instruction.operation ) ||
+         std::holds_alternative<ir::StoreIndirect>( instruction.operation ) ||
+         std::holds_alternative<ir::Copy>( instruction.operation ) ||
+         std::holds_alternative<ir::EnterWith>( instruction.operation );
+}
+
+void shareIn( ir::Function& function, std::set<std::string> const& volatiles )
+{
+  for ( ir::Block& block : function.blocks )
+  {
+    // The divisions no other has answered yet, by where they stand, while
+    // nothing has written what they read; and each first of two, with the
+    // second it answers.
+    std::vector<std::size_t> open;
+    std::map<std::size_t, std::size_t> pairs;
+    for ( std::size_t at = 0; at < block.instructions.size(); ++at )
+    {
+      ir::Instruction const& instruction = block.instructions[at];
+      auto const* const call = std::get_if<ir::Call>( &instruction.operation );
+      Divides const divides = call != nullptr ? dividesBy( *call ) : Divides{};
+      if ( divides.division == nullptr )
+      {
+        std::erase_if( open,
+                       [&]( std::size_t const other )
+                       {
+                         return mayWrite( instruction,
+                                          objectsReadBy( std::get<ir::Call>( block.instructions[other].operation ) ) );
+                       } );
+        continue;
+      }
+      // Two reads of a `volatile` object may read two numbers.
+      if ( std::ranges::any_of( objectsReadBy( *call ),
+                                [&volatiles]( std::string const& name ) { return volatiles.contains( name ); } ) )
+      {
+        continue;
+      }
+      auto const answer =
+          std::ranges::find_if( open,
+                                [&]( std::size_t const other )
+                                {
+                                  auto const& earlier = std::get<ir::Call>( block.instructions[other].operation );
+                                  Divides const was = dividesBy( earlier );
+                                  return was.division == divides.division && was.quotient != divides.quotient &&
+                                         earlier.arguments[0].type == call->arguments[0].type &&
+                                         sameOperand( earlier.arguments[0].value, call->arguments[0].value ) &&
+                                         sameOperand( earlier.arguments[1].value, call->arguments[1].value );
+                                } );
+      if ( answer != open.end() )
+      {
+        pairs.emplace( *answer, at );
+        open.erase( answer );
+      }
+      else
+      {
+        // The runtime writes its own bytes and nothing else, so a division
+        // ends no other that is open.
+        open.push_back( at );
+      }
+    }
+    if ( pairs.empty() )
+    {
+      continue;
+    }
+
+    // The remainder's call where the first of the two stood, and the
+    // quotient read from its `dividend`: where the second stood, if the
+    // remainder came first and nothing is called between, since the bytes are
+    // the Proc's own and only a call of it, or of anything sharing them, writes
+    // them; at once otherwise, the quotient's readers standing before the
+    // second or a call standing between.
+    std::map<std::size_t, std::vector<ir::Instruction>> instead;
+    std::set<std::size_t> dropped;
+    for ( auto const& [first, second] : pairs )
+    {
+      bool const quotientFirst = dividesBy( std::get<ir::Call>( block.instructions[first].operation ) ).quotient;
+      bool const calledBetween = std::any_of( block.instructions.begin() + static_cast<std::ptrdiff_t>( first ) + 1,
+                                              block.instructions.begin() + static_cast<std::ptrdiff_t>( second ),
+                                              []( ir::Instruction const& between )
+                                              {
+                                                return std::holds_alternative<ir::Call>( between.operation ) ||
+                                                       std::holds_alternative<ir::EnterWith>( between.operation );
+                                              } );
+      ir::Instruction& remainder = block.instructions[quotientFirst ? second : first];
+      std::optional<ir::Value> const result =
+          std::get<ir::Call>( block.instructions[quotientFirst ? first : second].operation ).result;
+      if ( !result.has_value() )
+      {
+        continue;
+      }
+      ir::Value const quotient = *result;
+      ir::Type const type = function.values.at( quotient.index );
+      bool const later = !quotientFirst && !calledBetween;
+      ir::Instruction quotientRead{
+        .operation =
+            ir::Convert{ .result = quotient,
+                         .type = type,
+                         .operand = ir::Object{ .name = std::get<ir::Call>( remainder.operation ).name + ".dividend",
+                                                .type = type } },
+        .at = block.instructions[later ? second : first].at
+      };
+      if ( later )
+      {
+        instead[second].push_back( std::move( quotientRead ) );
+        continue;
+      }
+      diag::SourceLocation const at = block.instructions[first].at;
+      instead[first].push_back( ir::Instruction{ .operation = std::move( remainder.operation ), .at = at } );
+      instead[first].push_back( std::move( quotientRead ) );
+      dropped.insert( second );
+    }
+    std::vector<ir::Instruction> rebuilt;
+    for ( std::size_t at = 0; at < block.instructions.size(); ++at )
+    {
+      if ( dropped.contains( at ) )
+      {
+        continue;
+      }
+      if ( auto const found = instead.find( at ); found != instead.end() )
+      {
+        std::ranges::move( found->second, std::back_inserter( rebuilt ) );
+        continue;
+      }
+      rebuilt.push_back( std::move( block.instructions[at] ) );
+    }
+    block.instructions = std::move( rebuilt );
+  }
+}
+
 } // namespace
 
 void narrowIndexes( ir::Unit& unit )
@@ -295,6 +485,17 @@ void narrowRuntimeCalls( ir::Unit& unit )
     if ( auto* const function = std::get_if<ir::Function>( &definition ) )
     {
       narrowIn( *function );
+    }
+  }
+}
+
+void shareDivisions( ir::Unit& unit )
+{
+  for ( ir::Definition& definition : unit.definitions )
+  {
+    if ( auto* const function = std::get_if<ir::Function>( &definition ) )
+    {
+      shareIn( *function, unit.volatiles );
     }
   }
 }

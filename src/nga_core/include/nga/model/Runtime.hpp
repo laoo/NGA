@@ -16,7 +16,9 @@ constexpr std::string_view C_RUNTIME_MODULE = "nga.runtime";
 /// The text of the C runtime: a Proc per product, quotient and remainder
 /// the compiler calls where no constant makes the operator shifts, adds and
 /// masks, each held to the header of docs/spec/syntax.md#procedures — see
-/// docs/decisions/0095-literals-and-the-runtime.md.
+/// docs/decisions/0095-literals-and-the-runtime.md — and one a loop that fills
+/// memory calls instead of turning — see
+/// docs/decisions/0265-a-loop-that-fills-calls-the-runtime.md.
 ///
 /// The Intent chooses among the shapes the text holds, through a Constant the
 /// text declares and `.if` decides on: under `size` a wide multiply of
@@ -25,6 +27,10 @@ constexpr std::string_view C_RUNTIME_MODULE = "nga.runtime";
 /// conditionals, since two texts would be two copies of the same arithmetic
 /// — see docs/decisions/0180-the-runtime-has-a-small-shape.md.
 std::string cRuntimeSource( Intent intent = Intent::FIT );
+
+/// Whether a Module of the Project is one of C: a `.ngc` file of its own,
+/// which the compiler reads, and not one the tool wrote.
+bool isCompiled( diag::SourceManager const& sources, ProjectModule const& entry );
 
 /// Whether a Project holds a `.ngc` Module, which is given the runtime.
 bool holdsC( diag::SourceManager const& sources, Project const& project );

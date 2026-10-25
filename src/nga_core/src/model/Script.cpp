@@ -5,9 +5,11 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -230,9 +232,9 @@ JSValue reportWarning( JSContext* ctx, JSValueConst /*self*/, int argc, JSValueC
 /// The message a thrown value makes, with the first frame of its stack behind
 /// it: the script's own line is what the author needs, and the call site is
 /// where the finding stands.
-std::string messageOf( JSContext* ctx )
+/// What was thrown, with the first frame of its stack where it has one.
+std::string messageOf( JSContext* ctx, Value const& thrown )
 {
-  Value const thrown{ ctx, JS_GetException( ctx ) };
   std::string message = stringOf( ctx, thrown.get() );
 
   Value const stack{ ctx, JS_GetPropertyStr( ctx, thrown.get(), "stack" ) };
@@ -247,6 +249,12 @@ std::string messageOf( JSContext* ctx )
     }
   }
   return message;
+}
+
+/// What the engine has just thrown.
+std::string messageOf( JSContext* ctx )
+{
+  return messageOf( ctx, Value{ ctx, JS_GetException( ctx ) } );
 }
 
 /// The engine, shut in: the intrinsics a generator needs and not one more.
@@ -395,7 +403,7 @@ private:
     {
       if ( *placement == "zeropage" )
       {
-        read.placement = PlacementClass::ZEROPAGE;
+        read.placement = syntax::PlacementClass::ZEROPAGE;
       }
       else if ( *placement != "absolute" )
       {
@@ -407,7 +415,6 @@ private:
     read.alignment = numberAt( section, "align", where + ".align" );
     read.boundary = numberAt( section, "within", where + ".within" );
     read.pane = stringAt( section, "in", where + ".in" );
-    read.movable = flagAt( section, "movable", where + ".movable" );
     read.readOnly = flagAt( section, "readonly", where + ".readonly" );
     read.root = flagAt( section, "root", where + ".root" );
     read.temporary = flagAt( section, "temporary", where + ".temporary" );
@@ -591,9 +598,19 @@ private:
 
     std::int64_t count = 0;
     JS_ToInt64( mCtx, &count, length.get() );
+    // A length is the script's word and nothing more, since any object may
+    // say it has one: held to what the engine could have built before
+    // anything is reserved for it.
+    if ( count < 0 || std::cmp_greater( count, MEMORY_ALLOWED ) )
+    {
+      fail( where + ".length: not a count of elements" );
+      return std::nullopt;
+    }
 
+    // Reserved up to a screen's worth and grown past it, since a length an
+    // object merely claims is found out at its first missing element.
     std::vector<std::int64_t> read;
-    read.reserve( static_cast<std::size_t>( count ) );
+    read.reserve( static_cast<std::size_t>( std::min<std::int64_t>( count, std::int64_t{ 1 } << 16 ) ) );
     for ( std::int64_t at = 0; at < count; ++at )
     {
       Value const element{ mCtx, JS_GetPropertyUint32( mCtx, value, static_cast<std::uint32_t>( at ) ) };
@@ -697,6 +714,28 @@ Value argumentsOf( JSContext* ctx, GeneratorCall const& call )
 std::optional<GeneratedModule>
 runScript( GeneratorCall const& call, GeneratorFiles const& files, diag::DiagnosticSink& sink )
 {
+  // Each argument is given once, as it is to `binary`: the script reads them as
+  // one object, where a second value under a name would quietly win, and it is
+  // given one path, so a second would quietly be dropped.
+  std::set<std::string> named;
+  bool positional = false;
+  bool twice = false;
+  for ( GeneratorArgument const& argument : call.arguments )
+  {
+    bool const again =
+        argument.name.empty() ? std::exchange( positional, true ) : !named.insert( argument.name ).second;
+    if ( again )
+    {
+      sink.add( diag::diagnostic( diag::DiagnosticId::GENERATOR_ARGUMENT_TWICE )
+                    .at( argument.span.begin, argument.span.length ) );
+      twice = true;
+    }
+  }
+  if ( twice )
+  {
+    return std::nullopt;
+  }
+
   std::string path;
   for ( GeneratorArgument const& argument : call.arguments )
   {
@@ -761,6 +800,14 @@ runScript( GeneratorCall const& call, GeneratorFiles const& files, diag::Diagnos
   if ( ran.isException() )
   {
     return host.work > WORK_ALLOWED ? stopped() : failed( messageOf( ctx ) );
+  }
+  // A module runs as a promise, so what its body throws is a promise
+  // rejected and not an exception, and the script stopped there whatever it
+  // had already exported.
+  if ( JS_PromiseState( ctx, ran.get() ) == JS_PROMISE_REJECTED )
+  {
+    return host.work > WORK_ALLOWED ? stopped()
+                                    : failed( messageOf( ctx, Value{ ctx, JS_PromiseResult( ctx, ran.get() ) } ) );
   }
 
   Value const space{ ctx, JS_GetModuleNamespace( ctx, module ) };

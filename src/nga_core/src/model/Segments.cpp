@@ -1,5 +1,7 @@
 #include "nga/model/Segments.hpp"
 
+#include "nga/model/Place.hpp"
+
 #include "nga/model/Transition.hpp"
 
 #include <algorithm>
@@ -11,6 +13,12 @@ namespace nga::model
 
 void SegmentWriter::segment( std::uint32_t start, std::span<std::uint8_t const> data )
 {
+  // Nothing to load is no segment: its header would end a byte before it
+  // starts, which a loader reads as a wrap of nearly the whole address space.
+  if ( data.empty() )
+  {
+    return;
+  }
   std::uint32_t const end = start + static_cast<std::uint32_t>( data.size() ) - 1;
   if ( mOpen.has_value() && mOpen->end + 1 == start )
   {
@@ -87,7 +95,8 @@ std::vector<Stored> storedImages( Patched const& build )
         {
           continue;
         }
-        stored.push_back( Stored{ .at = storage.addressOf( where, piece ), .form = storage.formOf( where, piece ) } );
+        stored.push_back(
+            Stored{ .at = storage.addressOf( where, piece ), .form = storage.formOf( where, piece ), .where = where } );
       }
     }
   }
@@ -96,8 +105,9 @@ std::vector<Stored> storedImages( Patched const& build )
   // docs/decisions/0054-panes.md.
   for ( Storage::PaneImage const& image : storage.paneImages() )
   {
-    stored.push_back(
-        Stored{ .at = image.at, .form = contentOf( bytes, image.where, sizes.initialisedExtentOf( image.where ) ) } );
+    stored.push_back( Stored{ .at = image.at,
+                              .form = contentOf( bytes, image.where, sizes.initialisedExtentOf( image.where ) ),
+                              .where = image.where } );
   }
   // And every Frame, which waits as a Payload does and is read by the
   // routine alone.
@@ -106,7 +116,8 @@ std::vector<Stored> storedImages( Patched const& build )
     FrameIndex const frame{ index };
     if ( storage.isFramePlaced( frame ) && !storage.frameBytesOf( frame ).empty() )
     {
-      stored.push_back( Stored{ .at = storage.frameAddressOf( frame ), .form = storage.frameBytesOf( frame ) } );
+      stored.push_back( Stored{
+          .at = storage.frameAddressOf( frame ), .form = storage.frameBytesOf( frame ), .where = std::nullopt } );
     }
   }
   std::ranges::stable_sort(
@@ -114,6 +125,57 @@ std::vector<Stored> storedImages( Patched const& build )
       []( Stored const& a, Stored const& b )
       { return a.at.bank.value != b.at.bank.value ? a.at.bank.value < b.at.bank.value : a.at.offset < b.at.offset; } );
   return stored;
+}
+
+std::uint32_t storageUsedOf( Patched const& build )
+{
+  std::uint32_t used = 0;
+  for ( Stored const& one : storedImages( build ) )
+  {
+    used = std::max( used, build.target().positionOf( one.at ) + static_cast<std::uint32_t>( one.form.size() ) );
+  }
+  return used;
+}
+
+bool refusedPayloads( Patched const& build, diag::DiagnosticId id, diag::DiagnosticSink& sink )
+{
+  bool refused = false;
+  for ( std::uint32_t module = 0; module < build.modules().size(); ++module )
+  {
+    Module const& one = build.modules()[module];
+    for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
+    {
+      SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
+      if ( !build.storage().hasPayload( where ) )
+      {
+        continue;
+      }
+      Section const& section = one.sections()[index];
+      sink.add( diag::diagnostic( id )
+                    .at( section.span().begin, section.span().length )
+                    .arg( "section", one.displayNameOf( where.section ) ) );
+      refused = true;
+    }
+  }
+  return refused;
+}
+
+std::vector<StateStored> stateImagesOf( Patched const& build )
+{
+  Sizes const& sizes = build.sizes();
+  Bytes const& bytes = build.bytes();
+  std::vector<StateStored> found;
+  for ( Storage::StateImage const& image : build.storage().stateImages() )
+  {
+    found.push_back( StateStored{ .state = image.state,
+                                  .offset = image.offset,
+                                  .form = contentOf( bytes, image.where, sizes.initialisedExtentOf( image.where ) ),
+                                  .where = image.where } );
+  }
+  std::ranges::stable_sort( found,
+                            []( StateStored const& a, StateStored const& b )
+                            { return a.state != b.state ? a.state < b.state : a.offset < b.offset; } );
+  return found;
 }
 
 std::vector<Resident> residentSections( Patched const& build, std::span<ModuleIndex const> except )
@@ -125,21 +187,20 @@ std::vector<Resident> residentSections( Patched const& build, std::span<ModuleIn
   Bytes const& bytes = build.bytes();
   std::span<Module const> const modules = symbols.modules();
 
-  Phase const& entryPhase = project.phases.phases[project.phases.entry.value];
-  std::vector<bool> present( modules.size(), false );
-  for ( ModuleIndex const module : entryPhase.needs )
-  {
-    present[module.value] = true;
-  }
+  // What is in memory as the entry Phase begins: what it needs, and in a
+  // program without storage every Section with bytes a later Phase needs too,
+  // since nothing could bring it afterwards — see heldAcross.
+  PhaseIndex const entry = project.phases.entry;
+  std::vector<bool> excepted( modules.size(), false );
   for ( ModuleIndex const module : except )
   {
-    present[module.value] = false;
+    excepted[module.value] = true;
   }
 
   std::vector<Resident> found;
   for ( std::uint32_t module = 0; module < modules.size(); ++module )
   {
-    if ( !present[module] )
+    if ( excepted[module] )
     {
       continue;
     }
@@ -147,9 +208,17 @@ std::vector<Resident> residentSections( Patched const& build, std::span<ModuleIn
     for ( std::uint32_t index = 0; index < one.sections().size(); ++index )
     {
       SectionRef const where{ .module = ModuleIndex{ module }, .section = SectionIndex{ index } };
-      // A Pane's Section is in its unit and not in base memory.
+      // A Section decoded while the file loads is written by the decode.
+      // And one the cold start brings is written by the routine.
+      if ( !heldAcrossOf( build, where ).includes( entry ) || build.storage().isDecodedAtLoad( where ) ||
+           build.storage().isHiddenAtLoad( where ) || build.storage().isLoadedByColdStart( where, entry ) )
+      {
+        continue;
+      }
+      // A Pane's Section is in its unit and not in memory the program addresses
+      // without a switch, and a unit set's in the medium alone.
       if ( !layout.isPlaced( where ) || !sizes.isKnown( where ) || sizes.sizeOfSection( where ) == 0 ||
-           !one.sections()[index].emitsBytes() || one.sections()[index].pane().has_value() )
+           !one.sections()[index].emitsBytes() || one.sections()[index].inMedium() )
       {
         continue;
       }
@@ -157,8 +226,12 @@ std::vector<Resident> residentSections( Patched const& build, std::span<ModuleIn
       // end is not in the file, because a load writing it would write nothing
       // the program may rely on.
       InitialisedExtent const extent = sizes.initialisedExtentOf( where );
+      if ( extent.size() == 0 )
+      {
+        continue;
+      }
       found.push_back( Resident{ .where = where,
-                                 .address = layout.addressIn( where, project.phases.entry ) + extent.begin,
+                                 .address = layout.addressOf( where ) + extent.begin,
                                  .content = contentOf( bytes, where, extent ) } );
     }
   }

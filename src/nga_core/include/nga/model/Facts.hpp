@@ -47,17 +47,17 @@ std::string factSetNames();
 /// nothing else would catch.
 std::set<FactSet> everyFactSet();
 
-/// What `--facts` is written from. A pointer is null where the run did not get
-/// that far: a Project that failed to load has no Layout, so there is no map,
-/// and the document says so by leaving the set out rather than by inventing an
-/// empty one.
+/// What `--facts` is written from. Each is absent where the run did not get
+/// that far, or was not asked for it: a Project that failed to load has no
+/// Layout, so there is no map, and the document says so by leaving the set out
+/// rather than by inventing an empty one. `buildWithFacts` fills the rest.
 struct Facts
 {
   std::string projectPath;
   Project const* project = nullptr;
-  MemoryMap const* map = nullptr;
-  std::vector<SymbolFacts> const* symbols = nullptr;
-  ContainerFacts const* bytes = nullptr;
+  std::optional<MemoryMap> map{};
+  std::optional<std::vector<SymbolFacts>> symbols{};
+  std::optional<ContainerFacts> bytes{};
 };
 
 /// The facts of one build as a single JSON document.

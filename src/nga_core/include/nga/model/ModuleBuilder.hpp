@@ -42,9 +42,10 @@ public:
   void reserve( syntax::ExpressionPtr size, diag::SourceSpan span ) override;
   void reserveTemporary( syntax::Token name,
                          syntax::ExpressionPtr size,
-                         PlacementClass placement,
+                         syntax::PlacementClass placement,
                          diag::SourceSpan span ) override;
   void transition( syntax::Token phase, diag::SourceSpan span, bool fast ) override;
+  void release( syntax::Token holder, diag::SourceSpan span ) override;
   void dispatch( std::vector<syntax::ExpressionPtr> targets, diag::SourceSpan span ) override;
   void beginMacro( syntax::Token name, syntax::Pattern parameters, diag::SourceSpan span ) override;
   void endMacro( diag::SourceSpan span ) override;
@@ -64,25 +65,31 @@ public:
   void exportSymbol( syntax::Token name, diag::SourceSpan span ) override;
   void silence( syntax::Token code, std::optional<diag::SourceLocation> statement, diag::SourceSpan span ) override;
   void markSource( syntax::Token path, syntax::Token line, diag::SourceSpan span ) override;
-  void with( model::WithForm form,
+  void with( syntax::WithForm form,
              syntax::ExpressionPtr what,
              std::optional<syntax::Token> state,
              diag::SourceSpan span ) override;
   void dropWiths() override;
-  void taking( model::Taking kind, std::vector<syntax::Token> followers, diag::SourceSpan span ) override;
+  void taking( syntax::Taking kind, std::vector<syntax::Token> followers, diag::SourceSpan span ) override;
   void dropTaking() override;
-  void declare( model::Declaring what,
-                std::optional<model::DeclaredType> type,
+  void alternatives( std::vector<syntax::Token> mnemonics, diag::SourceSpan span ) override;
+  void dropAlternatives() override;
+  void declare( syntax::Declaring what,
+                std::optional<syntax::DeclaredType> type,
                 std::string place,
                 diag::SourceSpan span ) override;
+  void declareResultElsewhere( std::string name, diag::SourceSpan nameSpan, diag::SourceSpan span ) override;
   void dropDeclaration() override;
   void declareTransform( syntax::Token format, syntax::Token label, diag::SourceSpan span ) override;
   void declareDriverRole( syntax::Token role, std::vector<syntax::Token> names, diag::SourceSpan span ) override;
-  void declareSlot( syntax::Token name, Binding binding, PlacementClass placement, diag::SourceSpan span ) override;
+  void declareSlot( syntax::Token name,
+                    syntax::Binding binding,
+                    syntax::PlacementClass placement,
+                    diag::SourceSpan span ) override;
   void implement( syntax::Token slot, syntax::Token symbol, diag::SourceSpan span ) override;
   void declareCharset( syntax::Token name,
-                       std::optional<CharsetBase> base,
-                       std::vector<CharsetEntry> entries,
+                       std::optional<syntax::CharsetBase> base,
+                       std::vector<syntax::CharsetEntry> entries,
                        diag::SourceSpan span ) override;
 
   /// What a Module can only settle once it has been read to the end: local
@@ -187,6 +194,11 @@ private:
 
   [[nodiscard]] std::optional<BoundName> boundName( std::string_view name ) const;
 
+  /// The same, among the first `open` of the open conditionals only: what a
+  /// `.case` about to open is bound around, which its sibling, the last case
+  /// of the innermost `.match`, is not.
+  [[nodiscard]] std::optional<BoundName> boundName( std::string_view name, std::size_t open ) const;
+
   /// Whether `name` is bound by any `.case` of the open body read so far.
   [[nodiscard]] bool boundByAnyCase( std::string_view name ) const;
 
@@ -209,7 +221,7 @@ private:
   /// A `.with` waiting for its statement: what it named, and where.
   struct PendingWith
   {
-    WithForm form = WithForm::NONE;
+    syntax::WithForm form = syntax::WithForm::NONE;
     syntax::Token directive;
     syntax::ExpressionPtr what;
     std::optional<syntax::Token> state;
@@ -219,11 +231,19 @@ private:
   std::vector<PendingWith> mPendingWiths;
 
   /// A `.own` or `.root` waiting for the statement below it.
-  std::optional<Taking> mPendingTaking;
+  std::optional<syntax::Taking> mPendingTaking;
   std::vector<syntax::Token> mPendingFollowers;
 
   /// Marks the Chunk just appended under a pending taking, and clears it.
   void applyTaking( Section& holder, ChunkIndex chunk );
+
+  /// A `.alt` waiting for the instruction below it, and where it was
+  /// written, for a finding about what came instead.
+  std::vector<syntax::Token> mPendingAlternatives;
+  diag::SourceSpan mAlternativesAt{};
+
+  /// Marks the Chunk just appended with the pending `.alt`, and clears it.
+  void applyAlternatives( Section& holder, ChunkIndex chunk );
 
   /// The Chunks a `.with` puts around the statement being appended: the
   /// entries before it, in the order written, and the exits after it, in
@@ -250,10 +270,12 @@ private:
   /// variable is to the open Proc, and the type it wrote, if any.
   struct PendingDeclaration
   {
-    Declaring what = Declaring::ARGUMENT;
-    std::optional<DeclaredType> type;
+    syntax::Declaring what = syntax::Declaring::ARGUMENT;
+    std::optional<syntax::DeclaredType> type;
     diag::SourceSpan span{};
     std::string place{};
+    std::string elsewhere{};
+    diag::SourceSpan elsewhereSpan{};
   };
 
   /// Says the declaration on the open Proc: the reservation below it, where
